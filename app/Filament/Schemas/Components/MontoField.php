@@ -8,15 +8,22 @@ use Filament\Forms\Components\TextInput;
 use Illuminate\Support\Str;
 
 /**
- * Componente Filament reutilizable para campos monetarios.
+ * Campo monetario. El estado NUNCA se convierte a float.
  *
- * Centraliza el formato (prefijo "L."), step de 0.01, validación de
- * no-negativos y placeholder consistente. Evita repetir esta config
- * en cada Form que tenga campos de dinero (§8.4.3).
+ * ⚠️ NO usar ->numeric() acá. Ese método registra un NumberStateCast
+ * (vendor/filament/forms/src/Components/TextInput.php:305) que convierte
+ * el estado a int o float antes de que llegue al modelo. El §8.3.1
+ * prohíbe float en el camino del dinero, y el guard de Lote::decimalDe()
+ * lo detecta lanzando ValueObjectInvalidoException.
+ *
+ * Se reemplaza por sus tres efectos, sin el cast:
+ *   - inputMode('decimal') → teclado numérico en celular, que importa:
+ *     los receptores cobran desde el teléfono (§14).
+ *   - rule('numeric')      → la misma validación.
+ *   - step                 → el mismo control del navegador.
  *
  * Uso:
- *   MontoField::make('precio_unitario')
- *   MontoField::make('limite_credito', 'Límite de crédito autorizado')
+ *   MontoField::make('precio_vara', 'Precio por vara²')
  */
 final class MontoField
 {
@@ -27,12 +34,11 @@ final class MontoField
         return TextInput::make($name)
             ->label($label ?? Str::headline($name))
             ->required()
-            ->numeric()
+            ->inputMode('decimal')
+            ->step('0.01')
             ->minValue(0)
-            ->step(0.01)
             ->prefix($simbolo)
             ->placeholder('0.00')
-            ->default(0)
-            ->rules(['decimal:0,2']);
+            ->rules(['numeric', 'decimal:0,2', 'min:0']);
     }
 }

@@ -390,6 +390,8 @@ Heredado de MAYAP y adaptado a este stack. Cito la regla cuando aplique. **Toda 
 11. **Filament v5 exige Tailwind 4.1 y Livewire 4.** No copiar configuración de Tailwind 3 ni ejemplos de v3.
 12. **MFA del panel**: activarlo para roles con acceso a dinero antes de salir a producción.
 
+13. **`->numeric()` de Filament CASTEA el estado a int/float** — registra un `NumberStateCast`. En cualquier campo de dinero o de área eso viola el §8.3.1 y llega al modelo como `float`. Usar `MontoField` y `AreaField`, que reemplazan `->numeric()` por sus tres efectos sin el cast: `inputMode('decimal')` (teclado numérico en celular, §14), `rule('numeric')` y `step`. En enteros de verdad —cantidades, contadores— `->numeric()` está bien.
+
 ### B. PHPStan nivel 7 (Larastan 3)
 
 1. **`nullsafe.neverNull`**: Larastan tipa BelongsTo como no-nulo → `$x?->prop ?? 'default'` falla. Chequear null explícito primero y luego acceder directo.
