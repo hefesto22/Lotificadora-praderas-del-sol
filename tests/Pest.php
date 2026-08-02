@@ -96,7 +96,7 @@ function sembrarPermisosDeShield(): void
         'Replicate', 'Reorder',
     ];
 
-    foreach (['User', 'Role', 'Activity'] as $recurso) {
+    foreach (['User', 'Role', 'Activity', 'Proyecto', 'Bloque', 'Lote'] as $recurso) {
         foreach ($acciones as $accion) {
             Permission::firstOrCreate(
                 ['name' => "{$accion}:{$recurso}"],

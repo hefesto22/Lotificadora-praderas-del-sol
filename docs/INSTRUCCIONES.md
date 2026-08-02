@@ -400,6 +400,8 @@ Heredado de MAYAP y adaptado a este stack. Cito la regla cuando aplique. **Toda 
 6. **Los errores nuevos NO se tapan engordando `phpstan.neon`.** Primero se corrige el código; si es falso positivo real, `@phpstan-ignore identificador (razón)` inline. El neon solo guarda patrones institucionalizados por ruta, ya documentados ahí.
 7. Nivel 7 es el piso, no el techo: al cerrar Etapa 1 se evalúa subir a 8. **No fijar `max` sin un spike previo.**
 
+8. **Nunca escribir la anotación de ignore de PHPStan textualmente dentro de un docblock**, ni siquiera entre backticks para explicar algo. El analizador la lee como directiva real, intenta parsearla y falla con `ignore.parseError`, que además es **non-ignorable**: no se puede silenciar ni desde el neon. Referirse a ella en prosa ("silenciar un `method.notFound`"). Misma familia que la regla 4.
+
 ### C. Tests (Pest 4)
 
 1. **Services SIEMPRE con `app(Servicio::class)`, nunca `new Servicio(...)`** — los constructores crecen y rompen todos los tests.
