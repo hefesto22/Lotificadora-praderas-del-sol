@@ -116,4 +116,27 @@ return [
 
     'prefix' => env('CACHE_PREFIX', Str::slug((string) env('APP_NAME', 'laravel')).'-cache-'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Clases Deserializables desde Cache
+    |--------------------------------------------------------------------------
+    |
+    | Laravel 13 introduce esta clave para cerrar los ataques de gadget chain
+    | por deserializacion: un atacante que logre escribir en Redis podria, de
+    | otro modo, inyectar un objeto serializado que ejecute codigo al leerse.
+    |
+    | `false` (default del framework) prohibe deserializar CUALQUIER objeto.
+    | Es lo correcto en un sistema que custodia dinero ajeno.
+    |
+    | Si algun dia hace falta cachear un objeto de dominio, NO se pone `true`:
+    | se listan las clases permitidas explicitamente.
+    |
+    |     'serializable_classes' => [
+    |         App\Domain\ValueObjects\Monto::class,
+    |     ],
+    |
+    */
+
+    'serializable_classes' => false,
+
 ];
