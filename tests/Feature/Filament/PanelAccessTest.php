@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\User;
+use App\Support\Roles;
 use BezhanSalleh\FilamentShield\Support\Utils as Shield;
 use Filament\Facades\Filament;
 
@@ -46,4 +47,19 @@ it('bloquea el panel a un super admin desactivado', function (): void {
 
 it('redirige al login a un visitante anonimo', function (): void {
     $this->get('/')->assertRedirect();
+});
+
+it('deja entrar al panel a todos los roles operativos', function (string $rol): void {
+    $user = crearUsuarioConRol($rol);
+
+    $this->actingAs($user)->get('/')->assertOk();
+})->with(Roles::operativos());
+
+it('la lista unica de roles no se desincroniza de la config de Shield', function (): void {
+    // §9.E.5: canAccessPanel valida contra Roles::operativos(). Si alguien
+    // renombra un rol en config/filament-shield.php y no acá, el panel
+    // quedaria cerrado para ese rol sin ningun error que lo explique.
+    expect(Roles::operativos())
+        ->toContain(Shield::getSuperAdminName())
+        ->toContain(Shield::getPanelUserRoleName());
 });

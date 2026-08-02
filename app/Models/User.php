@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Support\Roles;
 use App\Traits\HasAuditFields;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
 use BezhanSalleh\FilamentShield\Traits\HasPanelShield;
@@ -71,15 +72,18 @@ class User extends Authenticatable implements FilamentUser
 
     /**
      * Bloquea el acceso al panel para usuarios inactivos o sin rol.
+     *
+     * §9.E.5: se valida contra Roles::operativos(), la lista única, y no
+     * contra nombres escritos acá. Cuando entren `administradora` y
+     * `receptor` no hay que acordarse de tocar este método.
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        if (! $this->is_active) {
+        if ($this->getAttribute('is_active') !== true) {
             return false;
         }
 
-        return $this->hasRole(ShieldUtils::getSuperAdminName())
-            || $this->hasRole(ShieldUtils::getPanelUserRoleName());
+        return $this->hasAnyRole(Roles::operativos());
     }
 
     /**

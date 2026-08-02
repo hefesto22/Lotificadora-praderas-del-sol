@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Traits\HasAuditFields;
 use Database\Factories\ProyectoFactory;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -47,6 +48,23 @@ class Proyecto extends Model
         return [
             'activo' => 'boolean',
         ];
+    }
+
+    /**
+     * Tercera defensa del §10.4: aunque el valor entre por un seeder, un
+     * import o tinker —sin pasar por el formulario— queda en mayúsculas.
+     * El código es el prefijo de los correlativos de contrato (RPS-2026-0065)
+     * y una minúscula suelta produciría dos series distintas.
+     *
+     * @return Attribute<string|null, string|null>
+     */
+    protected function codigo(): Attribute
+    {
+        return Attribute::make(
+            set: static fn (?string $valor): ?string => filled($valor)
+                ? mb_strtoupper($valor, 'UTF-8')
+                : null,
+        );
     }
 
     public function getActivitylogOptions(): LogOptions

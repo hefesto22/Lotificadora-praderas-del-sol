@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Traits\HasAuditFields;
 use Database\Factories\BloqueFactory;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -54,6 +55,22 @@ class Bloque extends Model
             'lotes_planificados' => 'integer',
             'orden'              => 'integer',
         ];
+    }
+
+    /**
+     * Tercera defensa del §10.4. El nombre del bloque es una letra o un
+     * código corto del plano: "a" y "A" serían dos bloques distintos para
+     * el índice único (proyecto_id, nombre).
+     *
+     * @return Attribute<string|null, string|null>
+     */
+    protected function nombre(): Attribute
+    {
+        return Attribute::make(
+            set: static fn (?string $valor): ?string => filled($valor)
+                ? mb_strtoupper($valor, 'UTF-8')
+                : null,
+        );
     }
 
     public function getActivitylogOptions(): LogOptions

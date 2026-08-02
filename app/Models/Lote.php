@@ -11,6 +11,7 @@ use App\Domain\ValueObjects\Monto;
 use App\Traits\HasAuditFields;
 use Database\Factories\LoteFactory;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -87,6 +88,21 @@ class Lote extends Model
                 );
             }
         });
+    }
+
+    /**
+     * Tercera defensa del §10.4. El número admite formatos como "12-A", y
+     * "12-a" sería otro lote para el índice único.
+     *
+     * @return Attribute<string|null, string|null>
+     */
+    protected function numero(): Attribute
+    {
+        return Attribute::make(
+            set: static fn (?string $valor): ?string => filled($valor)
+                ? mb_strtoupper($valor, 'UTF-8')
+                : null,
+        );
     }
 
     public function getActivitylogOptions(): LogOptions
