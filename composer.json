@@ -1,0 +1,126 @@
+{
+    "$schema": "https://getcomposer.org/schema.json",
+    "name": "grupo-olympo/plantilla-laravel-filament",
+    "type": "project",
+    "description": "Plantilla base Grupo Olympo: Laravel 12 + Filament v4 + PHP 8.4 + PostgreSQL 16 + Redis 7. Lista para Honduras (ISV/RTN/CAI), multi-tenant opcional, observabilidad y CI integrados.",
+    "keywords": ["laravel", "filament", "postgresql", "honduras", "grupo-olympo", "template"],
+    "license": "MIT",
+    "require": {
+        "php": "^8.4",
+        "bezhansalleh/filament-shield": "^4.0",
+        "doctrine/dbal": "^4.4",
+        "filament/filament": "^4.0",
+        "laravel/framework": "^12.0",
+        "laravel/horizon": "^5.33",
+        "laravel/tinker": "^2.10.1",
+        "maatwebsite/excel": "^3.1",
+        "predis/predis": "^2.4",
+        "sentry/sentry-laravel": "^4.13",
+        "spatie/browsershot": "^5.0",
+        "spatie/laravel-activitylog": "^4.11",
+        "spatie/laravel-backup": "^9.3",
+        "spatie/laravel-health": "^1.34",
+        "spatie/laravel-permission": "^6.20"
+    },
+    "require-dev": {
+        "fakerphp/faker": "^1.23",
+        "larastan/larastan": "^3.0",
+        "laravel-lang/common": "^6.7",
+        "laravel/pail": "^1.2.2",
+        "laravel/pint": "^1.24",
+        "mockery/mockery": "^1.6",
+        "nunomaduro/collision": "^8.6",
+        "pestphp/pest": "^3.5",
+        "pestphp/pest-plugin-laravel": "^3.0",
+        "rector/rector": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "Domain\\": "app/Domain/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/"
+        },
+        "files": [
+            "app/Support/helpers.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "setup": [
+            "composer install",
+            "@php -r \"file_exists('.env') || copy('.env.example', '.env');\"",
+            "@php artisan key:generate",
+            "@php artisan storage:link",
+            "@php artisan migrate --force",
+            "@php artisan db:seed --force",
+            "npm install",
+            "npm run build"
+        ],
+        "dev": [
+            "Composer\\Config::disableProcessTimeout",
+            "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74,#a78bfa\" \"php artisan serve\" \"php artisan horizon\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,horizon,logs,vite --kill-others"
+        ],
+        "test": [
+            "@php artisan config:clear --ansi",
+            "@php vendor/bin/pest --parallel"
+        ],
+        "lint": [
+            "@php vendor/bin/pint"
+        ],
+        "lint:check": [
+            "@php vendor/bin/pint --test"
+        ],
+        "stan": [
+            "@php vendor/bin/phpstan analyse --memory-limit=2G"
+        ],
+        "rector": [
+            "@php vendor/bin/rector process --dry-run"
+        ],
+        "rector:fix": [
+            "@php vendor/bin/rector process"
+        ],
+        "ci": [
+            "@lint:check",
+            "@stan",
+            "@test"
+        ],
+        "post-autoload-dump": [
+            "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
+            "@php artisan package:discover --ansi",
+            "@php artisan filament:upgrade"
+        ],
+        "post-update-cmd": [
+            "@php artisan vendor:publish --tag=laravel-assets --ansi --force"
+        ],
+        "post-root-package-install": [
+            "@php -r \"file_exists('.env') || copy('.env.example', '.env');\""
+        ],
+        "post-create-project-cmd": [
+            "@php artisan key:generate --ansi"
+        ],
+        "pre-package-uninstall": [
+            "Illuminate\\Foundation\\ComposerScripts::prePackageUninstall"
+        ]
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": []
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "php-http/discovery": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

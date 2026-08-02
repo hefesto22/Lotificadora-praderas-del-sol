@@ -1,0 +1,48 @@
+*.log
+.DS_Store
+.env
+.env.backup
+.env.production
+.env.testing
+.phpactor.json
+.phpunit.result.cache
+.phpunit.cache
+/.fleet
+/.idea
+/.nova
+/.vscode
+/.zed
+/auth.json
+/node_modules
+/public/build
+/public/hot
+/public/storage
+/storage/*.key
+/storage/pail
+/storage/debugbar
+/storage/clockwork
+/storage/framework/cache/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+/storage/logs/*
+/vendor
+Homestead.json
+Homestead.yaml
+Thumbs.db
+
+# Análisis y herramientas
+.rector.cache
+.phpstan.cache
+phpstan-baseline.neon
+
+# Composer
+composer.phar
+
+# IDE / editores
+*.sublime-project
+*.sublime-workspace
+nbproject
+
+# Sistemas operativos
+ehthumbs.db
+Desktop.ini

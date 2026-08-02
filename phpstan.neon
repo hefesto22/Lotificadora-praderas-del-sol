@@ -1,0 +1,98 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    paths:
+        - app
+        - config
+        - database
+        - tests
+
+    # Nivel 7 mínimo según §22 del documento de instrucciones.
+    # Subir a 8 cuando el proyecto madure, 9 para zonas críticas.
+    level: 7
+
+    excludePaths:
+        - app/Filament/Resources/*/Pages/*
+        - bootstrap/cache/*
+        # Migraciones publicadas por paquetes (Spatie Permission, Activitylog).
+        # Son archivos vendor que el paquete mantiene — no las modificamos.
+        - database/migrations/2026_02_20_053238_create_permission_tables.php
+        - database/migrations/2026_02_20_054229_create_activity_log_table.php
+        - database/migrations/2026_02_20_054230_add_event_column_to_activity_log_table.php
+        - database/migrations/2026_02_20_054231_add_batch_uuid_column_to_activity_log_table.php
+
+    ignoreErrors:
+        # ── Filament v4 — magic methods en Schema/Form/Table builders ───────
+        - identifier: missingType.iterableValue
+          path: app/Filament/*
+
+        - identifier: missingType.parameter
+          path: app/Filament/Resources/ActivityLogResource.php
+
+        # Filament Resources heredados pasan $record sin tipo a callbacks.
+        # Es API documentada de Filament: $record es Model en runtime.
+        - identifier: method.notFound
+          paths:
+              - app/Filament/Resources/Users/*
+              - app/Filament/Resources/ActivityLogResource.php
+        - identifier: property.notFound
+          paths:
+              - app/Filament/Resources/Users/*
+              - app/Filament/Resources/ActivityLogResource.php
+
+        # ── Eloquent magic ──────────────────────────────────────────────────
+        - '#Access to an undefined property App\\Models\\.*::\$.*#'
+
+        # ── Multi-tenant opcional ───────────────────────────────────────────
+        # BelongsToEmpresa hace referencia a App\Models\Empresa que solo
+        # existe en proyectos multi-tenant. La plantilla NO incluye Empresa.
+        - '#Class App\\Models\\Empresa not found#'
+        - identifier: trait.unused
+          path: app/Models/Concerns/BelongsToEmpresa.php
+
+        # ── Pest 3 magic ────────────────────────────────────────────────────
+        # $this, test(), pest()->extend(), expect() son magic globals.
+        # PHPStan no los entiende sin pest plugin (no estable en Pest 3.x).
+        - identifier: variable.undefined
+          path: tests/*
+        - identifier: method.notFound
+          path: tests/*
+        - identifier: method.staticCall
+          path: tests/*
+
+        # ── Seeders ─────────────────────────────────────────────────────────
+        # ?->command es defensivo — el comando puede ser null.
+        - identifier: nullsafe.neverNull
+          path: database/seeders/*
+        # env() en seeders es válido (corren al setup, no en runtime cached).
+        - identifier: larastan.noEnvCallsOutsideOfConfig
+          path: database/seeders/*
+
+        # ── Filament panel branding usa env() para parametrizar nombre ──────
+        - identifier: larastan.noEnvCallsOutsideOfConfig
+          path: app/Providers/Filament/AdminPanelProvider.php
+
+        # ── Modelos Eloquent: User extiende Authenticatable de Laravel ─────
+        # PHPDoc covariance entre fillable/hidden de Laravel base y nuestro
+        # array es ruido — Laravel los define como list<string> implícito.
+        - identifier: property.phpDocType
+          path: app/Models/*
+
+        # User usa method_exists() en jerarquía hash, esto es defensivo
+        # cuando el trait se aplique a otros modelos.
+        - identifier: function.alreadyNarrowedType
+          path: app/Traits/HasAuditFields.php
+
+        # Filament Tables/Schemas reciben Model de la query builder generic.
+        # No podemos tipar $record como User dentro de cierres anónimos.
+        - '#Call to an undefined method Illuminate\\Database\\Eloquent\\(Model|Builder)<.*>::(hasRole|visibleTo)\(\)\.#'
+
+        # config/filesystems.php es archivo de Laravel — no nuestro
+        - identifier: argument.type
+          path: config/filesystems.php
+
+    # Solo opciones válidas en PHPStan 2.x:
+    checkUninitializedProperties: true
+    reportUnmatchedIgnoredErrors: false
+    treatPhpDocTypesAsCertain: false

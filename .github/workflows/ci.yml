@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+    name: PHP ${{ matrix.php }} · ${{ matrix.dependency-version }}
+    strategy:
+      fail-fast: true
+      matrix:
+        php: ['8.4']
+        dependency-version: [prefer-stable]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: plantilla_olympo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: bcmath, ctype, curl, dom, fileinfo, gd, intl, mbstring, openssl, pcre, pdo, pdo_pgsql, redis, tokenizer, xml, zip
+          ini-values: error_reporting=E_ALL, memory_limit=512M
+          coverage: none
+          tools: composer:v2
+
+      - name: Get composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ matrix.php }}-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-${{ matrix.php }}-
+
+      - name: Install dependencies
+        # Nota: composer install NO acepta --prefer-stable (solo composer update lo hace).
+        # La matrix dependency-version queda como label informativo de qué resolución
+        # de versiones espera el composer.lock que se commiteó.
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          # Sobreescribimos password de Postgres para CI
+          sed -i 's/^DB_PASSWORD=.*/DB_PASSWORD=postgres/' .env
+          # Aseguramos directorios de storage y cache writable (sin esto Filament/Livewire fallan)
+          mkdir -p storage/framework/{cache/data,sessions,views,testing}
+          mkdir -p storage/logs
+          mkdir -p bootstrap/cache
+          chmod -R 0777 storage bootstrap/cache
+          # Symlink al disco public — necesario si algún test toca BrandingSetting
+          php artisan storage:link
+
+      - name: Lint (Pint)
+        # --test: no escribe, solo verifica
+        # -v: muestra qué archivos cambiarían y por qué (útil para diagnosticar
+        # diferencias entre vendor/ local y vendor/ del runner CI).
+        run: vendor/bin/pint --test -v
+
+      - name: Static analysis (PHPStan)
+        run: vendor/bin/phpstan analyse --memory-limit=2G --error-format=github
+
+      - name: Run migrations
+        env:
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: plantilla_olympo_test
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+        run: php artisan migrate --force
+
+      - name: Run Pest test suite
+        env:
+          DB_CONNECTION: pgsql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 5432
+          DB_DATABASE: plantilla_olympo_test
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: 6379
+        run: vendor/bin/pest --parallel --ci

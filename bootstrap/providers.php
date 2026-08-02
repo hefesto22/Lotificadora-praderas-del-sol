@@ -1,0 +1,17 @@
+<?php
+
+declare(strict_types=1);
+
+use App\Providers\AppServiceProvider;
+use App\Providers\DomainServiceProvider;
+use App\Providers\Filament\AdminPanelProvider;
+use App\Providers\HealthServiceProvider;
+use App\Providers\HorizonServiceProvider;
+
+return [
+    AppServiceProvider::class,
+    DomainServiceProvider::class,
+    AdminPanelProvider::class,
+    HealthServiceProvider::class,
+    HorizonServiceProvider::class,
+];
