@@ -18,8 +18,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Override;
-use Spatie\Activitylog\LogOptions;
-use Spatie\Activitylog\Traits\LogsActivity;
+use Spatie\Activitylog\Models\Concerns\LogsActivity;
+use Spatie\Activitylog\Support\LogOptions;
 
 /**
  * La unidad que se vende (§8.2).
@@ -113,7 +113,7 @@ class Lote extends Model
         return LogOptions::defaults()
             ->logOnly(['numero', 'area_varas', 'precio_vara', 'valor', 'estado'])
             ->logOnlyDirty()
-            ->dontSubmitEmptyLogs()
+            ->dontLogEmptyChanges()
             ->setDescriptionForEvent(fn (string $evento): string => "Lote {$evento}");
     }
 

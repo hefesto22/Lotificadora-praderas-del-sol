@@ -446,6 +446,7 @@ Heredado de MAYAP y adaptado a este stack. Cito la regla cuando aplique. **Toda 
 
 1. *(2-ago-2026)* Shield 4.2 no admite `spatie/laravel-permission` v8 → constraint fijado en `^7.4` (§6.3).
 2. *(2-ago-2026)* Livewire 4 SFC no se usan: Pint no formatea el PHP embebido.
+3. *(2-ago-2026)* **Un paquete puede eliminar claves de `config/` que migraciones YA APLICADAS siguen leyendo.** activitylog v5 quitó `table_name` y `database_connection`; sus tres migraciones de la v4 las usaban dentro de `Schema::create(config(...))`. Publicar el config nuevo tal cual deja `migrate:fresh` —o sea, cada test— reventando con `Schema::create(null)`. Al subir un paquete mayor: `grep` de las claves del config viejo en `database/migrations/` ANTES de reemplazarlo. Las claves huérfanas se conservan como **literales** (nunca `env()`, o alguien cambia el nombre de la tabla y la migración crea una que el modelo jamás lee) con el comentario de por qué: el §12 hace inmutable a la migración, no al config.
 
 ---
 

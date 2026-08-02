@@ -151,12 +151,12 @@ class ActivityLogResource extends Resource
                     ->collapsible()
                     ->schema([
                         Grid::make(2)->schema([
-                            TextEntry::make('properties.old')
+                            TextEntry::make('attribute_changes.old')
                                 ->label('Valores anteriores')
                                 ->formatStateUsing(fn ($state) => is_array($state) ? json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) : '—')
                                 ->markdown()
                                 ->placeholder('Sin datos anteriores'),
-                            TextEntry::make('properties.attributes')
+                            TextEntry::make('attribute_changes.attributes')
                                 ->label('Valores nuevos')
                                 ->formatStateUsing(fn ($state) => is_array($state) ? json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) : '—')
                                 ->markdown()

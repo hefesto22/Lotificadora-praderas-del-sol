@@ -14,8 +14,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Override;
-use Spatie\Activitylog\LogOptions;
-use Spatie\Activitylog\Traits\LogsActivity;
+use Spatie\Activitylog\Models\Concerns\LogsActivity;
+use Spatie\Activitylog\Support\LogOptions;
 
 /**
  * Desarrollo inmobiliario. Raíz de la jerarquía proyectos → bloques → lotes
@@ -74,7 +74,7 @@ class Proyecto extends Model
         return LogOptions::defaults()
             ->logOnly(['nombre', 'codigo', 'activo'])
             ->logOnlyDirty()
-            ->dontSubmitEmptyLogs()
+            ->dontLogEmptyChanges()
             ->setDescriptionForEvent(fn (string $evento): string => "Proyecto {$evento}");
     }
 

@@ -15,7 +15,7 @@
         "predis/predis": "^2.4",
         "sentry/sentry-laravel": "^4.26",
         "spatie/browsershot": "^5.4",
-        "spatie/laravel-activitylog": "^4.12",
+        "spatie/laravel-activitylog": "^5.0",
         "spatie/laravel-backup": "^10.3",
         "spatie/laravel-health": "^1.40",
         "spatie/laravel-permission": "^7.4"
