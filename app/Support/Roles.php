@@ -20,10 +20,10 @@ namespace App\Support;
 final class Roles
 {
     /** Acceso total. Shield le sincroniza todos los permisos generados. */
-    public const SUPER_ADMIN = 'super_admin';
+    public const string SUPER_ADMIN = 'super_admin';
 
     /** Acceso al panel sin permisos de Resource. Base de los demás. */
-    public const PANEL_USER = 'panel_user';
+    public const string PANEL_USER = 'panel_user';
 
     /**
      * Rosa Elena: administra el residencial completo.
@@ -31,7 +31,7 @@ final class Roles
      * Ve y opera todo el negocio, pero NO es super_admin: no administra
      * usuarios del sistema ni configuración técnica.
      */
-    public const ADMINISTRADORA = 'administradora';
+    public const string ADMINISTRADORA = 'administradora';
 
     /**
      * Quien cobra en ventanilla (§13.1).
@@ -39,7 +39,7 @@ final class Roles
      * Registra pagos y emite recibos. NO anula, NO edita ventas, NO ve
      * gastos y NO ve el arqueo de otro receptor.
      */
-    public const RECEPTOR = 'receptor';
+    public const string RECEPTOR = 'receptor';
 
     /**
      * Roles con acceso al panel.

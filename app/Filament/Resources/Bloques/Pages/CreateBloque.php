@@ -6,8 +6,10 @@ namespace App\Filament\Resources\Bloques\Pages;
 
 use App\Filament\Resources\Bloques\BloqueResource;
 use Filament\Resources\Pages\CreateRecord;
+use Override;
 
 class CreateBloque extends CreateRecord
 {
+    #[Override]
     protected static string $resource = BloqueResource::class;
 }

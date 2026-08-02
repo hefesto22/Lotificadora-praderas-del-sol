@@ -10,11 +10,14 @@ use App\Domain\Exceptions\ValueObjectInvalidoException;
 use App\Domain\ValueObjects\Monto;
 use App\Traits\HasAuditFields;
 use Database\Factories\LoteFactory;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Override;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 
@@ -26,6 +29,15 @@ use Spatie\Activitylog\Traits\LogsActivity;
  * §8.3.4 para columnas derivadas almacenadas, se recalcula en cada guardado
  * y hay un golden test que lo verifica al céntimo desde cero.
  */
+#[Fillable([
+    'proyecto_id',
+    'bloque_id',
+    'numero',
+    'area_varas',
+    'precio_vara',
+    'estado',
+    'observaciones',
+])]
 class Lote extends Model
 {
     use HasAuditFields;
@@ -34,17 +46,6 @@ class Lote extends Model
     use HasFactory;
 
     use LogsActivity;
-
-    /** @var list<string> */
-    protected $fillable = [
-        'proyecto_id',
-        'bloque_id',
-        'numero',
-        'area_varas',
-        'precio_vara',
-        'estado',
-        'observaciones',
-    ];
 
     /**
      * `area_varas`, `precio_vara` y `valor` NO se castean a decimal.
@@ -57,6 +58,7 @@ class Lote extends Model
      *
      * @return array<string, string>
      */
+    #[Override]
     protected function casts(): array
     {
         return [
@@ -64,6 +66,7 @@ class Lote extends Model
         ];
     }
 
+    #[Override]
     protected static function booted(): void
     {
         // El valor SIEMPRE se recalcula: así un seeder, un import o un
@@ -180,7 +183,8 @@ class Lote extends Model
      *
      * @return Builder<Lote>
      */
-    public function scopeDisponibles(Builder $query): Builder
+    #[Scope]
+    protected function disponibles(Builder $query): Builder
     {
         return $query->where('estado', EstadoLote::Disponible);
     }
@@ -192,7 +196,8 @@ class Lote extends Model
      *
      * @return Builder<Lote>
      */
-    public function scopeComprometidos(Builder $query): Builder
+    #[Scope]
+    protected function comprometidos(Builder $query): Builder
     {
         return $query->whereIn('estado', [EstadoLote::Apartado, EstadoLote::Vendido]);
     }
@@ -202,7 +207,8 @@ class Lote extends Model
      *
      * @return Builder<Lote>
      */
-    public function scopeDelProyecto(Builder $query, Proyecto $proyecto): Builder
+    #[Scope]
+    protected function delProyecto(Builder $query, Proyecto $proyecto): Builder
     {
         return $query->where('proyecto_id', $proyecto->getKey());
     }

@@ -7,16 +7,16 @@ use App\Domain\ValueObjects\Monto;
 
 describe('Monto — invariantes del constructor', function (): void {
     test('rechaza valor negativo', function (): void {
-        expect(fn () => new Monto('-1.00'))->toThrow(ValueObjectInvalidoException::class);
+        expect(fn (): Monto => new Monto('-1.00'))->toThrow(ValueObjectInvalidoException::class);
     });
 
     test('rechaza moneda con longitud distinta a 3', function (): void {
-        expect(fn () => new Monto('100.00', 'HONDURAS'))
+        expect(fn (): Monto => new Monto('100.00', 'HONDURAS'))
             ->toThrow(ValueObjectInvalidoException::class);
     });
 
     test('rechaza strings que no son decimales simples', function (string $entrada): void {
-        expect(fn () => new Monto($entrada))->toThrow(ValueObjectInvalidoException::class);
+        expect(fn (): Monto => new Monto($entrada))->toThrow(ValueObjectInvalidoException::class);
     })->with(['1,234.56', '1e3', 'abc', '', '12.', '.5']);
 
     test('acepta enteros y strings decimales', function (): void {
@@ -98,7 +98,7 @@ describe('Monto — aritmetica', function (): void {
         $hnl = new Monto('100.00', 'HNL');
         $usd = new Monto('100.00', 'USD');
 
-        expect(fn () => $hnl->sumar($usd))->toThrow(ValueObjectInvalidoException::class);
+        expect(fn (): Monto => $hnl->sumar($usd))->toThrow(ValueObjectInvalidoException::class);
     });
 
     test('aplica porcentaje — caso ISV 15%', function (): void {
@@ -106,7 +106,7 @@ describe('Monto — aritmetica', function (): void {
     });
 
     test('resta produce error si el resultado seria negativo', function (): void {
-        expect(fn () => new Monto('50.00')->restar(new Monto('100.00')))
+        expect(fn (): Monto => new Monto('50.00')->restar(new Monto('100.00')))
             ->toThrow(ValueObjectInvalidoException::class);
     });
 
@@ -115,7 +115,7 @@ describe('Monto — aritmetica', function (): void {
     });
 
     test('rechaza division entre cero', function (): void {
-        expect(fn () => new Monto('100.00')->dividirPor('0'))
+        expect(fn (): Monto => new Monto('100.00')->dividirPor('0'))
             ->toThrow(ValueObjectInvalidoException::class);
     });
 

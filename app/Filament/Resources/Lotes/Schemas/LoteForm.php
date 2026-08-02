@@ -187,7 +187,7 @@ class LoteForm
      * Aun así esto es SOLO presentación: el campo valor no se envía y el
      * valor real lo calcula el modelo.
      */
-    private const JS_CALCULAR_VALOR = <<<'JS'
+    private const string JS_CALCULAR_VALOR = <<<'JS'
         const aEntero = (valor, decimales) => {
             const [entera, decimal = ''] = String(valor ?? '0').split('.');
             const digitos = (decimal + '0'.repeat(decimales)).slice(0, decimales);

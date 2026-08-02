@@ -36,23 +36,17 @@ class RoleSeeder extends Seeder
 {
     public function run(): void
     {
-        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        resolve(PermissionRegistrar::class)->forgetCachedPermissions();
 
         // Acceso total. shield:super-admin le sincroniza todos los
         // permisos generados, desde AdminUserSeeder.
-        Role::firstOrCreate(
-            ['name' => Utils::getSuperAdminName()],
-            ['guard_name' => 'web']
-        );
+        Role::query()->firstOrCreate(['name' => Utils::getSuperAdminName()], ['guard_name' => 'web']);
 
         // Acceso al panel sin permisos de Resource. Es la base sobre la
         // que se construirán los roles del negocio (receptor,
         // administradora) cuando existan sus Resources y Shield haya
         // generado sus permisos.
-        Role::firstOrCreate(
-            ['name' => Utils::getPanelUserRoleName()],
-            ['guard_name' => 'web']
-        );
+        Role::query()->firstOrCreate(['name' => Utils::getPanelUserRoleName()], ['guard_name' => 'web']);
 
         $this->command?->info('✓ Roles base listos: '.Utils::getSuperAdminName().', '.Utils::getPanelUserRoleName());
     }

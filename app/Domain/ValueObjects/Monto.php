@@ -40,10 +40,10 @@ use Stringable;
 final readonly class Monto implements Stringable
 {
     /** Escala interna de trabajo (§8.3.1). */
-    private const ESCALA = 12;
+    private const int ESCALA = 12;
 
     /** Decimales con los que el dinero sale al mundo. */
-    private const DECIMALES = 2;
+    private const int DECIMALES = 2;
 
     /**
      * Valor exacto, con ESCALA decimales.
@@ -67,7 +67,7 @@ final readonly class Monto implements Stringable
      */
     public function __construct(string|int $valor, public string $moneda = 'HNL')
     {
-        $normalizado = self::normalizar((string) $valor);
+        $normalizado = $this->normalizar((string) $valor);
 
         if (bccomp($normalizado, '0', self::ESCALA) < 0) {
             throw ValueObjectInvalidoException::paraCampo(
@@ -126,7 +126,7 @@ final readonly class Monto implements Stringable
 
     public function multiplicarPor(string|int $factor): self
     {
-        $normalizado = self::normalizar((string) $factor);
+        $normalizado = $this->normalizar((string) $factor);
 
         if (bccomp($normalizado, '0', self::ESCALA) < 0) {
             throw ValueObjectInvalidoException::paraCampo(
@@ -141,7 +141,7 @@ final readonly class Monto implements Stringable
 
     public function dividirPor(string|int $divisor): self
     {
-        $normalizado = self::normalizar((string) $divisor);
+        $normalizado = $this->normalizar((string) $divisor);
 
         if (bccomp($normalizado, '0', self::ESCALA) === 0) {
             throw ValueObjectInvalidoException::paraCampo(
@@ -156,7 +156,7 @@ final readonly class Monto implements Stringable
 
     public function aplicarPorcentaje(string|int $porcentaje): self
     {
-        return $this->multiplicarPor(self::normalizar((string) $porcentaje))->dividirPor('100');
+        return $this->multiplicarPor($this->normalizar((string) $porcentaje))->dividirPor('100');
     }
 
     // ─── Exposición — acá y solo acá se redondea ──────────────────────
@@ -236,7 +236,7 @@ final readonly class Monto implements Stringable
      *
      * @return numeric-string
      */
-    private static function normalizar(string $valor): string
+    private function normalizar(string $valor): string
     {
         $limpio = trim($valor);
 

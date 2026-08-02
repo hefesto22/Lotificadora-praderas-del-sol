@@ -68,10 +68,10 @@ expect()->extend('toBeValidRTN', function (): Expectation {
  */
 function rol(string $nombre): Role
 {
-    app(PermissionRegistrar::class)->forgetCachedPermissions();
+    resolve(PermissionRegistrar::class)->forgetCachedPermissions();
 
     /** @var Role $role */
-    $role = Role::firstOrCreate(['name' => $nombre], ['guard_name' => 'web']);
+    $role = Role::query()->firstOrCreate(['name' => $nombre], ['guard_name' => 'web']);
 
     return $role;
 }
@@ -98,10 +98,7 @@ function sembrarPermisosDeShield(): void
 
     foreach (['User', 'Role', 'Activity', 'Proyecto', 'Bloque', 'Lote'] as $recurso) {
         foreach ($acciones as $accion) {
-            Permission::firstOrCreate(
-                ['name' => "{$accion}:{$recurso}"],
-                ['guard_name' => 'web']
-            );
+            Permission::query()->firstOrCreate(['name' => "{$accion}:{$recurso}"], ['guard_name' => 'web']);
         }
     }
 }
@@ -138,7 +135,7 @@ function actingAsAdmin(array $atributos = []): User
     $user = User::factory()->create(array_merge(['is_active' => true], $atributos));
     $user->assignRole($rolAdmin);
 
-    app(PermissionRegistrar::class)->forgetCachedPermissions();
+    resolve(PermissionRegistrar::class)->forgetCachedPermissions();
 
     test()->actingAs($user);
 

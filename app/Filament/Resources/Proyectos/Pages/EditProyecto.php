@@ -8,15 +8,18 @@ use App\Filament\Resources\Proyectos\ProyectoResource;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\ViewAction;
 use Filament\Resources\Pages\EditRecord;
+use Override;
 
 class EditProyecto extends EditRecord
 {
+    #[Override]
     protected static string $resource = ProyectoResource::class;
 
     /**
      * §9.A1: en cabecera van acciones directas, nunca dentro de un
      * ActionGroup — ahí no reciben $record y quedan invisibles.
      */
+    #[Override]
     protected function getHeaderActions(): array
     {
         return [

@@ -30,11 +30,11 @@ class AdminUserSeeder extends Seeder
      * Credenciales por defecto SOLO para desarrollo local.
      * Memorables para acelerar el setup al clonar la plantilla.
      */
-    private const DEFAULT_EMAIL = 'admin@gmail.com';
+    private const string DEFAULT_EMAIL = 'admin@gmail.com';
 
-    private const DEFAULT_PASSWORD = '12345678';
+    private const string DEFAULT_PASSWORD = '12345678';
 
-    private const DEFAULT_NAME = 'Administrador';
+    private const string DEFAULT_NAME = 'Administrador';
 
     public function run(): void
     {
@@ -54,15 +54,12 @@ class AdminUserSeeder extends Seeder
             $this->command?->warn('   Define ADMIN_PASSWORD en tu .env antes de deployar a producción.');
         }
 
-        $admin = User::updateOrCreate(
-            ['email' => $email],
-            [
-                'name'              => $nombre,
-                'password'          => Hash::make($password),
-                'is_active'         => true,
-                'email_verified_at' => now(),
-            ]
-        );
+        $admin = User::query()->updateOrCreate(['email' => $email], [
+            'name'              => $nombre,
+            'password'          => Hash::make($password),
+            'is_active'         => true,
+            'email_verified_at' => now(),
+        ]);
 
         // Asegura que el rol super_admin exista (lo crea RoleSeeder, pero
         // por si este seeder corre solo, hacemos un fallback defensivo).

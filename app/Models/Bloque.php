@@ -6,11 +6,13 @@ namespace App\Models;
 
 use App\Traits\HasAuditFields;
 use Database\Factories\BloqueFactory;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Override;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 
@@ -20,6 +22,14 @@ use Spatie\Activitylog\Traits\LogsActivity;
  * `area_total_varas` y `lotes_planificados` son datos DECLARADOS del
  * plano, no un caché de lo que hay cargado. Ver lotesRegistrados().
  */
+#[Fillable([
+    'proyecto_id',
+    'nombre',
+    'area_total_varas',
+    'lotes_planificados',
+    'orden',
+    'observaciones',
+])]
 class Bloque extends Model
 {
     use HasAuditFields;
@@ -28,16 +38,6 @@ class Bloque extends Model
     use HasFactory;
 
     use LogsActivity;
-
-    /** @var list<string> */
-    protected $fillable = [
-        'proyecto_id',
-        'nombre',
-        'area_total_varas',
-        'lotes_planificados',
-        'orden',
-        'observaciones',
-    ];
 
     /**
      * `area_total_varas` NO se castea a decimal a propósito.
@@ -49,6 +49,7 @@ class Bloque extends Model
      *
      * @return array<string, string>
      */
+    #[Override]
     protected function casts(): array
     {
         return [

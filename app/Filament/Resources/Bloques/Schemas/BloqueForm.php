@@ -99,7 +99,7 @@ class BloqueForm
                                         Placeholder::make('pendientes')
                                             ->label('Avance según el plano')
                                             ->content(static function (?Bloque $record): string {
-                                                if ($record === null) {
+                                                if (! $record instanceof Bloque) {
                                                     return '—';
                                                 }
 

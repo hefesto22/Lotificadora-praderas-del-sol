@@ -7,16 +7,16 @@ use App\Domain\ValueObjects\RTN;
 
 describe('RTN — invariantes', function (): void {
     test('rechaza valor con menos de 14 dígitos', function (): void {
-        expect(fn () => new RTN('1234'))->toThrow(ValueObjectInvalidoException::class);
+        expect(fn (): RTN => new RTN('1234'))->toThrow(ValueObjectInvalidoException::class);
     });
 
     test('rechaza valor con caracteres no numéricos', function (): void {
-        expect(fn () => new RTN('0801198501234X'))
+        expect(fn (): RTN => new RTN('0801198501234X'))
             ->toThrow(ValueObjectInvalidoException::class);
     });
 
     test('rechaza RTN con guiones', function (): void {
-        expect(fn () => new RTN('0801-1985-012345'))
+        expect(fn (): RTN => new RTN('0801-1985-012345'))
             ->toThrow(ValueObjectInvalidoException::class);
     });
 

@@ -11,14 +11,11 @@ class BrandingSettingSeeder extends Seeder
 {
     public function run(): void
     {
-        BrandingSetting::firstOrCreate(
-            [],
-            [
-                'logo_path'     => null,
-                'favicon_path'  => null,
-                'primary_color' => '#f59e0b', // amber-500 (default Filament Olympo)
-            ]
-        );
+        BrandingSetting::query()->firstOrCreate([], [
+            'logo_path'     => null,
+            'favicon_path'  => null,
+            'primary_color' => '#f59e0b', // amber-500 (default Filament Olympo)
+        ]);
 
         $this->command?->info('✓ Branding setting inicializado.');
     }

@@ -6,11 +6,14 @@ namespace App\Models;
 
 use App\Traits\HasAuditFields;
 use Database\Factories\ProyectoFactory;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Override;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 
@@ -20,6 +23,15 @@ use Spatie\Activitylog\Traits\LogsActivity;
  *
  * `codigo` es el prefijo de los correlativos de contrato: RPS-2026-0065.
  */
+#[Fillable([
+    'nombre',
+    'codigo',
+    'municipio',
+    'departamento',
+    'direccion',
+    'activo',
+    'observaciones',
+])]
 class Proyecto extends Model
 {
     use HasAuditFields;
@@ -29,20 +41,10 @@ class Proyecto extends Model
 
     use LogsActivity;
 
-    /** @var list<string> */
-    protected $fillable = [
-        'nombre',
-        'codigo',
-        'municipio',
-        'departamento',
-        'direccion',
-        'activo',
-        'observaciones',
-    ];
-
     /**
      * @return array<string, string>
      */
+    #[Override]
     protected function casts(): array
     {
         return [
@@ -103,7 +105,8 @@ class Proyecto extends Model
      *
      * @return Builder<Proyecto>
      */
-    public function scopeActivos(Builder $query): Builder
+    #[Scope]
+    protected function activos(Builder $query): Builder
     {
         return $query->where('activo', true);
     }

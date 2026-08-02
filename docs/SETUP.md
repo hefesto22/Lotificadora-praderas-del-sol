@@ -151,6 +151,6 @@ composer dev
 ## Próximos pasos
 
 1. Lee `docs/adr/0001-arquitectura.md` para entender la decisión arquitectónica de la plantilla.
-2. Si tu proyecto necesita multi-tenant, activa el trait `BelongsToEmpresa` en cada modelo.
+2. Este proyecto es **single-tenant** (ADR-0002). El trait `BelongsToEmpresa` de la plantilla se eliminó: `proyecto_id` es jerarquía de negocio, no separación de inquilinos.
 3. Si aplicas Clean Architecture, lee §6 del documento de instrucciones de Grupo Olympo y crea tu propio ADR.
 4. Antes de deployar a producción, ejecuta la auditoría de §19 (estado del VPS).

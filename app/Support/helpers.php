@@ -64,7 +64,7 @@ if (! function_exists('fechaCorta')) {
      */
     function fechaCorta(?CarbonInterface $fecha, bool $conHora = false): string
     {
-        if ($fecha === null) {
+        if (! $fecha instanceof CarbonInterface) {
             return '—';
         }
 
@@ -83,7 +83,7 @@ if (! function_exists('fechaLarga')) {
      */
     function fechaLarga(?CarbonInterface $fecha, bool $conDiaSemana = false): string
     {
-        if ($fecha === null) {
+        if (! $fecha instanceof CarbonInterface) {
             return '—';
         }
 

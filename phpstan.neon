@@ -44,13 +44,6 @@ parameters:
         # ── Eloquent magic ──────────────────────────────────────────────────
         - '#Access to an undefined property App\\Models\\.*::\$.*#'
 
-        # ── Multi-tenant opcional ───────────────────────────────────────────
-        # BelongsToEmpresa hace referencia a App\Models\Empresa que solo
-        # existe en proyectos multi-tenant. La plantilla NO incluye Empresa.
-        - '#Class App\\Models\\Empresa not found#'
-        - identifier: trait.unused
-          path: app/Models/Concerns/BelongsToEmpresa.php
-
         # ── Pest 4 magic ────────────────────────────────────────────────────
         # $this, test(), pest()->extend(), expect() son magic globals.
         # PHPStan no los entiende sin pest plugin (no estable en Pest 4.x).

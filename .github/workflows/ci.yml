@@ -60,10 +60,6 @@ jobs:
           --health-retries 5
 
     steps:
-      # PENDIENTE Fase 3: agregar aquí los gates `composer audit` y
-      # `vendor/bin/rector process --dry-run` que exigen §6.4 y §17.1.
-      # No se agregan en la fase de infraestructura para no introducir
-      # un gate nuevo y un cambio de stack en el mismo commit.
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -93,6 +89,12 @@ jobs:
         # de versiones espera el composer.lock que se commiteó.
         run: composer install --prefer-dist --no-interaction --no-progress
 
+      - name: Audit de seguridad
+        # §6.4: composer audit corre en CI y su fallo rompe el build. Una
+        # dependencia con CVE conocido en un sistema que custodia dinero
+        # ajeno no es una advertencia, es un bloqueo.
+        run: composer audit --no-interaction
+
       - name: Prepare environment
         run: |
           cp .env.example .env
@@ -108,6 +110,12 @@ jobs:
       - name: Lint (Pint)
         # --test: no escribe, solo verifica
         run: vendor/bin/pint --test -v
+
+      - name: Rector (dry-run)
+        # §17.1: si Rector propone cambios, el build falla. Mantiene el
+        # codigo alineado con PHP 8.5 y Laravel 13 sin que nadie tenga que
+        # acordarse de correrlo.
+        run: vendor/bin/rector process --dry-run --no-progress-bar
 
       - name: Static analysis (PHPStan)
         run: vendor/bin/phpstan analyse --memory-limit=2G --error-format=github

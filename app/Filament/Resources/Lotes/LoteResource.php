@@ -18,31 +18,41 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Override;
 
 class LoteResource extends Resource
 {
+    #[Override]
     protected static ?string $model = Lote::class;
 
+    #[Override]
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedSquares2x2;
 
+    #[Override]
     protected static ?string $recordTitleAttribute = 'numero';
 
+    #[Override]
     protected static ?string $modelLabel = 'Lote';
 
+    #[Override]
     protected static ?string $pluralModelLabel = 'Lotes';
 
+    #[Override]
     protected static ?int $navigationSort = 3;
 
+    #[Override]
     public static function getNavigationGroup(): ?string
     {
         return 'Lotificación';
     }
 
+    #[Override]
     public static function getNavigationLabel(): string
     {
         return 'Lotes';
     }
 
+    #[Override]
     public static function getBreadcrumb(): string
     {
         return 'Lotes';
@@ -53,6 +63,7 @@ class LoteResource extends Resource
      * el nombre del proyecto y del bloque en cada fila; sin esto son dos
      * queries por lote, o sea un N+1 sobre 500 filas.
      */
+    #[Override]
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()->with([
@@ -61,26 +72,31 @@ class LoteResource extends Resource
         ]);
     }
 
+    #[Override]
     public static function form(Schema $schema): Schema
     {
         return LoteForm::configure($schema);
     }
 
+    #[Override]
     public static function infolist(Schema $schema): Schema
     {
         return LoteInfolist::configure($schema);
     }
 
+    #[Override]
     public static function table(Table $table): Table
     {
         return LotesTable::configure($table);
     }
 
+    #[Override]
     public static function getGloballySearchableAttributes(): array
     {
         return ['numero'];
     }
 
+    #[Override]
     public static function getRelations(): array
     {
         return [
@@ -88,6 +104,7 @@ class LoteResource extends Resource
         ];
     }
 
+    #[Override]
     public static function getPages(): array
     {
         return [

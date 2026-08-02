@@ -17,56 +17,71 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Override;
 
 class BloqueResource extends Resource
 {
+    #[Override]
     protected static ?string $model = Bloque::class;
 
+    #[Override]
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleGroup;
 
+    #[Override]
     protected static ?string $recordTitleAttribute = 'nombre';
 
+    #[Override]
     protected static ?string $modelLabel = 'Bloque';
 
+    #[Override]
     protected static ?string $pluralModelLabel = 'Bloques';
 
+    #[Override]
     protected static ?int $navigationSort = 2;
 
+    #[Override]
     public static function getNavigationGroup(): ?string
     {
         return 'Lotificación';
     }
 
+    #[Override]
     public static function getNavigationLabel(): string
     {
         return 'Bloques';
     }
 
+    #[Override]
     public static function getBreadcrumb(): string
     {
         return 'Bloques';
     }
 
+    #[Override]
     public static function form(Schema $schema): Schema
     {
         return BloqueForm::configure($schema);
     }
 
+    #[Override]
     public static function infolist(Schema $schema): Schema
     {
         return BloqueInfolist::configure($schema);
     }
 
+    #[Override]
     public static function table(Table $table): Table
     {
         return BloquesTable::configure($table);
     }
 
+    #[Override]
     public static function getGloballySearchableAttributes(): array
     {
         return ['nombre'];
     }
 
+    #[Override]
     public static function getRelations(): array
     {
         return [
@@ -74,6 +89,7 @@ class BloqueResource extends Resource
         ];
     }
 
+    #[Override]
     public static function getPages(): array
     {
         return [

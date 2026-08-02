@@ -11,6 +11,9 @@ use BezhanSalleh\FilamentShield\Traits\HasPanelShield;
 use Database\Factories\UserFactory;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -18,11 +21,29 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\DB;
+use Override;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 use Spatie\Permission\Traits\HasRoles;
 use stdClass;
 
+#[Fillable([
+    'name',
+    'email',
+    'password',
+    'phone',
+    'avatar_url',
+    'is_active',
+    'last_login_at',
+    'last_login_ip',
+    'created_by',
+    'updated_by',
+    'deleted_by',
+])]
+#[Hidden([
+    'password',
+    'remember_token',
+])]
 class User extends Authenticatable implements FilamentUser
 {
     use HasAuditFields;
@@ -36,30 +57,10 @@ class User extends Authenticatable implements FilamentUser
     use Notifiable;
     use SoftDeletes;
 
-    /** @var list<string> */
-    protected $fillable = [
-        'name',
-        'email',
-        'password',
-        'phone',
-        'avatar_url',
-        'is_active',
-        'last_login_at',
-        'last_login_ip',
-        'created_by',
-        'updated_by',
-        'deleted_by',
-    ];
-
-    /** @var list<string> */
-    protected $hidden = [
-        'password',
-        'remember_token',
-    ];
-
     /**
      * @return array<string, string>
      */
+    #[Override]
     protected function casts(): array
     {
         return [
@@ -175,7 +176,8 @@ class User extends Authenticatable implements FilamentUser
      *
      * @return Builder<User>
      */
-    public function scopeActive(Builder $query): Builder
+    #[Scope]
+    protected function active(Builder $query): Builder
     {
         return $query->where('is_active', true);
     }
@@ -185,7 +187,8 @@ class User extends Authenticatable implements FilamentUser
      *
      * @return Builder<User>
      */
-    public function scopeInactive(Builder $query): Builder
+    #[Scope]
+    protected function inactive(Builder $query): Builder
     {
         return $query->where('is_active', false);
     }
@@ -198,7 +201,8 @@ class User extends Authenticatable implements FilamentUser
      *
      * @return Builder<User>
      */
-    public function scopeVisibleTo(Builder $query, User $user): Builder
+    #[Scope]
+    protected function visibleTo(Builder $query, User $user): Builder
     {
         if ($user->hasRole(ShieldUtils::getSuperAdminName())) {
             return $query;
