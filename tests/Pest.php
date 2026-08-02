@@ -35,12 +35,14 @@ pest()->extend(TestCase::class)
 | Custom expectations específicas del dominio Olympo.
 */
 
-expect()->extend('toBeMonto', function (float $valor, string $moneda = 'HNL'): Expectation {
+expect()->extend('toBeMonto', function (string $valor, string $moneda = 'HNL'): Expectation {
     /** @var Monto $monto */
     $monto = $this->value;
 
     expect($monto)->toBeInstanceOf(Monto::class);
-    expect($monto->valor)->toBe($valor);
+    // Se compara el redondeado, no el exacto: el valor interno lleva
+    // escala 12 y compararlo obligaria a escribir los ceros en cada test.
+    expect($monto->redondeado())->toBe($valor);
     expect($monto->moneda)->toBe($moneda);
 
     return $this;

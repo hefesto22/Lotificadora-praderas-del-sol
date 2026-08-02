@@ -23,16 +23,21 @@ if (! function_exists('lempiras')) {
     /**
      * Formatea un monto como Lempiras hondureños.
      *
-     *   lempiras(1234.56)               => "L. 1,234.56"
-     *   lempiras(1234.5, decimales: 0)  => "L. 1,235"
-     *   lempiras(new Monto(99.99))      => "L. 99.99"
+     *   lempiras('1234.56')                => "L. 1,234.56"
+     *   lempiras('1234.5', decimales: 0)   => "L. 1,235"
+     *   lempiras(new Monto('99.99'))       => "L. 99.99"
+     *
+     * Recibe string o int, nunca float: el §8.3.1 prohíbe float en el
+     * camino del dinero, y number_format() lo reintroduciría por la
+     * puerta de atrás. El formateo lo hace Monto, que separa miles
+     * con aritmética de strings.
      */
-    function lempiras(float|int|Monto $monto, int $decimales = 2): string
+    function lempiras(string|int|Monto $monto, int $decimales = 2): string
     {
-        $valor = $monto instanceof Monto ? $monto->valor : (float) $monto;
         $simbolo = (string) config('honduras.moneda.simbolo', 'L.');
 
-        return $simbolo.' '.number_format($valor, $decimales, '.', ',');
+        return ($monto instanceof Monto ? $monto : new Monto($monto))
+            ->formateado($simbolo, $decimales);
     }
 }
 
@@ -40,14 +45,13 @@ if (! function_exists('moneda')) {
     /**
      * Formatea con cualquier símbolo monetario.
      *
-     *   moneda(1234.56, 'USD')   => "USD 1,234.56"
-     *   moneda(1234.56, '$')     => "$ 1,234.56"
+     *   moneda('1234.56', 'USD')   => "USD 1,234.56"
+     *   moneda('1234.56', '$')     => "$ 1,234.56"
      */
-    function moneda(float|int|Monto $monto, string $simbolo = 'L.', int $decimales = 2): string
+    function moneda(string|int|Monto $monto, string $simbolo = 'L.', int $decimales = 2): string
     {
-        $valor = $monto instanceof Monto ? $monto->valor : (float) $monto;
-
-        return $simbolo.' '.number_format($valor, $decimales, '.', ',');
+        return ($monto instanceof Monto ? $monto : new Monto($monto))
+            ->formateado($simbolo, $decimales);
     }
 }
 
