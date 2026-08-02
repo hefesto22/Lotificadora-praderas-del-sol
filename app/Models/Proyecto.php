@@ -1,0 +1,92 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Models;
+
+use App\Traits\HasAuditFields;
+use Database\Factories\ProyectoFactory;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
+
+/**
+ * Desarrollo inmobiliario. Raíz de la jerarquía proyectos → bloques → lotes
+ * (ADR-0002).
+ *
+ * `codigo` es el prefijo de los correlativos de contrato: RPS-2026-0065.
+ */
+class Proyecto extends Model
+{
+    use HasAuditFields;
+
+    /** @use HasFactory<ProyectoFactory> */
+    use HasFactory;
+
+    use LogsActivity;
+
+    /** @var list<string> */
+    protected $fillable = [
+        'nombre',
+        'codigo',
+        'municipio',
+        'departamento',
+        'direccion',
+        'activo',
+        'observaciones',
+    ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'activo' => 'boolean',
+        ];
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly(['nombre', 'codigo', 'activo'])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->setDescriptionForEvent(fn (string $evento): string => "Proyecto {$evento}");
+    }
+
+    /**
+     * @return HasMany<Bloque, $this>
+     */
+    public function bloques(): HasMany
+    {
+        return $this->hasMany(Bloque::class);
+    }
+
+    /**
+     * Lotes del proyecto, sin pasar por bloques.
+     *
+     * `proyecto_id` está denormalizado en `lotes` a propósito (ADR-0002):
+     * los reportes filtran por proyecto en cada consulta y hacerlo vía
+     * bloques obligaría a un join en todas.
+     *
+     * @return HasMany<Lote, $this>
+     */
+    public function lotes(): HasMany
+    {
+        return $this->hasMany(Lote::class);
+    }
+
+    /**
+     * @param Builder<Proyecto> $query
+     *
+     * @return Builder<Proyecto>
+     */
+    public function scopeActivos(Builder $query): Builder
+    {
+        return $query->where('activo', true);
+    }
+}

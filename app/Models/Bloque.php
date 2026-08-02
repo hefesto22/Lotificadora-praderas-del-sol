@@ -1,0 +1,109 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Models;
+
+use App\Traits\HasAuditFields;
+use Database\Factories\BloqueFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
+
+/**
+ * Agrupador de lotes dentro de un proyecto.
+ *
+ * `area_total_varas` y `lotes_planificados` son datos DECLARADOS del
+ * plano, no un caché de lo que hay cargado. Ver lotesRegistrados().
+ */
+class Bloque extends Model
+{
+    use HasAuditFields;
+
+    /** @use HasFactory<BloqueFactory> */
+    use HasFactory;
+
+    use LogsActivity;
+
+    /** @var list<string> */
+    protected $fillable = [
+        'proyecto_id',
+        'nombre',
+        'area_total_varas',
+        'lotes_planificados',
+        'orden',
+        'observaciones',
+    ];
+
+    /**
+     * `area_total_varas` NO se castea a decimal a propósito.
+     *
+     * El cast `decimal:x` de Laravel usa number_format(), que recibe float
+     * y reintroduciría por la puerta de atrás el error que Monto existe
+     * para evitar (§8.3.1). PDO de PostgreSQL ya devuelve NUMERIC como
+     * string, que es exactamente lo que necesita bcmath.
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'lotes_planificados' => 'integer',
+            'orden'              => 'integer',
+        ];
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly(['nombre', 'area_total_varas', 'lotes_planificados'])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->setDescriptionForEvent(fn (string $evento): string => "Bloque {$evento}");
+    }
+
+    /**
+     * @return BelongsTo<Proyecto, $this>
+     */
+    public function proyecto(): BelongsTo
+    {
+        return $this->belongsTo(Proyecto::class);
+    }
+
+    /**
+     * @return HasMany<Lote, $this>
+     */
+    public function lotes(): HasMany
+    {
+        return $this->hasMany(Lote::class);
+    }
+
+    /**
+     * Cantidad REAL de lotes cargados, contra `lotes_planificados`, que es
+     * lo que dice el plano.
+     *
+     * Para listados usar withCount('lotes'): llamar a esto por fila es un
+     * N+1 de manual (§4.L4).
+     */
+    public function lotesRegistrados(): int
+    {
+        return $this->lotes()->count();
+    }
+
+    /**
+     * ¿Faltan lotes por cargar respecto de lo que declara el plano?
+     */
+    public function tieneLotesPendientesDeCargar(): bool
+    {
+        $planificados = $this->getAttribute('lotes_planificados');
+
+        if (! is_int($planificados)) {
+            return false;
+        }
+
+        return $this->lotesRegistrados() < $planificados;
+    }
+}
