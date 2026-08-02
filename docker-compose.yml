@@ -1,51 +1,54 @@
 # ─────────────────────────────────────────────────────────────────
-# docker-compose.yml — Plantilla Grupo Olympo
+# docker-compose.yml — Residencial Praderas del Sol
 #
-# Este archivo es OPCIONAL. Cuándo usarlo:
+# SOLO datos. El runtime PHP corre nativo en Herd (§7.3): montar el
+# código en un contenedor en macOS penaliza el I/O y no compra nada.
 #
-#  1. Desarrollo local SIN Postgres/Redis ya instalados (Herd no
-#     incluye estos servicios) → ejecutar: docker compose up -d
+# Puertos DEDICADOS 5442 / 6389 para no chocar con los otros
+# proyectos Olympo que ya ocupan 5432 / 6379 en esta Mac (§7.2).
 #
-#  2. Si compartes VPS con otros proyectos que ya tienen Postgres y
-#     Redis corriendo en Docker, NO uses este archivo. En su lugar
-#     conecta el .env al contenedor existente y crea una DB nueva
-#     dentro de él (ver §19.4 del documento de instrucciones).
-#
-# Todos los nombres se derivan de variables del .env — ningún valor
-# hardcoded del proyecto. Cambia COMPOSE_PROJECT_NAME y APP_SLUG
-# en .env y todo se renombra automáticamente.
+# Levantar:  docker compose up -d
+# Estado:    docker compose ps
 # ─────────────────────────────────────────────────────────────────
 
 services:
 
   postgres:
-    image: postgres:16-alpine
-    container_name: ${COMPOSE_PROJECT_NAME:-plantilla_olympo}_postgres
+    image: postgres:18-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-praderas}_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DB_DATABASE:-plantilla_olympo}
+      POSTGRES_DB: ${DB_DATABASE:-praderas_dev}
       POSTGRES_USER: ${DB_USERNAME:-postgres}
       POSTGRES_PASSWORD: ${COMPOSE_POSTGRES_PASSWORD:-}
-      POSTGRES_HOST_AUTH_METHOD: ${COMPOSE_POSTGRES_PASSWORD:+md5}
-      # Si COMPOSE_POSTGRES_PASSWORD está vacío, Postgres acepta
-      # conexiones sin password (solo desarrollo local).
+      POSTGRES_HOST_AUTH_METHOD: ${COMPOSE_POSTGRES_AUTH:-trust}
+      # Consumida por el script de initdb para crear la base de tests.
+      POSTGRES_TEST_DB: ${DB_DATABASE_TEST:-praderas_test}
     ports:
-      - "${COMPOSE_POSTGRES_PORT:-5432}:5432"
+      - "${COMPOSE_POSTGRES_PORT:-5442}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # ⚠️ PostgreSQL 18 cambió PGDATA de /var/lib/postgresql/data a
+      # /var/lib/postgresql/18/docker, y declara VOLUME sobre el padre
+      # /var/lib/postgresql. Montar en .../data como en PG 16 hace que
+      # Docker cree un volumen anónimo y el volumen nombrado quede
+      # VACÍO: los datos se pierden al recrear el contenedor, sin error
+      # visible. El montaje correcto en PG 18 es el directorio padre.
+      - postgres_data:/var/lib/postgresql
+      # Scripts que corren UNA sola vez, cuando PGDATA está vacío.
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE:-plantilla_olympo}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE:-praderas_dev}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
-    image: redis:7-alpine
-    container_name: ${COMPOSE_PROJECT_NAME:-plantilla_olympo}_redis
+    image: redis:8-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-praderas}_redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
-      - "${COMPOSE_REDIS_PORT:-6379}:6379"
+      - "${COMPOSE_REDIS_PORT:-6389}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -56,6 +59,6 @@ services:
 
 volumes:
   postgres_data:
-    name: ${COMPOSE_PROJECT_NAME:-plantilla_olympo}_postgres_data
+    name: ${COMPOSE_PROJECT_NAME:-praderas}_postgres_data
   redis_data:
-    name: ${COMPOSE_PROJECT_NAME:-plantilla_olympo}_redis_data
+    name: ${COMPOSE_PROJECT_NAME:-praderas}_redis_data

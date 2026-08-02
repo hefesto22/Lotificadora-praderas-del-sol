@@ -19,13 +19,28 @@ jobs:
         php: ['8.4']
         dependency-version: [prefer-stable]
 
+    # Config de DB/Redis a nivel de JOB: así TODOS los steps la ven.
+    # Antes vivía suelta en los steps de migrate y test, y `artisan`
+    # en el step de preparación quedaba apuntando al .env (puerto
+    # 5442 local) contra unos servicios que aquí escuchan en 5432.
+    env:
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_DATABASE: praderas_test
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+
     services:
+      # Paridad de motor con local y producción: PostgreSQL 18 (§7.1).
       postgres:
-        image: postgres:16-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: plantilla_olympo_test
+          POSTGRES_DB: praderas_test
         ports:
           - 5432:5432
         options: >-
@@ -35,7 +50,7 @@ jobs:
           --health-retries 5
 
       redis:
-        image: redis:7-alpine
+        image: redis:8-alpine
         ports:
           - 6379:6379
         options: >-
@@ -45,6 +60,10 @@ jobs:
           --health-retries 5
 
     steps:
+      # PENDIENTE Fase 3: agregar aquí los gates `composer audit` y
+      # `vendor/bin/rector process --dry-run` que exigen §6.4 y §17.1.
+      # No se agregan en la fase de infraestructura para no introducir
+      # un gate nuevo y un cambio de stack en el mismo commit.
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -78,9 +97,7 @@ jobs:
         run: |
           cp .env.example .env
           php artisan key:generate
-          # Sobreescribimos password de Postgres para CI
-          sed -i 's/^DB_PASSWORD=.*/DB_PASSWORD=postgres/' .env
-          # Aseguramos directorios de storage y cache writable (sin esto Filament/Livewire fallan)
+          # Directorios de storage y cache writable (sin esto Filament/Livewire fallan)
           mkdir -p storage/framework/{cache/data,sessions,views,testing}
           mkdir -p storage/logs
           mkdir -p bootstrap/cache
@@ -90,31 +107,13 @@ jobs:
 
       - name: Lint (Pint)
         # --test: no escribe, solo verifica
-        # -v: muestra qué archivos cambiarían y por qué (útil para diagnosticar
-        # diferencias entre vendor/ local y vendor/ del runner CI).
         run: vendor/bin/pint --test -v
 
       - name: Static analysis (PHPStan)
         run: vendor/bin/phpstan analyse --memory-limit=2G --error-format=github
 
       - name: Run migrations
-        env:
-          DB_CONNECTION: pgsql
-          DB_HOST: 127.0.0.1
-          DB_PORT: 5432
-          DB_DATABASE: plantilla_olympo_test
-          DB_USERNAME: postgres
-          DB_PASSWORD: postgres
         run: php artisan migrate --force
 
       - name: Run Pest test suite
-        env:
-          DB_CONNECTION: pgsql
-          DB_HOST: 127.0.0.1
-          DB_PORT: 5432
-          DB_DATABASE: plantilla_olympo_test
-          DB_USERNAME: postgres
-          DB_PASSWORD: postgres
-          REDIS_HOST: 127.0.0.1
-          REDIS_PORT: 6379
         run: vendor/bin/pest --parallel --ci

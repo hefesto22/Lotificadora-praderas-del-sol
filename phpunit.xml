@@ -33,16 +33,18 @@
         <env name="CACHE_STORE" value="array"/>
 
         <!--
-            DB de testing en PostgreSQL — algunos tests dependen de
-            features específicas de Postgres (CTE recursivo, JSONB).
-            Crear una DB dedicada antes de correr los tests:
-                createdb plantilla_olympo_test
-            O usa la variable DB_DATABASE_TEST para apuntar a otra.
+            PostgreSQL 18 en el puerto dedicado 5442 (§7.1 paridad de
+            motor). SQLite está prohibido: los tests dependen de CHECK
+            constraints, índices parciales, JSONB, CTE y NUMERIC.
+
+            La base praderas_test la crea el script de initdb de Docker
+            en el primer arranque del contenedor. Pest en modo paralelo
+            crea además praderas_test_1..N, por eso el rol tiene CREATEDB.
         -->
         <env name="DB_CONNECTION" value="pgsql"/>
-        <env name="DB_DATABASE" value="plantilla_olympo_test"/>
+        <env name="DB_DATABASE" value="praderas_test"/>
         <env name="DB_HOST" value="127.0.0.1"/>
-        <env name="DB_PORT" value="5432"/>
+        <env name="DB_PORT" value="5442"/>
 
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
