@@ -30,6 +30,7 @@ use Spatie\Activitylog\Support\LogOptions;
     'departamento',
     'direccion',
     'activo',
+    'plano_esquematico',
     'observaciones',
 ])]
 class Proyecto extends Model
@@ -42,13 +43,33 @@ class Proyecto extends Model
     use LogsActivity;
 
     /**
+     * Valor inicial de `plano_esquematico` en memoria, no solo en la base.
+     *
+     * Sin esto, un modelo recien creado NO tiene el atributo cargado: al
+     * leerlo, el cast a boolean convierte el null ausente en false, y
+     * spatie/activitylog compara null contra false y concluye que cambio.
+     * Resultado: cada update del proyecto registraba una modificacion
+     * fantasma de esta columna, y `dontLogEmptyChanges` dejaba de servir
+     * porque siempre habia "algo" que loguear.
+     *
+     * El default de la migracion arregla la base; este arregla PHP. Los
+     * dos tienen que existir y decir lo mismo.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'plano_esquematico' => false,
+    ];
+
+    /**
      * @return array<string, string>
      */
     #[Override]
     protected function casts(): array
     {
         return [
-            'activo' => 'boolean',
+            'activo'            => 'boolean',
+            'plano_esquematico' => 'boolean',
         ];
     }
 
@@ -72,7 +93,7 @@ class Proyecto extends Model
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['nombre', 'codigo', 'activo'])
+            ->logOnly(['nombre', 'codigo', 'activo', 'plano_esquematico'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges()
             ->setDescriptionForEvent(fn (string $evento): string => "Proyecto {$evento}");

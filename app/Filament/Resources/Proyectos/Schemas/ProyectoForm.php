@@ -108,6 +108,16 @@ class ProyectoForm
                                         'nuevos, pero conserva intactos sus lotes, ventas e histórico.'
                                     ),
 
+                                Toggle::make('plano_esquematico')
+                                    ->label('El plano es esquemático')
+                                    ->onColor('warning')
+                                    ->offColor('gray')
+                                    ->helperText(
+                                        'Se enciende solo cuando el sistema acomoda el plano. Significa que '.
+                                        'el dibujo respeta el área de cada lote pero NO su ubicación real en '.
+                                        'el terreno. Apagalo cuando la geometría venga del plano del topógrafo.'
+                                    ),
+
                                 Section::make('Información del registro')
                                     ->description('Datos de auditoría que mantiene el sistema.')
                                     ->icon('heroicon-o-information-circle')

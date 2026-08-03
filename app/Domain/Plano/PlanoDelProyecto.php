@@ -33,10 +33,11 @@ final readonly class PlanoDelProyecto
      * @return array{
      *     viewBox: string,
      *     hayGeometria: bool,
+     *     esquematico: bool,
      *     sinDibujar: int,
      *     resumen: array<string, int>,
      *     lotes: list<array{id: int, codigo: string, numero: string, estado: string, etiqueta: string, color: string, puntos: string, centro: array{float, float}, areaVaras: string, valor: string, valorFormateado: string, desalineado: bool}>,
-     *     calles: list<array{nombre: string|null, tipo: string, etiqueta: string, ancho: float, puntos: string}>
+     *     calles: list<array{nombre: string|null, tipo: string, etiqueta: string, ancho: float, esArea: bool, puntos: string}>
      * }
      */
     public function para(Proyecto $proyecto): array
@@ -86,19 +87,33 @@ final readonly class PlanoDelProyecto
         $callesDibujadas = [];
 
         foreach ($calles as $calle) {
-            $puntos = $calle->puntos();
+            /*
+             * Una calle dibujada a mano es un eje con un ancho; una
+             * importada de un DXF es el poligono de su area. Las dos se
+             * pintan, pero el encuadre las tiene que medir distinto.
+             */
+            $esArea = $calle->esArea();
+            $puntos = $esArea ? $calle->verticesDelArea() : $calle->puntos();
+            $minimo = $esArea ? 3 : 2;
 
-            if (count($puntos) < 2) {
+            if (count($puntos) < $minimo) {
                 continue;
             }
 
-            $ancho = (float) (string) $calle->getAttribute('ancho_varas');
+            $anchoCrudo = $calle->getAttribute('ancho_varas');
+            $ancho = $esArea || ! is_numeric($anchoCrudo) ? 0.0 : (float) $anchoCrudo;
             $tipo = $calle->getAttribute('tipo');
 
-            // El trazo se pinta grueso, asi que el encuadre tiene que
-            // contemplar medio ancho a cada lado o la calle del borde
-            // aparece cortada por la mitad.
             foreach ($puntos as $punto) {
+                if ($esArea) {
+                    $puntosParaEncuadre[] = $punto;
+
+                    continue;
+                }
+
+                // El eje se pinta grueso: el encuadre tiene que contemplar
+                // medio ancho a cada lado o la calle del borde aparece
+                // cortada por la mitad.
                 $puntosParaEncuadre[] = [$punto[0] - $ancho / 2, $punto[1] - $ancho / 2];
                 $puntosParaEncuadre[] = [$punto[0] + $ancho / 2, $punto[1] + $ancho / 2];
             }
@@ -108,6 +123,7 @@ final readonly class PlanoDelProyecto
                 'tipo'     => $tipo instanceof TipoCalle ? $tipo->value : 'calle',
                 'etiqueta' => $tipo instanceof TipoCalle ? $tipo->etiqueta() : 'Calle',
                 'ancho'    => $ancho,
+                'esArea'   => $esArea,
                 'puntos'   => $this->comoPuntosSvg($puntos),
             ];
         }
@@ -115,6 +131,7 @@ final readonly class PlanoDelProyecto
         return [
             'viewBox'      => $this->encuadre($puntosParaEncuadre),
             'hayGeometria' => $puntosParaEncuadre !== [],
+            'esquematico'  => (bool) $proyecto->getAttribute('plano_esquematico'),
             'sinDibujar'   => $sinDibujar,
             'resumen'      => $this->resumen($lotes),
             'lotes'        => $lotesDibujados,

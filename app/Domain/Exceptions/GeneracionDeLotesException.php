@@ -29,6 +29,16 @@ final class GeneracionDeLotesException extends GrupoOlympoException
         );
     }
 
+    public static function porCapaSinContornos(string $capa): self
+    {
+        return new self(
+            "La capa \"{$capa}\" no tiene ningun contorno cerrado. ".
+            'Puede ser que los lotes esten en otra capa, o que en el plano esten '.
+            'dibujados con lineas sueltas en vez de polilineas cerradas: en ese caso '.
+            'hay que cerrarlos en AutoCAD antes de exportar.'
+        );
+    }
+
     public static function porTandaDemasiadoGrande(int $pedidos, int $maximo): self
     {
         return new self(

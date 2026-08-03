@@ -35,6 +35,7 @@ use Spatie\Activitylog\Support\LogOptions;
     'tipo',
     'ancho_varas',
     'trazo',
+    'poligono',
     'orden',
     'observaciones',
 ])]
@@ -59,9 +60,10 @@ class Calle extends Model
     protected function casts(): array
     {
         return [
-            'tipo'  => TipoCalle::class,
-            'trazo' => 'array',
-            'orden' => 'integer',
+            'tipo'     => TipoCalle::class,
+            'trazo'    => 'array',
+            'poligono' => 'array',
+            'orden'    => 'integer',
         ];
     }
 
@@ -101,7 +103,33 @@ class Calle extends Model
      */
     public function puntos(): array
     {
-        $trazo = $this->getAttribute('trazo');
+        return $this->comoPares('trazo');
+    }
+
+    /**
+     * Vertices del area de la calle, cuando viene importada de un plano.
+     *
+     * @return list<array{float, float}>
+     */
+    public function verticesDelArea(): array
+    {
+        return $this->comoPares('poligono');
+    }
+
+    /**
+     * ¿Esta calle esta definida por su area y no por un eje con ancho?
+     */
+    public function esArea(): bool
+    {
+        return count($this->verticesDelArea()) >= 3;
+    }
+
+    /**
+     * @return list<array{float, float}>
+     */
+    private function comoPares(string $campo): array
+    {
+        $trazo = $this->getAttribute($campo);
 
         if (! is_array($trazo)) {
             return [];
