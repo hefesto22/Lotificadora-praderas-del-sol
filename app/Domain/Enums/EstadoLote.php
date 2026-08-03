@@ -52,6 +52,28 @@ enum EstadoLote: string
     }
 
     /**
+     * Color del relleno en el plano, en hexadecimal.
+     *
+     * Vive pegado a color() a proposito: son la misma decision vista en
+     * dos superficies —el badge de la tabla y el poligono del plano— y
+     * separarlas es garantizar que algun dia el lote vendido sea azul en
+     * un lado y rojo en el otro.
+     *
+     * Se sigue el enum, NO la convencion de los portales de venta (donde
+     * vendido suele ser rojo). Adentro del panel, rojo significa problema
+     * y una venta cerrada no es un problema: es el objetivo.
+     */
+    public function colorHex(): string
+    {
+        return match ($this) {
+            self::Disponible => '#16a34a',
+            self::Apartado   => '#d97706',
+            self::Vendido    => '#2563eb',
+            self::Cancelado  => '#dc2626',
+        };
+    }
+
+    /**
      * ¿El lote está comprometido con un cliente?
      *
      * Un lote apartado o vendido no puede volver a apartarse ni venderse

@@ -7,6 +7,7 @@ namespace App\Filament\Resources\Proyectos;
 use App\Filament\Resources\Proyectos\Pages\CreateProyecto;
 use App\Filament\Resources\Proyectos\Pages\EditProyecto;
 use App\Filament\Resources\Proyectos\Pages\ListProyectos;
+use App\Filament\Resources\Proyectos\Pages\VerPlano;
 use App\Filament\Resources\Proyectos\Pages\ViewProyecto;
 use App\Filament\Resources\Proyectos\Schemas\ProyectoForm;
 use App\Filament\Resources\Proyectos\Schemas\ProyectoInfolist;
@@ -108,6 +109,7 @@ class ProyectoResource extends Resource
             'create' => CreateProyecto::route('/create'),
             'view'   => ViewProyecto::route('/{record}'),
             'edit'   => EditProyecto::route('/{record}/edit'),
+            'plano'  => VerPlano::route('/{record}/plano'),
         ];
     }
 }
