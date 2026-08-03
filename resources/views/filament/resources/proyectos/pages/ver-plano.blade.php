@@ -50,6 +50,7 @@
         .plano-lienzo svg {
             display: block; width: 100%; height: min(72vh, 760px);
             touch-action: none; cursor: grab;
+            user-select: none; -webkit-user-select: none;
         }
         .plano-lienzo svg.arrastrando { cursor: grabbing; }
 
@@ -216,15 +217,41 @@
                     };
                 },
 
+                /*
+                   La seleccion se resuelve al SOLTAR y no con un click.
+                   Motivo: cancelar el pointerdown —que hace falta para que
+                   arrastrar no seleccione texto ni arrastre la imagen—
+                   suprime los eventos de compatibilidad del mouse, y el
+                   click es uno de ellos: no llegaba nunca al poligono.
+
+                   Al soltar se pregunta que elemento hay bajo el cursor.
+                   Los numeros tienen pointer-events: none, asi que lo que
+                   contesta es siempre el poligono o el fondo.
+                */
                 alSoltar(e) {
                     this.arrastrando = false;
+
                     if (e && this.$refs.lienzo.hasPointerCapture(e.pointerId)) {
                         this.$refs.lienzo.releasePointerCapture(e.pointerId);
                     }
+
+                    // Un gesto cancelado —el navegador se lleva el puntero, o
+                    // entra una llamada— no es un clic y no debe seleccionar.
+                    if (this.movio || e.type !== 'pointerup') { this.movio = false; return }
+
+                    const debajo = document.elementFromPoint(e.clientX, e.clientY);
+                    const indice = debajo?.dataset?.indice;
+
+                    this.seleccionar(indice === undefined ? null : Number(indice));
                 },
 
                 seleccionar(indice) {
-                    if (this.movio) { this.movio = false; return }
+                    // Soltar sobre el fondo deselecciona.
+                    if (indice === null || Number.isNaN(indice) || ! this.lotes[indice]) {
+                        this.seleccionado = null;
+
+                        return;
+                    }
 
                     const lote = this.lotes[indice];
                     this.seleccionado = this.seleccionado?.id === lote.id ? null : lote;
@@ -282,7 +309,7 @@
                             stroke-linejoin="round"
                             vector-effect="non-scaling-stroke"
                             class="lote"
-                            x-on:click="seleccionar({{ $indice }})"
+                            data-indice="{{ $indice }}"
                             :stroke="seleccionado?.id === {{ $lote['id'] }} ? '#0f172a' : '#ffffff'"
                             :stroke-width="seleccionado?.id === {{ $lote['id'] }} ? 2.5 : 1"
                         >
