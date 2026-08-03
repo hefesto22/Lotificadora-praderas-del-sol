@@ -89,11 +89,21 @@ class User extends Authenticatable implements FilamentUser
 
     /**
      * Configuración de Activity Log — solo cambios significativos.
+     *
+     * `phone` salió de la lista: el §13.5 pide PII fuera de logs y el
+     * teléfono está nombrado ahí junto al DNI y el RTN. Auditarlo copiaba el
+     * número a `activity_log`, que tiene otro control de acceso que la ficha
+     * del usuario. Que el teléfono cambió se sabe igual por el timestamp de
+     * `updated_at` y por el causer; el número en sí no aporta a la auditoría.
+     *
+     * Mismo criterio que Cliente. Si algún día hace falta rastrear el valor
+     * anterior de un teléfono, va a una tabla propia con su propia Policy,
+     * no a la bitácora general.
      */
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['name', 'email', 'phone', 'is_active'])
+            ->logOnly(['name', 'email', 'is_active'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges()
             ->setDescriptionForEvent(fn (string $eventName): string => "Usuario {$eventName}");

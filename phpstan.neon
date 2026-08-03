@@ -47,11 +47,20 @@ parameters:
         # ── Pest 4 magic ────────────────────────────────────────────────────
         # $this, test(), pest()->extend(), expect() son magic globals.
         # PHPStan no los entiende sin pest plugin (no estable en Pest 4.x).
+        #
+        # property.notFound cubre el `->not` de las expectativas negadas
+        # (expect($x)->not->toContain(...)): en Pest es una propiedad mágica
+        # que devuelve otra Expectation. Es el mismo caso que los tres de
+        # arriba, no un error nuestro — y sin esto la única salida sería
+        # escribir expect(str_contains(...))->toBeFalse() en cada negación,
+        # que se lee bastante peor en un archivo de tests.
         - identifier: variable.undefined
           path: tests/*
         - identifier: method.notFound
           path: tests/*
         - identifier: method.staticCall
+          path: tests/*
+        - identifier: property.notFound
           path: tests/*
 
         # ── Seeders ─────────────────────────────────────────────────────────

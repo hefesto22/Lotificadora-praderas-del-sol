@@ -4,17 +4,10 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use App\Models\Proyecto;
 use Illuminate\Auth\Access\HandlesAuthorization;
 use Illuminate\Foundation\Auth\User as AuthUser;
 
-/**
- * §9.E.1: todo Resource nace con su Policy. Sin ella, el Resource queda
- * visible para cualquier usuario autenticado.
- *
- * Los permisos siguen la convención de config/filament-shield.php:
- * separator ':' y case 'pascal'. Los genera shield:generate; nunca se
- * escriben a mano en un seeder (§9.E.2).
- */
 class ProyectoPolicy
 {
     use HandlesAuthorization;
@@ -24,7 +17,7 @@ class ProyectoPolicy
         return $authUser->can('ViewAny:Proyecto');
     }
 
-    public function view(AuthUser $authUser): bool
+    public function view(AuthUser $authUser, Proyecto $proyecto): bool
     {
         return $authUser->can('View:Proyecto');
     }
@@ -34,22 +27,22 @@ class ProyectoPolicy
         return $authUser->can('Create:Proyecto');
     }
 
-    public function update(AuthUser $authUser): bool
+    public function update(AuthUser $authUser, Proyecto $proyecto): bool
     {
         return $authUser->can('Update:Proyecto');
     }
 
-    public function delete(AuthUser $authUser): bool
+    public function delete(AuthUser $authUser, Proyecto $proyecto): bool
     {
         return $authUser->can('Delete:Proyecto');
     }
 
-    public function restore(AuthUser $authUser): bool
+    public function restore(AuthUser $authUser, Proyecto $proyecto): bool
     {
         return $authUser->can('Restore:Proyecto');
     }
 
-    public function forceDelete(AuthUser $authUser): bool
+    public function forceDelete(AuthUser $authUser, Proyecto $proyecto): bool
     {
         return $authUser->can('ForceDelete:Proyecto');
     }
@@ -64,7 +57,7 @@ class ProyectoPolicy
         return $authUser->can('RestoreAny:Proyecto');
     }
 
-    public function replicate(AuthUser $authUser): bool
+    public function replicate(AuthUser $authUser, Proyecto $proyecto): bool
     {
         return $authUser->can('Replicate:Proyecto');
     }

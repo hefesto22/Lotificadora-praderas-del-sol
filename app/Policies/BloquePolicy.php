@@ -4,17 +4,10 @@ declare(strict_types=1);
 
 namespace App\Policies;
 
+use App\Models\Bloque;
 use Illuminate\Auth\Access\HandlesAuthorization;
 use Illuminate\Foundation\Auth\User as AuthUser;
 
-/**
- * §9.E.1: todo Resource nace con su Policy. Sin ella, el Resource queda
- * visible para cualquier usuario autenticado.
- *
- * Los permisos siguen la convención de config/filament-shield.php:
- * separator ':' y case 'pascal'. Los genera shield:generate; nunca se
- * escriben a mano en un seeder (§9.E.2).
- */
 class BloquePolicy
 {
     use HandlesAuthorization;
@@ -24,7 +17,7 @@ class BloquePolicy
         return $authUser->can('ViewAny:Bloque');
     }
 
-    public function view(AuthUser $authUser): bool
+    public function view(AuthUser $authUser, Bloque $bloque): bool
     {
         return $authUser->can('View:Bloque');
     }
@@ -34,22 +27,22 @@ class BloquePolicy
         return $authUser->can('Create:Bloque');
     }
 
-    public function update(AuthUser $authUser): bool
+    public function update(AuthUser $authUser, Bloque $bloque): bool
     {
         return $authUser->can('Update:Bloque');
     }
 
-    public function delete(AuthUser $authUser): bool
+    public function delete(AuthUser $authUser, Bloque $bloque): bool
     {
         return $authUser->can('Delete:Bloque');
     }
 
-    public function restore(AuthUser $authUser): bool
+    public function restore(AuthUser $authUser, Bloque $bloque): bool
     {
         return $authUser->can('Restore:Bloque');
     }
 
-    public function forceDelete(AuthUser $authUser): bool
+    public function forceDelete(AuthUser $authUser, Bloque $bloque): bool
     {
         return $authUser->can('ForceDelete:Bloque');
     }
@@ -64,7 +57,7 @@ class BloquePolicy
         return $authUser->can('RestoreAny:Bloque');
     }
 
-    public function replicate(AuthUser $authUser): bool
+    public function replicate(AuthUser $authUser, Bloque $bloque): bool
     {
         return $authUser->can('Replicate:Bloque');
     }
