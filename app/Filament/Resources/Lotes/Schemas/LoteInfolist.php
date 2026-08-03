@@ -18,8 +18,15 @@ class LoteInfolist
             ->components([
                 Section::make('Ubicación')
                     ->icon('heroicon-o-map-pin')
-                    ->columns(3)
+                    ->columns(4)
                     ->schema([
+                        // El código va primero y copiable: es lo que se dicta
+                        // por teléfono y lo que va impreso en el contrato.
+                        TextEntry::make('codigo')
+                            ->label('Código')
+                            ->weight('bold')
+                            ->copyable()
+                            ->copyMessage('Código copiado'),
                         TextEntry::make('proyecto.nombre')->label('Proyecto'),
                         TextEntry::make('bloque.nombre')->label('Bloque')->badge()->color('gray'),
                         TextEntry::make('numero')->label('Lote'),

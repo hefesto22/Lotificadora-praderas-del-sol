@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Lotes;
 
+use App\Domain\Enums\EstadoLote;
 use App\Filament\Resources\Lotes\Pages\CreateLote;
 use App\Filament\Resources\Lotes\Pages\EditLote;
 use App\Filament\Resources\Lotes\Pages\ListLotes;
@@ -18,6 +19,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Override;
 
 class LoteResource extends Resource
@@ -29,7 +31,7 @@ class LoteResource extends Resource
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedSquares2x2;
 
     #[Override]
-    protected static ?string $recordTitleAttribute = 'numero';
+    protected static ?string $recordTitleAttribute = 'codigo';
 
     #[Override]
     protected static ?string $modelLabel = 'Lote';
@@ -90,10 +92,48 @@ class LoteResource extends Resource
         return LotesTable::configure($table);
     }
 
+    /**
+     * El código es lo que la gente teclea: "RPS-B-12". Buscar solo por
+     * `numero` devolvía todos los lotes 12 de todos los proyectos, sin nada
+     * que los distinguiera en la lista de resultados.
+     *
+     * @return array<int, string>
+     */
     #[Override]
     public static function getGloballySearchableAttributes(): array
     {
-        return ['numero'];
+        return ['codigo', 'numero'];
+    }
+
+    /**
+     * Sin esto, los resultados globales muestran solo el código y hay que
+     * abrirlos para saber cuál es cuál.
+     *
+     * @return array<string, string>
+     */
+    #[Override]
+    public static function getGlobalSearchResultDetails(Model $record): array
+    {
+        /** @var Lote $record */
+        $estado = $record->getAttribute('estado');
+
+        return [
+            'Proyecto' => (string) $record->proyecto?->getAttribute('nombre'),
+            'Estado'   => $estado instanceof EstadoLote ? $estado->etiqueta() : '—',
+            'Valor'    => 'L '.number_format((float) $record->getAttribute('valor'), 2),
+        ];
+    }
+
+    /**
+     * Evita un N+1 en la lista de resultados globales: sin el eager load,
+     * cada fila consulta su proyecto por separado.
+     *
+     * @return Builder<Model>
+     */
+    #[Override]
+    public static function getGlobalSearchEloquentQuery(): Builder
+    {
+        return parent::getGlobalSearchEloquentQuery()->with('proyecto:id,nombre');
     }
 
     #[Override]

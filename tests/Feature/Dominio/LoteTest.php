@@ -204,3 +204,87 @@ describe('Proyecto — jerarquia', function (): void {
         expect(Proyecto::query()->activos()->count())->toBe(2);
     });
 });
+
+/*
+| El código legible existe para que buscar un lote entre 2,000 sea escribir
+| "RPS-B-12", no filtrar tres veces. Y de paso arregla un bug que ya estaba
+| en pantalla con 54 lotes: `numero` es texto, así que ordenar por él ponía
+| el lote 2 después del 19.
+*/
+describe('Lote — código legible', function (): void {
+    test('compone el código con el número rellenado a 3 dígitos', function (string $numero, string $esperado): void {
+        expect(Lote::componerCodigo('RPS', 'B', $numero))->toBe($esperado);
+    })->with([
+        ['1', 'RPS-B-001'],
+        ['12', 'RPS-B-012'],
+        ['200', 'RPS-B-200'],
+        ['1500', 'RPS-B-1500'],   // no se trunca si pasa de 3 dígitos
+        ['12-A', 'RPS-B-012-A'],  // el sufijo se conserva
+        ['BIS', 'RPS-B-BIS'],     // sin dígitos, se deja tal cual
+    ]);
+
+    test('el código se genera solo al crear el lote', function (): void {
+        $proyecto = Proyecto::factory()->create(['codigo' => 'RPS']);
+        $bloque = Bloque::factory()->delProyecto($proyecto)->create(['nombre' => 'B']);
+
+        $lote = Lote::factory()->enBloque($bloque)->create(['numero' => '12']);
+
+        expect($lote->fresh()?->getAttribute('codigo'))->toBe('RPS-B-012');
+    });
+
+    /*
+    | El código se lee del bloque con una consulta fresca, no de la relación
+    | cacheada: si se leyera de la relación en memoria, mover un lote de
+    | bloque dejaría el código apuntando al bloque viejo.
+    */
+    test('el código se recalcula si el lote cambia de bloque', function (): void {
+        $proyecto = Proyecto::factory()->create(['codigo' => 'RPS']);
+        $bloqueA = Bloque::factory()->delProyecto($proyecto)->create(['nombre' => 'A']);
+        $bloqueB = Bloque::factory()->delProyecto($proyecto)->create(['nombre' => 'B']);
+
+        $lote = Lote::factory()->enBloque($bloqueA)->create(['numero' => '7']);
+        expect($lote->fresh()?->getAttribute('codigo'))->toBe('RPS-A-007');
+
+        $lote->update(['bloque_id' => $bloqueB->getKey()]);
+
+        expect($lote->fresh()?->getAttribute('codigo'))->toBe('RPS-B-007');
+    });
+
+    test('el orden alfabético del código es el orden natural del número', function (): void {
+        $proyecto = Proyecto::factory()->create(['codigo' => 'RPS']);
+        $bloque = Bloque::factory()->delProyecto($proyecto)->create(['nombre' => 'A']);
+
+        foreach (['19', '2', '10', '1', '20'] as $numero) {
+            Lote::factory()->enBloque($bloque)->create(['numero' => $numero]);
+        }
+
+        $ordenados = Lote::query()->orderBy('codigo')->pluck('numero')->all();
+
+        // Ordenando por `numero` esto daría 1, 10, 19, 2, 20.
+        expect($ordenados)->toBe(['1', '2', '10', '19', '20']);
+    });
+
+    test('dos proyectos pueden tener el mismo bloque y número sin chocar', function (): void {
+        $praderas = Proyecto::factory()->create(['codigo' => 'RPS']);
+        $colinas = Proyecto::factory()->create(['codigo' => 'LMC']);
+
+        $bloquePraderas = Bloque::factory()->delProyecto($praderas)->create(['nombre' => 'A']);
+        $bloqueColinas = Bloque::factory()->delProyecto($colinas)->create(['nombre' => 'A']);
+
+        $uno = Lote::factory()->enBloque($bloquePraderas)->create(['numero' => '1']);
+        $otro = Lote::factory()->enBloque($bloqueColinas)->create(['numero' => '1']);
+
+        expect($uno->fresh()?->getAttribute('codigo'))->toBe('RPS-A-001');
+        expect($otro->fresh()?->getAttribute('codigo'))->toBe('LMC-A-001');
+    });
+
+    test('el código es único en toda la tabla', function (): void {
+        $proyecto = Proyecto::factory()->create(['codigo' => 'RPS']);
+        $bloque = Bloque::factory()->delProyecto($proyecto)->create(['nombre' => 'A']);
+
+        Lote::factory()->enBloque($bloque)->create(['numero' => '1']);
+
+        expect(fn (): Lote => Lote::factory()->enBloque($bloque)->create(['numero' => '1']))
+            ->toThrow(QueryException::class);
+    });
+});

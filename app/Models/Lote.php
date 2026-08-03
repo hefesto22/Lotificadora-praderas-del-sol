@@ -69,10 +69,12 @@ class Lote extends Model
     #[Override]
     protected static function booted(): void
     {
-        // El valor SIEMPRE se recalcula: así un seeder, un import o un
-        // tinker no pueden guardar un lote con un valor inconsistente.
+        // El valor y el código SIEMPRE se recalculan: así un seeder, un
+        // import o un tinker no pueden guardar un lote con un valor
+        // inconsistente ni con un código que ya no corresponde a su bloque.
         static::saving(function (Lote $lote): void {
             $lote->setAttribute('valor', $lote->calcularValor());
+            $lote->setAttribute('codigo', $lote->calcularCodigo());
         });
 
         // §8.2: un lote vendido no se edita en precio ni área. Esta es la
@@ -115,6 +117,52 @@ class Lote extends Model
             ->logOnlyDirty()
             ->dontLogEmptyChanges()
             ->setDescriptionForEvent(fn (string $evento): string => "Lote {$evento}");
+    }
+
+    // ─── Código legible ───────────────────────────────────────────────
+
+    /**
+     * RPS-B-012 — lo que la gente dice por teléfono y lo que va impreso en
+     * el contrato y en el recibo.
+     *
+     * Se lee del bloque y del proyecto con una consulta fresca, no de la
+     * relación cacheada: si alguien mueve el lote de bloque, la relación en
+     * memoria todavía apunta al viejo y el código quedaría mintiendo.
+     */
+    public function calcularCodigo(): string
+    {
+        $bloque = Bloque::query()
+            ->select(['id', 'proyecto_id', 'nombre'])
+            ->whereKey($this->getAttribute('bloque_id'))
+            ->firstOrFail();
+
+        $proyecto = Proyecto::query()
+            ->select(['id', 'codigo'])
+            ->whereKey($bloque->getAttribute('proyecto_id'))
+            ->firstOrFail();
+
+        return self::componerCodigo(
+            (string) $proyecto->getAttribute('codigo'),
+            (string) $bloque->getAttribute('nombre'),
+            (string) $this->getAttribute('numero')
+        );
+    }
+
+    /**
+     * El número va con relleno a 3 dígitos para que el orden ALFABÉTICO del
+     * código sea el orden correcto: RPS-B-002 antes que RPS-B-010. Sin el
+     * relleno, el lote 2 aparece después del 19 — que es exactamente el bug
+     * que tenía el listado.
+     *
+     * Los sufijos se conservan: "12-A" produce "012-A".
+     */
+    public static function componerCodigo(string $proyecto, string $bloque, string $numero): string
+    {
+        if (preg_match('/^(\d+)(.*)$/', $numero, $partes) === 1) {
+            $numero = str_pad($partes[1], 3, '0', STR_PAD_LEFT).$partes[2];
+        }
+
+        return "{$proyecto}-{$bloque}-{$numero}";
     }
 
     // ─── Dinero ───────────────────────────────────────────────────────
