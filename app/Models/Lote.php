@@ -36,6 +36,7 @@ use Spatie\Activitylog\Support\LogOptions;
     'area_varas',
     'precio_vara',
     'estado',
+    'poligono',
     'observaciones',
 ])]
 class Lote extends Model
@@ -46,6 +47,15 @@ class Lote extends Model
     use HasFactory;
 
     use LogsActivity;
+
+    /**
+     * Diferencia maxima tolerada entre el area DIBUJADA en el plano y el
+     * area CARGADA del documento legal, en porcentaje.
+     *
+     * Por encima de esto los dos estan contando cosas distintas y alguien
+     * tiene que mirarlo. No se corrige solo: ver areaSegunPoligonoVaras().
+     */
+    public const float TOLERANCIA_DE_AREA = 2.0;
 
     /**
      * `area_varas`, `precio_vara` y `valor` NO se castean a decimal.
@@ -62,7 +72,8 @@ class Lote extends Model
     protected function casts(): array
     {
         return [
-            'estado' => EstadoLote::class,
+            'estado'   => EstadoLote::class,
+            'poligono' => 'array',
         ];
     }
 
@@ -204,6 +215,122 @@ class Lote extends Model
             razon: 'Debe ser string o int. El §8.3.1 prohíbe float en el camino del dinero: '.
                    'asignalo como string, por ejemplo "1350.00" en lugar de 1350.00.'
         );
+    }
+
+    // ─── Geometria del plano ──────────────────────────────────────────
+
+    public function tienePoligono(): bool
+    {
+        return $this->verticesPoligono() !== [];
+    }
+
+    /**
+     * Vertices del poligono como pares [x, y] en varas.
+     *
+     * El CHECK de la base garantiza 3 elementos o mas, pero no que cada
+     * elemento sea un par de numeros: eso en SQL costaria una funcion y
+     * aca cuesta seis lineas.
+     *
+     * @return list<array{float, float}>
+     */
+    public function verticesPoligono(): array
+    {
+        $poligono = $this->getAttribute('poligono');
+
+        if (! is_array($poligono)) {
+            return [];
+        }
+
+        $vertices = [];
+
+        foreach ($poligono as $vertice) {
+            if (! is_array($vertice)) {
+                continue;
+            }
+
+            $valores = array_values($vertice);
+
+            if (count($valores) < 2 || ! is_numeric($valores[0]) || ! is_numeric($valores[1])) {
+                continue;
+            }
+
+            $vertices[] = [(float) $valores[0], (float) $valores[1]];
+        }
+
+        return count($vertices) >= 3 ? $vertices : [];
+    }
+
+    /**
+     * Area encerrada por el dibujo, en varas cuadradas, por la formula del
+     * cordon de zapato (shoelace).
+     *
+     * ESTE NUMERO NUNCA TOCA `area_varas` NI EL CAMINO DEL DINERO.
+     *
+     * Se calcula en float, que seria inaceptable en un precio pero aca es
+     * correcto: el resultado solo sirve para AVISAR que el dibujo y el
+     * plano legal no coinciden. El area que se cobra es siempre la
+     * cargada, que viene del documento que firmo el cliente.
+     *
+     * Si alguna vez alguien quiere hacer `area_varas = esto`, que lea
+     * antes el §8.2: un lote vendido tiene el area congelada y un trigger
+     * de PostgreSQL se lo va a impedir de todas formas.
+     */
+    public function areaSegunPoligonoVaras(): ?float
+    {
+        $vertices = $this->verticesPoligono();
+
+        if ($vertices === []) {
+            return null;
+        }
+
+        $suma = 0.0;
+        $total = count($vertices);
+
+        for ($i = 0; $i < $total; $i++) {
+            $actual = $vertices[$i];
+            $siguiente = $vertices[($i + 1) % $total];
+
+            $suma += ($actual[0] * $siguiente[1]) - ($siguiente[0] * $actual[1]);
+        }
+
+        return abs($suma) / 2.0;
+    }
+
+    /**
+     * Cuanto se aparta el dibujo del area cargada, en porcentaje.
+     *
+     * null si el lote no esta dibujado o si el area cargada es cero:
+     * dividir ahi no diria nada util.
+     */
+    public function discrepanciaDeAreaEnPorcentaje(): ?float
+    {
+        $dibujada = $this->areaSegunPoligonoVaras();
+
+        if ($dibujada === null) {
+            return null;
+        }
+
+        $cargada = $this->getAttribute('area_varas');
+
+        if (! is_numeric($cargada) || (float) $cargada <= 0.0) {
+            return null;
+        }
+
+        return abs($dibujada - (float) $cargada) / (float) $cargada * 100.0;
+    }
+
+    /**
+     * El dibujo contradice al plano legal mas de lo tolerable.
+     *
+     * Mismo espiritu que Bloque::tieneLotesPendientesDeCargar(): una
+     * herramienta de conciliacion, no un bug esperando. Un lote sin
+     * poligono no esta desalineado, simplemente no esta dibujado.
+     */
+    public function poligonoDesalineado(): bool
+    {
+        $discrepancia = $this->discrepanciaDeAreaEnPorcentaje();
+
+        return $discrepancia !== null && $discrepancia > self::TOLERANCIA_DE_AREA;
     }
 
     // ─── Relaciones ───────────────────────────────────────────────────
