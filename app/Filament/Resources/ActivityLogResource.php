@@ -20,6 +20,7 @@ use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Spatie\Activitylog\Models\Activity;
 
 class ActivityLogResource extends Resource
@@ -151,19 +152,53 @@ class ActivityLogResource extends Resource
                     ->collapsible()
                     ->schema([
                         Grid::make(2)->schema([
-                            TextEntry::make('attribute_changes.old')
+                            /*
+                            | ->state() con el $record entero, NO make('attribute_changes.old').
+                            |
+                            | Con la notacion de punto Filament resuelve un ARRAY y llama a
+                            | formatStateUsing UNA VEZ POR ELEMENTO, unidos por coma. El
+                            | callback recibia strings sueltos, is_array() daba false y la
+                            | pantalla mostraba "—, —" con el dato intacto en la base.
+                            */
+                            TextEntry::make('valores_anteriores')
                                 ->label('Valores anteriores')
-                                ->formatStateUsing(fn ($state) => is_array($state) ? json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) : '—')
+                                ->state(fn (Activity $record): ?string => self::comoJson($record->attribute_changes?->get('old')))
                                 ->markdown()
                                 ->placeholder('Sin datos anteriores'),
-                            TextEntry::make('attribute_changes.attributes')
+                            TextEntry::make('valores_nuevos')
                                 ->label('Valores nuevos')
-                                ->formatStateUsing(fn ($state) => is_array($state) ? json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) : '—')
+                                ->state(fn (Activity $record): ?string => self::comoJson($record->attribute_changes?->get('attributes')))
                                 ->markdown()
                                 ->placeholder('Sin datos nuevos'),
                         ]),
                     ]),
             ]);
+    }
+
+    /**
+     * Bloque de codigo markdown con el diff, o null para que salga el
+     * placeholder. Publico porque hay un test que lo llama directo: es la
+     * unica parte con logica de toda la pantalla.
+     */
+    public static function comoJson(mixed $valores): ?string
+    {
+        $arreglo = match (true) {
+            $valores instanceof Collection => $valores->toArray(),
+            is_array($valores)             => $valores,
+            default                        => [],
+        };
+
+        if ($arreglo === []) {
+            return null;
+        }
+
+        $json = json_encode($arreglo, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        if ($json === false) {
+            return null;
+        }
+
+        return "```json\n".$json."\n```";
     }
 
     public static function getPages(): array

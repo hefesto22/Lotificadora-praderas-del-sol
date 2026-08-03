@@ -32,6 +32,22 @@ return [
 
         'role' => Role::class,
 
+        /*
+         * Modelo de equipo. Este proyecto NO usa teams (ver 'teams' mas abajo):
+         * el scoping es jerarquico por created_by, no por tenant.
+         */
+
+        'team' => null,
+
+        /*
+         * Modelo por defecto para las relaciones morfologicas cuando el
+         * model_type guardado ya no resuelve a una clase existente. null hace
+         * que el paquete lance la excepcion, que es lo que queremos: preferimos
+         * enterarnos a que un permiso apunte silenciosamente a la nada.
+         */
+
+        'default_model' => null,
+
     ],
 
     'table_names' => [

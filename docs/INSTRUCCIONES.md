@@ -201,7 +201,7 @@ Antes de declarar terminado un módulo/feature verifico y reporto **explícitame
 | **Frontend base** | Livewire 4 · **Tailwind CSS 4.1+** | Requisito duro de Filament v5. Nada de configs de Tailwind 3 |
 | **Base de datos** | **PostgreSQL 18** | EOL 2030, UUIDv7 nativo, I/O asíncrono. Mínimo aceptable 16 si el VPS obliga |
 | **Cache/colas** | Redis 8 + Horizon 5.47 | |
-| **Permisos** | Shield 4.2 + **spatie/laravel-permission ^7.4** | ⚠️ Ver §6.3 — **NO ^8.0** |
+| **Permisos** | Shield 4.3 + **spatie/laravel-permission ^8.0** | Shield 4.3 ya declara `^6.0\|^7.0\|^8.0` — §6.3 |
 | **Tests** | Pest 4.7 (+ plugin browser opcional) | Pest 4 trae browser testing sobre Playwright |
 | **Calidad** | Larastan 3.10 (PHPStan 2) nivel 7 · Pint 1.29 · Rector 2.5 + driftingly/rector-laravel | `composer ci` = lint + stan + test |
 | **PDFs / Excel** | Browsershot 5.3 vía `PdfRenderer` · maatwebsite/excel 3.1.69 | DomPDF/mPDF prohibidos. Para exports >50k filas evaluar `spatie/simple-excel` |
@@ -216,7 +216,7 @@ Antes de declarar terminado un módulo/feature verifico y reporto **explícitame
     "laravel/framework": "^13.0",
     "filament/filament": "^5.0",
     "bezhansalleh/filament-shield": "^4.2",
-    "spatie/laravel-permission": "^7.4",   // ⚠️ NO ^8 — ver 6.3
+    "spatie/laravel-permission": "^8.0",
     "spatie/laravel-activitylog": "^5.0",
     "spatie/laravel-backup": "^10.3",
     "spatie/laravel-health": "^1.40",
@@ -236,11 +236,17 @@ Antes de declarar terminado un módulo/feature verifico y reporto **explícitame
 }
 ```
 
-### 6.3 ⚠️ TRAMPA VERIFICADA — Shield vs spatie/laravel-permission v8
+### 6.3 Shield vs spatie/laravel-permission v8 — RESUELTO
 
-`bezhansalleh/filament-shield` 4.2 declara `"spatie/laravel-permission": "^6.0|^7.0"`, pero la última estable de permission es **8.0** (30-may-2026). Un `composer require spatie/laravel-permission` sin restringir resuelve a 8.x y **deja Shield sin instalar, o Composer degrada Shield en silencio**.
+**Historia, porque el método importa más que el dato.** Este párrafo decía que Shield no admitía permission v8 y fijaba el constraint en `^7.4`. Era cierto con Shield **4.2**. Shield **4.3.1** declara `"spatie/laravel-permission": "^6.0|^7.0|^8.0"` y el proyecto corre en **8.x** desde el 2-ago-2026.
 
-**Regla:** el constraint queda fijado en `^7.4` en `composer.json` y se revisa solo cuando Shield publique soporte de v8. La rama 7.x soporta Laravel 13 y PHP 8.3+ sin problema.
+**Cómo se verificó** (esto es lo que hay que repetir, no lo de arriba):
+
+1. `composer.lock` instalado → la sección `require` del paquete que consume. Es la fuente más dura que existe, no depende de memoria ni de Packagist.
+2. La guía de upgrade oficial del paquete que sube.
+3. El config y las migraciones de la versión nueva, **antes** de instalar, buscando claves eliminadas que migraciones ya aplicadas puedan estar leyendo (§9.F.3).
+
+**El upgrade v7 → v8 resultó chico:** un solo breaking change, la firma de `findByName()` y `findOrCreate()` en `Contracts\Role` y `Contracts\Permission`, que ahora aceptan `BackedEnum|string`. Solo afecta a quien implemente esos contratos con modelos propios; este proyecto usa los del paquete. Config y migración de v8: mismas tablas, mismas columnas, mismas claves.
 
 ### 6.4 Reglas de versiones
 
@@ -392,6 +398,8 @@ Heredado de MAYAP y adaptado a este stack. Cito la regla cuando aplique. **Toda 
 
 13. **`->numeric()` de Filament CASTEA el estado a int/float** — registra un `NumberStateCast`. En cualquier campo de dinero o de área eso viola el §8.3.1 y llega al modelo como `float`. Usar `MontoField` y `AreaField`, que reemplazan `->numeric()` por sus tres efectos sin el cast: `inputMode('decimal')` (teclado numérico en celular, §14), `rule('numeric')` y `step`. En enteros de verdad —cantidades, contadores— `->numeric()` está bien.
 
+14. **La notación de punto en `TextEntry::make('columna.llave')` sobre una columna JSON RESUELVE UN ARRAY** y Filament llama a `formatStateUsing` **una vez por elemento**, uniendo los resultados con coma. Un callback que hace `is_array($state) ? json_encode(...) : '—'` recibe strings sueltos, nunca entra al `is_array`, y la pantalla muestra `—, —` con el dato **intacto en la base**. Falla mostrando algo, que es la peor forma de fallar. Patrón correcto: `->state(fn (Modelo $record) => ...)` recibiendo el registro entero y navegando a mano. Encontrado en `ActivityLogResource`, en la pantalla de auditoría — la que existe justamente para que se pueda confiar en lo que se ve.
+
 ### B. PHPStan nivel 7 (Larastan 3)
 
 1. **`nullsafe.neverNull`**: Larastan tipa BelongsTo como no-nulo → `$x?->prop ?? 'default'` falla. Chequear null explícito primero y luego acceder directo.
@@ -444,7 +452,7 @@ Heredado de MAYAP y adaptado a este stack. Cito la regla cuando aplique. **Toda 
 
 ### F. Reglas nuevas del proyecto (se agregan aquí conforme aparezcan)
 
-1. *(2-ago-2026)* Shield 4.2 no admite `spatie/laravel-permission` v8 → constraint fijado en `^7.4` (§6.3).
+1. *(2-ago-2026, **corregida el mismo dia**)* Shield **4.2** no admitia `spatie/laravel-permission` v8; Shield **4.3.1** si. La regla que sobrevive no es la version, es el metodo: el constraint de un paquete que otro paquete consume se lee del `composer.lock` instalado, no de la memoria ni de un blog. Ver §6.3.
 2. *(2-ago-2026)* Livewire 4 SFC no se usan: Pint no formatea el PHP embebido.
 3. *(2-ago-2026)* **Un paquete puede eliminar claves de `config/` que migraciones YA APLICADAS siguen leyendo.** activitylog v5 quitó `table_name` y `database_connection`; sus tres migraciones de la v4 las usaban dentro de `Schema::create(config(...))`. Publicar el config nuevo tal cual deja `migrate:fresh` —o sea, cada test— reventando con `Schema::create(null)`. Al subir un paquete mayor: `grep` de las claves del config viejo en `database/migrations/` ANTES de reemplazarlo. Las claves huérfanas se conservan como **literales** (nunca `env()`, o alguien cambia el nombre de la tabla y la migración crea una que el modelo jamás lee) con el comentario de por qué: el §12 hace inmutable a la migración, no al config.
 
