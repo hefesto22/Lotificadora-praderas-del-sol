@@ -450,11 +450,15 @@ Heredado de MAYAP y adaptado a este stack. Cito la regla cuando aplique. **Toda 
 7. El seeder de roles ES la matriz de verdad. Tras tocar permisos: seed + `permission:cache-reset` + hard refresh.
 8. Base: rate limiting en login y exports; secretos solo en `.env` + `config()`; **PII (DNI, RTN, teléfono) fuera de logs** — el filtro `FilterSensitiveData` ya existe, mantenerlo actualizado; validación de mime real en uploads; documentos en disco privado con URL firmada.
 
+9. **Un modelo que vive en `vendor/` NO descubre su policy solo, y Filament sin policy NO deniega: PERMITE.** El autodescubrimiento de Laravel mapea `App\Models\X` → `App\Policies\XPolicy`; `Spatie\Activitylog\Models\Activity` y `Spatie\Permission\Models\Role` quedan fuera de ese mapeo. Y `get_authorization_response()` de Filament, cuando no encuentra policy, corre los *before callbacks* del Gate y termina en **`Response::allow()`**. Resultado: la bitácora completa y la pantalla de Roles abiertas a cualquier usuario del panel. `shield:generate` lo avisa marcando la policy como *"requires registration"*, aviso que pasa desapercibido entre decenas de permisos generados. **Regla: todo Resource cuyo modelo esté fuera de `App\Models` lleva su `Gate::policy()` explícito en `AppServiceProvider`, y un test que exija 403 para un rol sin permisos.** El registro se puede borrar en un refactor; el test no.
+
 ### F. Reglas nuevas del proyecto (se agregan aquí conforme aparezcan)
 
 1. *(2-ago-2026, **corregida el mismo dia**)* Shield **4.2** no admitia `spatie/laravel-permission` v8; Shield **4.3.1** si. La regla que sobrevive no es la version, es el metodo: el constraint de un paquete que otro paquete consume se lee del `composer.lock` instalado, no de la memoria ni de un blog. Ver §6.3.
 2. *(2-ago-2026)* Livewire 4 SFC no se usan: Pint no formatea el PHP embebido.
 3. *(2-ago-2026)* **Un paquete puede eliminar claves de `config/` que migraciones YA APLICADAS siguen leyendo.** activitylog v5 quitó `table_name` y `database_connection`; sus tres migraciones de la v4 las usaban dentro de `Schema::create(config(...))`. Publicar el config nuevo tal cual deja `migrate:fresh` —o sea, cada test— reventando con `Schema::create(null)`. Al subir un paquete mayor: `grep` de las claves del config viejo en `database/migrations/` ANTES de reemplazarlo. Las claves huérfanas se conservan como **literales** (nunca `env()`, o alguien cambia el nombre de la tabla y la migración crea una que el modelo jamás lee) con el comentario de por qué: el §12 hace inmutable a la migración, no al config.
+
+4. *(3-ago-2026)* **`shield:generate --all` REESCRIBE las policies existentes.** Los docblocks, comentarios o reglas de negocio que se hayan escrito a mano dentro de una Policy se pierden sin aviso, y Pint después reformatea los archivos regenerados como si fueran nuestros. La lógica que no sea `can('Accion:Modelo')` no vive en la Policy: va al Resource (`getEloquentQuery`, `canEdit`) o a un scope del modelo, que Shield no toca. Verificar con `git diff app/Policies/` después de cada corrida.
 
 ---
 
