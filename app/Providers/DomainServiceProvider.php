@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use Override;
 
 /**
  * Service Provider del dominio Grupo Olympo.
@@ -27,6 +28,7 @@ use Illuminate\Support\ServiceProvider;
  */
 final class DomainServiceProvider extends ServiceProvider
 {
+    #[Override]
     public function register(): void
     {
         // Ejemplo (descomentar cuando exista el binding):

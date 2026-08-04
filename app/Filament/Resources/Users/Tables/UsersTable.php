@@ -34,7 +34,7 @@ class UsersTable
                 ImageColumn::make('avatar_url')
                     ->label('')
                     ->circular()
-                    ->defaultImageUrl(fn ($record) => 'https://ui-avatars.com/api/?name='.urlencode($record->name).'&color=FFFFFF&background=F59E0B'),
+                    ->defaultImageUrl(fn ($record): string => 'https://ui-avatars.com/api/?name='.urlencode($record->name).'&color=FFFFFF&background=F59E0B'),
 
                 TextColumn::make('name')
                     ->label('Nombre')
@@ -63,7 +63,7 @@ class UsersTable
                     ->label('Activo')
                     ->onColor('success')
                     ->offColor('danger')
-                    ->beforeStateUpdated(function (Model $record) {
+                    ->beforeStateUpdated(function (Model $record): void {
                         if ($record->hasRole('super_admin')) {
                             throw new Exception('No se puede desactivar al super administrador.');
                         }
@@ -108,7 +108,7 @@ class UsersTable
                 ViewAction::make(),
                 EditAction::make(),
                 DeleteAction::make()
-                    ->before(function (Model $record) {
+                    ->before(function (Model $record): void {
                         if ($record->hasRole('super_admin')) {
                             throw new Exception('No se puede eliminar al super administrador.');
                         }
@@ -119,8 +119,8 @@ class UsersTable
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make()
-                        ->before(function ($records) {
-                            $records->each(function (Model $record) {
+                        ->before(function ($records): void {
+                            $records->each(function (Model $record): void {
                                 if ($record->hasRole('super_admin')) {
                                     throw new Exception('No se puede eliminar al super administrador.');
                                 }

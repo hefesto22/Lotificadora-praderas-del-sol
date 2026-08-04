@@ -14,6 +14,7 @@ use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
+use Override;
 
 /**
  * Página de configuración del branding del sistema.
@@ -29,23 +30,28 @@ use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
  */
 class BrandingSettingsPage extends Page
 {
+    #[Override]
     protected string $view = 'filament.pages.branding-settings';
 
+    #[Override]
     public function getTitle(): string
     {
         return 'Configuración del Sistema';
     }
 
+    #[Override]
     public static function getNavigationLabel(): string
     {
         return 'Configuración';
     }
 
+    #[Override]
     public static function getNavigationGroup(): ?string
     {
         return 'Sistema';
     }
 
+    #[Override]
     public static function getNavigationSort(): ?int
     {
         return 99;
@@ -142,6 +148,7 @@ class BrandingSettingsPage extends Page
         $this->redirect(static::getUrl());
     }
 
+    #[Override]
     public static function canAccess(): bool
     {
         $user = auth()->user();

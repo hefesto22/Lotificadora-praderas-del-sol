@@ -267,7 +267,15 @@ class Lote extends Model
 
             $valores = array_values($vertice);
 
-            if (count($valores) < 2 || ! is_numeric($valores[0]) || ! is_numeric($valores[1])) {
+            if (count($valores) < 2) {
+                continue;
+            }
+
+            if (! is_numeric($valores[0])) {
+                continue;
+            }
+
+            if (! is_numeric($valores[1])) {
                 continue;
             }
 

@@ -53,6 +53,7 @@ class Cuota extends Model
     /**
      * @var array<string, mixed>
      */
+    #[Override]
     protected $attributes = [
         'monto_pagado' => '0.00',
     ];

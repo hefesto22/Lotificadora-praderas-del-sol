@@ -21,40 +21,51 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Override;
 use Spatie\Activitylog\Models\Activity;
 
 class ActivityLogResource extends Resource
 {
+    #[Override]
     protected static ?string $model = Activity::class;
 
+    #[Override]
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentList;
 
+    #[Override]
     protected static ?string $modelLabel = 'Registro de Actividad';
 
+    #[Override]
     protected static ?string $pluralModelLabel = 'Registros de Actividad';
 
+    #[Override]
     protected static ?int $navigationSort = 99;
 
+    #[Override]
     public static function getNavigationGroup(): ?string
     {
         return 'Administración';
     }
 
+    #[Override]
     public static function canCreate(): bool
     {
         return false;
     }
 
+    #[Override]
     public static function canEdit($record): bool
     {
         return false;
     }
 
+    #[Override]
     public static function canDelete($record): bool
     {
         return false;
     }
 
+    #[Override]
     public static function table(Table $table): Table
     {
         return $table
@@ -87,13 +98,13 @@ class ActivityLogResource extends Resource
             ->filters([
                 SelectFilter::make('log_name')
                     ->label('Tipo de log')
-                    ->options(fn () => Activity::distinct()->pluck('log_name', 'log_name')->toArray()),
+                    ->options(fn () => Activity::query()->distinct()->pluck('log_name', 'log_name')->toArray()),
                 SelectFilter::make('subject_type')
                     ->label('Modelo')
-                    ->options(fn () => Activity::distinct()
+                    ->options(fn () => Activity::query()->distinct()
                         ->whereNotNull('subject_type')
                         ->pluck('subject_type')
-                        ->mapWithKeys(fn ($type) => [$type => class_basename($type)])
+                        ->mapWithKeys(fn ($type): array => [$type => class_basename($type)])
                         ->toArray()),
                 Filter::make('created_at')
                     ->indicateUsing(function (array $data): ?string {
@@ -107,11 +118,9 @@ class ActivityLogResource extends Resource
                         DatePicker::make('from')->label('Desde'),
                         DatePicker::make('until')->label('Hasta'),
                     ])
-                    ->query(function (Builder $query, array $data): Builder {
-                        return $query
-                            ->when($data['from'] ?? null, fn (Builder $query, $date) => $query->whereDate('created_at', '>=', $date))
-                            ->when($data['until'] ?? null, fn (Builder $query, $date) => $query->whereDate('created_at', '<=', $date));
-                    }),
+                    ->query(fn (Builder $query, array $data): Builder => $query
+                        ->when($data['from'] ?? null, fn (Builder $query, $date) => $query->whereDate('created_at', '>=', $date))
+                        ->when($data['until'] ?? null, fn (Builder $query, $date) => $query->whereDate('created_at', '<=', $date))),
             ])
             ->recordActions([
                 ViewAction::make(),
@@ -119,6 +128,7 @@ class ActivityLogResource extends Resource
             ->toolbarActions([]);
     }
 
+    #[Override]
     public static function infolist(Schema $schema): Schema
     {
         return $schema
@@ -201,6 +211,7 @@ class ActivityLogResource extends Resource
         return "```json\n".$json."\n```";
     }
 
+    #[Override]
     public static function getPages(): array
     {
         return [

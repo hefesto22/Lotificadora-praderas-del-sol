@@ -10,6 +10,7 @@ use App\Domain\Plano\ParametrosDeGeneracion;
 use App\Models\Bloque;
 use App\Models\Lote;
 use App\Models\Proyecto;
+use Illuminate\Database\Eloquent\Collection;
 
 /**
  * Parametros de prueba: un bloque de 2x3 lotes de 10 x 25 varas.
@@ -125,22 +126,22 @@ describe('Generador — geometria', function (): void {
 
 describe('Generador — se niega a hacer un desastre', function (): void {
     test('una tanda absurda se rechaza antes de calcular nada', function (): void {
-        expect(fn () => new GeneradorDeLotes()->previsualizar(parametrosDeGeneracion(filas: 100, columnas: 100)))
+        expect(fn (): array => new GeneradorDeLotes()->previsualizar(parametrosDeGeneracion(filas: 100, columnas: 100)))
             ->toThrow(GeneracionDeLotesException::class);
     });
 
     test('un frente de cero no es un lote', function (): void {
-        expect(fn () => parametrosDeGeneracion(frenteVaras: '0'))
+        expect(fn (): ParametrosDeGeneracion => parametrosDeGeneracion(frenteVaras: '0'))
             ->toThrow(ValueObjectInvalidoException::class);
     });
 
     test('una medida que no es numero se rechaza', function (): void {
-        expect(fn () => parametrosDeGeneracion(fondoVaras: 'veinticinco'))
+        expect(fn (): ParametrosDeGeneracion => parametrosDeGeneracion(fondoVaras: 'veinticinco'))
             ->toThrow(ValueObjectInvalidoException::class);
     });
 
     test('filas en cero se rechaza', function (): void {
-        expect(fn () => parametrosDeGeneracion(filas: 0))->toThrow(ValueObjectInvalidoException::class);
+        expect(fn (): ParametrosDeGeneracion => parametrosDeGeneracion(filas: 0))->toThrow(ValueObjectInvalidoException::class);
     });
 });
 
@@ -191,7 +192,7 @@ describe('Generador — creacion en la base', function (): void {
     test('si un numero ya existe no se crea NINGUNO', function (): void {
         Lote::factory()->enBloque($this->bloque)->create(['numero' => '2']);
 
-        expect(fn () => new GeneradorDeLotes()->generar($this->bloque, parametrosDeGeneracion()))
+        expect(fn (): Collection => new GeneradorDeLotes()->generar($this->bloque, parametrosDeGeneracion()))
             ->toThrow(GeneracionDeLotesException::class);
 
         expect(Lote::query()->count())->toBe(1);

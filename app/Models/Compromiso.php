@@ -35,6 +35,7 @@ use Spatie\Activitylog\Support\LogOptions;
     'proyecto_id',
     'lote_id',
     'cliente_id',
+    'venta_id',
     'tipo',
     'estado',
     'area_varas',
@@ -109,6 +110,21 @@ class Compromiso extends Model
     public function cliente(): BelongsTo
     {
         return $this->belongsTo(Cliente::class);
+    }
+
+    /**
+     * El expediente al que pertenece este lote, si tiene uno.
+     *
+     * Es nula en dos casos legitimos: los apartados —que no pertenecen a
+     * ninguna venta y nunca pueden hacerlo, hay un CHECK— y los lotes que
+     * ya estaban vendidos antes de que existiera el sistema, cargados con
+     * dueno y valor pero sin expediente (R15).
+     *
+     * @return BelongsTo<Venta, $this>
+     */
+    public function venta(): BelongsTo
+    {
+        return $this->belongsTo(Venta::class);
     }
 
     // ─── Dinero ───────────────────────────────────────────────────────

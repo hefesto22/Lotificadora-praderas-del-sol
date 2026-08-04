@@ -7,6 +7,8 @@ namespace App\Console\Commands;
 use App\Domain\Enums\EstadoLote;
 use App\Models\Lote;
 use App\Models\Proyecto;
+use Illuminate\Console\Attributes\Description;
+use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -26,15 +28,13 @@ use Illuminate\Support\Facades\DB;
  * la excepción y atajarla: un comando de consola tiene que contestar con
  * una línea legible, no con un stack trace.
  */
-final class EliminarProyecto extends Command
-{
-    protected $signature = 'proyecto:eliminar
+#[Description('Borra un proyecto con sus bloques, lotes, calles y compromisos')]
+#[Signature('proyecto:eliminar
                             {codigo* : Código del proyecto, por ejemplo RVV}
                             {--forzar : No preguntar}
-                            {--liberar : Liberar antes los lotes apartados o vendidos}';
-
-    protected $description = 'Borra un proyecto con sus bloques, lotes, calles y compromisos';
-
+                            {--liberar : Liberar antes los lotes apartados o vendidos}')]
+final class EliminarProyecto extends Command
+{
     public function handle(): int
     {
         /** @var list<string> $codigos */

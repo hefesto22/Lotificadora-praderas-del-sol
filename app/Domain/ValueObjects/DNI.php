@@ -30,12 +30,12 @@ use Stringable;
  */
 final readonly class DNI implements Stringable
 {
-    public const REGEX = '/^\d{13}$/';
+    public const string REGEX = '/^\d{13}$/';
 
-    public const LONGITUD = 13;
+    public const int LONGITUD = 13;
 
     /** El RNP emite desde 1893; el margen alto cubre recién nacidos. */
-    private const ANIO_MINIMO = 1893;
+    private const int ANIO_MINIMO = 1893;
 
     public function __construct(public string $valor)
     {

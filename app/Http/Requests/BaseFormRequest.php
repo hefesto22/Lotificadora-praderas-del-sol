@@ -6,6 +6,7 @@ namespace App\Http\Requests;
 
 use App\Domain\ValueObjects\RTN;
 use Illuminate\Foundation\Http\FormRequest;
+use Override;
 
 /**
  * Form Request base para Grupo Olympo.
@@ -103,6 +104,7 @@ abstract class BaseFormRequest extends FormRequest
     /**
      * @return array<string, string>
      */
+    #[Override]
     public function messages(): array
     {
         return [

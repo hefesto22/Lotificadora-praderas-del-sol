@@ -99,7 +99,7 @@ class Cliente extends Model
     {
         return Attribute::make(
             set: static function (?string $valor): ?string {
-                if (! filled($valor)) {
+                if (blank($valor)) {
                     return null;
                 }
 

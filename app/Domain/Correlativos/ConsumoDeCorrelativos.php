@@ -119,7 +119,7 @@ final readonly class ConsumoDeCorrelativos
             throw CorrelativoInvalidoException::porFaltarTransaccion($tipo);
         }
 
-        $proyectoId = $proyecto === null ? null : (int) $proyecto->getKey();
+        $proyectoId = $proyecto instanceof Proyecto ? (int) $proyecto->getKey() : null;
 
         $fila = $this->bloquear($tipo, $proyectoId);
 

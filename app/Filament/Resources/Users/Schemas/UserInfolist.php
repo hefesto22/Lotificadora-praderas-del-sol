@@ -23,7 +23,7 @@ class UserInfolist
                             ImageEntry::make('avatar_url')
                                 ->label('Foto de perfil')
                                 ->circular()
-                                ->defaultImageUrl(fn ($record) => 'https://ui-avatars.com/api/?name='.urlencode($record->name).'&color=FFFFFF&background=F59E0B'),
+                                ->defaultImageUrl(fn ($record): string => 'https://ui-avatars.com/api/?name='.urlencode($record->name).'&color=FFFFFF&background=F59E0B'),
                             TextEntry::make('name')
                                 ->label('Nombre completo'),
                             TextEntry::make('email')

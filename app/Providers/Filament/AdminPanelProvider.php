@@ -39,12 +39,12 @@ class AdminPanelProvider extends PanelProvider
             // Cada proyecto que herede la plantilla configura su logo,
             // favicon y color desde el panel sin tocar código.
             ->brandName(fn (): string => env('APP_BRAND_NAME', config('app.name', 'Olympo')))
-            ->brandLogo(fn (): ?string => self::brandingValue('logoUrl'))
-            ->darkModeBrandLogo(fn (): ?string => self::brandingValue('logoUrl'))
+            ->brandLogo(fn (): ?string => $this->brandingValue('logoUrl'))
+            ->darkModeBrandLogo(fn (): ?string => $this->brandingValue('logoUrl'))
             ->brandLogoHeight('2.5rem')
-            ->favicon(fn (): ?string => self::brandingValue('faviconUrl'))
+            ->favicon(fn (): ?string => $this->brandingValue('faviconUrl'))
             ->colors([
-                'primary' => self::primaryColorPalette(),
+                'primary' => $this->primaryColorPalette(),
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
@@ -85,7 +85,7 @@ class AdminPanelProvider extends PanelProvider
      * `migrate` del setup), evitamos que Filament muera intentando leer
      * la tabla. En ese caso retornamos null y Filament usa su default.
      */
-    private static function brandingValue(string $atributo): ?string
+    private function brandingValue(string $atributo): ?string
     {
         try {
             $valor = BrandingSetting::current()->{$atributo} ?? null;
@@ -102,7 +102,7 @@ class AdminPanelProvider extends PanelProvider
      *
      * @return array<int|string, string>
      */
-    private static function primaryColorPalette(): array
+    private function primaryColorPalette(): array
     {
         try {
             $hex = BrandingSetting::current()->primary_color;

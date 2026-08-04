@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Domain\Plano\Dxf\ArchivoDxf;
 use App\Domain\Plano\Dxf\ArchivoDxfInvalidoException;
 use App\Domain\Plano\Dxf\ExtractorDeGeometria;
 use App\Domain\Plano\Dxf\LectorDxf;
@@ -124,12 +125,12 @@ describe('Lector — el formato real', function (): void {
     });
 
     test('un archivo que no es DXF se rechaza con un mensaje util', function (): void {
-        expect(fn () => new LectorDxf()->leer("esto no es un DXF\nen absoluto\n"))
+        expect(fn (): ArchivoDxf => new LectorDxf()->leer("esto no es un DXF\nen absoluto\n"))
             ->toThrow(ArchivoDxfInvalidoException::class);
     });
 
     test('un archivo vacio se rechaza', function (): void {
-        expect(fn () => new LectorDxf()->leer(''))->toThrow(ArchivoDxfInvalidoException::class);
+        expect(fn (): ArchivoDxf => new LectorDxf()->leer(''))->toThrow(ArchivoDxfInvalidoException::class);
     });
 });
 

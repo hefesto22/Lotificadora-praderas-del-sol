@@ -80,7 +80,7 @@ final readonly class AnalisisDeDxf
      */
     private function porVocabulario(array $vocabulario): ?string
     {
-        foreach ($this->capas as $capa => $_) {
+        foreach (array_keys($this->capas) as $capa) {
             $normal = OpcionesDeImportacion::normalizar($capa);
 
             foreach ($vocabulario as $palabra) {

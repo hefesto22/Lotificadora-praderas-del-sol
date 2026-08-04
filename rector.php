@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Rector\Config\RectorConfig;
 use Rector\Set\ValueObject\LevelSetList;
+use RectorLaravel\Rector\FuncCall\AppToResolveRector;
+use RectorLaravel\Rector\StaticCall\CarbonToDateFacadeRector;
 use RectorLaravel\Set\LaravelLevelSetList;
 use RectorLaravel\Set\LaravelSetList;
 
@@ -25,6 +27,37 @@ return RectorConfig::configure()
         // las reescriba rompería esa garantía y, peor, produciría diffs en
         // archivos que en producción ya corrieron.
         __DIR__.'/database/migrations',
+
+        /*
+         * Reescribe `app(Servicio::class)` como `resolve(Servicio::class)`.
+         *
+         * El §9.C1 del documento rector fija lo contrario, textual:
+         * "Services SIEMPRE con `app(Servicio::class)`, nunca
+         * `new Servicio(...)`". Las dos funciones son idénticas —
+         * `resolve()` llama a `app()`— así que el cambio no aporta nada
+         * técnico y sí rompe una convención que ya está escrita y aplicada
+         * en toda la suite.
+         *
+         * Si algún día se prefiere `resolve()`, se cambia primero el §9.C1
+         * y después se quita este skip. En ese orden.
+         */
+        AppToResolveRector::class,
+
+        /*
+         * Reescribe `Carbon::parse(...)` como `Date::parse(...)`.
+         *
+         * La fachada `Date` devuelve la clase que esté configurada, que por
+         * defecto es `Illuminate\Support\Carbon` — MUTABLE. El dominio usa
+         * `CarbonImmutable` a propósito: una fecha de negocio que alguien
+         * pueda mutar por accidente a través de una referencia compartida
+         * es exactamente el tipo de error que aparece meses después en un
+         * vencimiento corrido.
+         *
+         * Además rompería los tipos: `PlanDeCuotas` y `RegistroDeVentas`
+         * declaran `CarbonImmutable` en sus firmas, y PHPStan nivel 7 lo
+         * verifica.
+         */
+        CarbonToDateFacadeRector::class,
     ])
 
     // PHP 8.5. UP_TO_PHP_84 queda para las modernizaciones acumuladas de

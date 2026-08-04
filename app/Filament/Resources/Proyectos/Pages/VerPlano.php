@@ -31,6 +31,7 @@ use Filament\Resources\Pages\Concerns\InteractsWithRecord;
 use Filament\Resources\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Validation\Rules\Unique;
+use Override;
 
 /**
  * El plano del proyecto: los lotes dibujados y pintados por estado.
@@ -43,8 +44,10 @@ class VerPlano extends Page
 {
     use InteractsWithRecord;
 
+    #[Override]
     protected static string $resource = ProyectoResource::class;
 
+    #[Override]
     protected string $view = 'filament.resources.proyectos.pages.ver-plano';
 
     public function mount(int|string $record): void
@@ -52,11 +55,13 @@ class VerPlano extends Page
         $this->record = $this->resolveRecord($record);
     }
 
+    #[Override]
     public function getTitle(): string
     {
         return 'Plano de '.$this->getRecord()->getAttribute('nombre');
     }
 
+    #[Override]
     public function getHeading(): string
     {
         return $this->getTitle();
@@ -65,6 +70,7 @@ class VerPlano extends Page
     /**
      * @return array<int, Action>
      */
+    #[Override]
     protected function getHeaderActions(): array
     {
         return [
@@ -167,7 +173,7 @@ class VerPlano extends Page
             ->modalDescription('Queda reservado a nombre del cliente. Se puede liberar despues sin consecuencias.')
             ->modalSubmitActionLabel('Apartar')
             ->schema([
-                self::selectorDeCliente('¿A nombre de quien?'),
+                $this->selectorDeCliente('¿A nombre de quien?'),
 
                 TextInput::make('monto_senia')
                     ->label('Seña recibida (opcional)')
@@ -217,7 +223,7 @@ class VerPlano extends Page
             )
             ->modalSubmitActionLabel('Registrar la venta')
             ->schema([
-                self::selectorDeCliente('¿Quien compra?'),
+                $this->selectorDeCliente('¿Quien compra?'),
 
                 Textarea::make('observaciones')
                     ->label('Observaciones')
@@ -263,7 +269,7 @@ class VerPlano extends Page
                 $this->conElLote($arguments, function (Lote $lote) use ($data): string {
                     new RegistroDeCompromisos()->liberar($lote, $this->texto($data, 'motivo', 'Sin motivo'));
 
-                    return (string) $lote->getAttribute('codigo').' volvio a estar disponible.';
+                    return $lote->getAttribute('codigo').' volvio a estar disponible.';
                 });
             });
     }
@@ -317,21 +323,21 @@ class VerPlano extends Page
      * Las opciones se resuelven con un closure y no de una vez: asi el
      * cliente recien creado aparece en la lista sin recargar la pagina.
      */
-    private static function selectorDeCliente(string $etiqueta): Select
+    private function selectorDeCliente(string $etiqueta): Select
     {
         return Select::make('cliente_id')
             ->label($etiqueta)
             ->options(static fn (): array => self::clientesDisponibles())
             ->searchable()
             ->required()
-            ->createOptionForm(self::altaRapidaDeCliente())
+            ->createOptionForm($this->altaRapidaDeCliente())
             ->createOptionUsing(static fn (array $data): int => self::crearClienteRapido($data));
     }
 
     /**
      * @return array<int, mixed>
      */
-    private static function altaRapidaDeCliente(): array
+    private function altaRapidaDeCliente(): array
     {
         /*
          * Los indices unicos de `clientes` son PARCIALES: llevan
@@ -464,7 +470,7 @@ class VerPlano extends Page
 
                 Select::make('unidad')
                     ->label('¿En que unidad esta dibujado el plano?')
-                    ->options(self::unidadesDisponibles())
+                    ->options($this->unidadesDisponibles())
                     ->default((string) UnidadDxf::Metros->value)
                     ->required()
                     ->helperText('Se pregunta siempre, aunque el archivo lo declare: en planos de '.
@@ -538,7 +544,7 @@ class VerPlano extends Page
     /**
      * @return array<string, string>
      */
-    private static function unidadesDisponibles(): array
+    private function unidadesDisponibles(): array
     {
         $opciones = ['varas' => 'El plano ya esta dibujado en varas'];
 
@@ -594,6 +600,7 @@ class VerPlano extends Page
     /**
      * @return array<string, mixed>
      */
+    #[Override]
     protected function getViewData(): array
     {
         /** @var Proyecto $proyecto */

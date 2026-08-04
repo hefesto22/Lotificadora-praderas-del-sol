@@ -38,7 +38,7 @@ use RuntimeException;
  */
 class DemoSeeder extends Seeder
 {
-    private const PROYECTO = [
+    private const array PROYECTO = [
         'nombre'       => 'Residencial Praderas del Sol',
         'codigo'       => 'RPS',
         'municipio'    => 'Cucuyagua',
@@ -61,7 +61,7 @@ class DemoSeeder extends Seeder
      *
      * @var list<array{nombre: string, area: numeric-string, planificados: int, precio: numeric-string, cargar: int, base: numeric-string, paso: numeric-string}>
      */
-    private const BLOQUES = [
+    private const array BLOQUES = [
         ['nombre' => 'A', 'area' => '12500.0000', 'planificados' => 24, 'precio' => '2530.00', 'cargar' => 24, 'base' => '480.0000', 'paso' => '13.5750'],
         ['nombre' => 'B', 'area' => '9800.0000',  'planificados' => 18, 'precio' => '2380.00', 'cargar' => 18, 'base' => '412.5000', 'paso' => '9.2400'],
         ['nombre' => 'C', 'area' => '11200.0000', 'planificados' => 20, 'precio' => '2650.00', 'cargar' => 12, 'base' => '505.0000', 'paso' => '17.3325'],

@@ -12,6 +12,7 @@ use App\Domain\ValueObjects\Monto;
 use App\Models\Cliente;
 use App\Models\Compromiso;
 use App\Models\Lote;
+use App\Models\Venta;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -66,9 +67,24 @@ final readonly class RegistroDeCompromisos
      * Si venia apartado, el apartado se cierra como CONVERTIDO y tiene que
      * ser del mismo cliente: venderle a otro por encima de un apartado
      * vigente es, casi siempre, un error de quien carga.
+     *
+     * `$venta` es opcional y va al final a proposito, por dos razones:
+     *
+     * 1. Los lotes que ya estaban vendidos ANTES de que existiera el
+     *    sistema se cargan sin expediente: tienen dueno y valor, pero no
+     *    prima ni plan de cuotas (R15, los datos llegan en papel).
+     * 2. Al final no rompe a ningun llamador posicional que ya exista.
+     *
+     * Cuando la venta viene, la pasa `RegistroDeVentas::activar()` desde
+     * adentro de su transaccion, y el compromiso queda ligado a su
+     * expediente.
      */
-    public function vender(Lote $lote, Cliente $cliente, ?string $observaciones = null): Compromiso
-    {
+    public function vender(
+        Lote $lote,
+        Cliente $cliente,
+        ?string $observaciones = null,
+        ?Venta $venta = null,
+    ): Compromiso {
         $estado = $this->estadoDe($lote);
         $codigo = $this->codigoDe($lote);
 
@@ -83,7 +99,7 @@ final readonly class RegistroDeCompromisos
         $vigente = $this->vigenteDe($lote);
 
         if ($estado === EstadoLote::Apartado) {
-            if ($vigente === null) {
+            if (! $vigente instanceof Compromiso) {
                 throw CompromisoInvalidoException::porFaltarCompromisoVigente($codigo, $estado->etiqueta());
             }
 
@@ -95,7 +111,7 @@ final readonly class RegistroDeCompromisos
             }
         }
 
-        return DB::transaction(function () use ($lote, $cliente, $observaciones, $vigente): Compromiso {
+        return DB::transaction(function () use ($lote, $cliente, $observaciones, $vigente, $venta): Compromiso {
             /*
              * El apartado se cierra ANTES de crear la venta. El indice
              * unico parcial solo admite un compromiso vigente por lote, y
@@ -107,13 +123,14 @@ final readonly class RegistroDeCompromisos
                 'cerrado_el' => today(),
             ]);
 
-            $venta = $this->crear($lote, $cliente, TipoCompromiso::Venta, [
+            $compromiso = $this->crear($lote, $cliente, TipoCompromiso::Venta, [
                 'observaciones' => $observaciones,
+                'venta_id'      => $venta?->getKey(),
             ]);
 
             $lote->update(['estado' => EstadoLote::Vendido]);
 
-            return $venta;
+            return $compromiso;
         });
     }
 
@@ -126,7 +143,7 @@ final readonly class RegistroDeCompromisos
         $codigo = $this->codigoDe($lote);
         $vigente = $this->vigenteDe($lote);
 
-        if ($vigente === null) {
+        if (! $vigente instanceof Compromiso) {
             throw CompromisoInvalidoException::porFaltarCompromisoVigente($codigo, $estado->etiqueta());
         }
 

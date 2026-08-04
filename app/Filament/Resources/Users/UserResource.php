@@ -21,36 +21,47 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
+use Override;
 
 class UserResource extends Resource
 {
+    #[Override]
     protected static ?string $model = User::class;
 
+    #[Override]
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;
 
+    #[Override]
     protected static ?string $recordTitleAttribute = 'name';
 
+    #[Override]
     protected static ?string $modelLabel = 'Usuario';
 
+    #[Override]
     protected static ?string $pluralModelLabel = 'Usuarios';
 
+    #[Override]
     protected static ?int $navigationSort = 1;
 
+    #[Override]
     public static function getNavigationGroup(): ?string
     {
         return 'Administración';
     }
 
+    #[Override]
     public static function form(Schema $schema): Schema
     {
         return UserForm::configure($schema);
     }
 
+    #[Override]
     public static function infolist(Schema $schema): Schema
     {
         return UserInfolist::configure($schema);
     }
 
+    #[Override]
     public static function table(Table $table): Table
     {
         return UsersTable::configure($table);
@@ -60,6 +71,7 @@ class UserResource extends Resource
      * Filtrar la query base: cada usuario solo ve su rama.
      * Super admin ve todos.
      */
+    #[Override]
     public static function getEloquentQuery(): Builder
     {
         /** @var User $user */
@@ -71,6 +83,7 @@ class UserResource extends Resource
     /**
      * Verificar si el usuario puede ver un registro específico.
      */
+    #[Override]
     public static function canView(Model $record): bool
     {
         /** @var User $user */
@@ -86,6 +99,7 @@ class UserResource extends Resource
     /**
      * Verificar si el usuario puede editar un registro específico.
      */
+    #[Override]
     public static function canEdit(Model $record): bool
     {
         /** @var User $user */
@@ -102,6 +116,7 @@ class UserResource extends Resource
      * Verificar si el usuario puede eliminar un registro específico.
      * No se puede eliminar a sí mismo ni al super admin.
      */
+    #[Override]
     public static function canDelete(Model $record): bool
     {
         /** @var User $user */
@@ -124,6 +139,7 @@ class UserResource extends Resource
         return in_array($record->id, $user->getVisibleUserIds());
     }
 
+    #[Override]
     public static function getRelations(): array
     {
         return [
@@ -131,6 +147,7 @@ class UserResource extends Resource
         ];
     }
 
+    #[Override]
     public static function getPages(): array
     {
         return [
@@ -141,6 +158,7 @@ class UserResource extends Resource
         ];
     }
 
+    #[Override]
     public static function getGloballySearchableAttributes(): array
     {
         return ['name', 'email'];

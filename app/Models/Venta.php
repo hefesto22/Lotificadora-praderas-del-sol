@@ -76,6 +76,7 @@ class Venta extends Model
      *
      * @var array<string, mixed>
      */
+    #[Override]
     protected $attributes = [
         'estado'          => EstadoVenta::Borrador->value,
         'area_total'      => '0.0000',
@@ -207,11 +208,18 @@ class Venta extends Model
      * dia el rendimiento lo exige, el §8.3.4 permite cachearla —pero
      * actualizada dentro de la misma transaccion y con un test que la
      * reconstruya desde cero.
+     *
+     * El `reorder()` no es decorativo: la relacion `cuotas()` viene con
+     * `orderBy('numero')`, y ese ORDER BY sobrevive al agregado. Postgres
+     * entonces exige que `numero` este en el GROUP BY o dentro de una
+     * funcion de agregacion, y tira un error 42803. MySQL lo dejaria pasar
+     * en silencio; Postgres tiene razon y avisa.
      */
     public function saldoPendiente(): Monto
     {
         /** @var string|int|null $suma */
         $suma = $this->cuotas()
+            ->reorder()
             ->selectRaw('COALESCE(SUM(monto - monto_pagado), 0) AS pendiente')
             ->value('pendiente');
 

@@ -45,7 +45,7 @@ final readonly class ExtractorDeGeometria
             if ($entidad->tipo === 'LWPOLYLINE') {
                 $poligono = $this->desdeLwpolyline($entidad);
 
-                if ($poligono !== null) {
+                if ($poligono instanceof PoligonoDxf) {
                     $poligonos[] = $poligono;
                 }
 
@@ -72,7 +72,7 @@ final readonly class ExtractorDeGeometria
 
             $poligono = $this->desdePolyline($entidad, $vertices);
 
-            if ($poligono !== null) {
+            if ($poligono instanceof PoligonoDxf) {
                 $poligonos[] = $poligono;
             }
 
@@ -94,7 +94,7 @@ final readonly class ExtractorDeGeometria
                 ? $this->desdeText($entidad)
                 : $this->desdeMtext($entidad);
 
-            if ($rotulo !== null) {
+            if ($rotulo instanceof RotuloDxf) {
                 $rotulos[] = $rotulo;
             }
         }
@@ -128,7 +128,11 @@ final readonly class ExtractorDeGeometria
                 continue;
             }
 
-            if ($abierto === null || $numero === null) {
+            if ($abierto === null) {
+                continue;
+            }
+
+            if ($numero === null) {
                 continue;
             }
 
@@ -175,7 +179,11 @@ final readonly class ExtractorDeGeometria
             $x = $vertice->numero(10);
             $y = $vertice->numero(20);
 
-            if ($x === null || $y === null) {
+            if ($x === null) {
+                continue;
+            }
+
+            if ($y === null) {
                 continue;
             }
 

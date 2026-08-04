@@ -101,7 +101,7 @@ final readonly class ImportadorDeDxf
 
         $deCalles = $opciones->capaDeCalles === null ? [] : array_values(array_filter(
             $poligonos,
-            static fn (PoligonoDxf $p): bool => $opciones->usaCapa($p->capa, (string) $opciones->capaDeCalles)
+            static fn (PoligonoDxf $p): bool => $opciones->usaCapa($p->capa, $opciones->capaDeCalles)
         ));
 
         if ($deLotes === []) {
@@ -130,7 +130,7 @@ final readonly class ImportadorDeDxf
                 continue;
             }
 
-            $numero = $this->numeroPara($poligono, $rotulos, $opciones, $transformar);
+            $numero = $this->numeroPara($poligono, $rotulos, $opciones);
 
             if ($numero === null) {
                 $sinRotulo++;
@@ -258,9 +258,8 @@ final readonly class ImportadorDeDxf
      * haber tambien el area rotulada, y el numero va al medio.
      *
      * @param list<RotuloDxf> $rotulos
-     * @param callable(array{float, float}): array{float, float} $transformar
      */
-    private function numeroPara(PoligonoDxf $poligono, array $rotulos, OpcionesDeImportacion $opciones, callable $transformar): ?string
+    private function numeroPara(PoligonoDxf $poligono, array $rotulos, OpcionesDeImportacion $opciones): ?string
     {
         [$centroX, $centroY] = $poligono->centro();
 
@@ -268,11 +267,15 @@ final readonly class ImportadorDeDxf
         $distanciaMenor = INF;
 
         foreach ($rotulos as $rotulo) {
-            if ($opciones->capaDeRotulos !== null && ! $opciones->usaCapa($rotulo->capa, (string) $opciones->capaDeRotulos)) {
+            if ($opciones->capaDeRotulos !== null && ! $opciones->usaCapa($rotulo->capa, $opciones->capaDeRotulos)) {
                 continue;
             }
 
-            if ($rotulo->numeroDeLote() === null || ! $poligono->contiene($rotulo->x, $rotulo->y)) {
+            if ($rotulo->numeroDeLote() === null) {
+                continue;
+            }
+
+            if (! $poligono->contiene($rotulo->x, $rotulo->y)) {
                 continue;
             }
 

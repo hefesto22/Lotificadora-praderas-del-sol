@@ -60,6 +60,7 @@ class Proyecto extends Model
      *
      * @var array<string, mixed>
      */
+    #[Override]
     protected $attributes = [
         'plano_esquematico' => false,
     ];

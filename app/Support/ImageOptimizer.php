@@ -42,7 +42,7 @@ final class ImageOptimizer
         string $directory,
         int $quality = 85,
     ): string {
-        $extension = strtolower((string) $file->getClientOriginalExtension());
+        $extension = strtolower($file->getClientOriginalExtension());
 
         // SVG: vectorial, no se convierte. Se guarda tal cual.
         if ($extension === 'svg') {
@@ -57,12 +57,8 @@ final class ImageOptimizer
         self::preservarTransparencia($imagen);
 
         if (! imagewebp($imagen, $rutaCompleta, $quality)) {
-            imagedestroy($imagen);
-
             throw new RuntimeException('No se pudo escribir el archivo WebP.');
         }
-
-        imagedestroy($imagen);
 
         return $rutaRelativa;
     }
@@ -80,7 +76,7 @@ final class ImageOptimizer
         string $directory,
         int $size = 64,
     ): string {
-        $extension = strtolower((string) $file->getClientOriginalExtension());
+        $extension = strtolower($file->getClientOriginalExtension());
 
         // ICO y SVG se guardan tal cual.
         if (in_array($extension, ['ico', 'svg'], true)) {
@@ -93,15 +89,10 @@ final class ImageOptimizer
 
         $original = self::cargarImagen($file->getRealPath());
         $cuadrado = self::redimensionarCuadrado($original, $size);
-        imagedestroy($original);
 
         if (! imagepng($cuadrado, $rutaCompleta, 9)) {
-            imagedestroy($cuadrado);
-
             throw new RuntimeException('No se pudo escribir el favicon PNG.');
         }
-
-        imagedestroy($cuadrado);
 
         return $rutaRelativa;
     }

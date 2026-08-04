@@ -29,9 +29,9 @@ final readonly class RTN implements Stringable
      * (b) los Value Objects deben ser auto-contenidos sin depender
      * del Service Container de Laravel (§7.5).
      */
-    public const REGEX = '/^\d{14}$/';
+    public const string REGEX = '/^\d{14}$/';
 
-    public const LONGITUD = 14;
+    public const int LONGITUD = 14;
 
     public function __construct(public string $valor)
     {

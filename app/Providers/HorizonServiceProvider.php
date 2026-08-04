@@ -7,8 +7,8 @@ namespace App\Providers;
 use App\Models\User;
 use BezhanSalleh\FilamentShield\Support\Utils as ShieldUtils;
 use Illuminate\Support\Facades\Gate;
-use Laravel\Horizon\Horizon;
 use Laravel\Horizon\HorizonApplicationServiceProvider;
+use Override;
 
 /**
  * Horizon Service Provider.
@@ -23,6 +23,7 @@ use Laravel\Horizon\HorizonApplicationServiceProvider;
  */
 class HorizonServiceProvider extends HorizonApplicationServiceProvider
 {
+    #[Override]
     public function boot(): void
     {
         parent::boot();
@@ -39,12 +40,13 @@ class HorizonServiceProvider extends HorizonApplicationServiceProvider
      * Filament Shield no protege rutas externas a Filament — Horizon vive
      * fuera del panel, por eso necesita su propio gate.
      */
+    #[Override]
     protected function gate(): void
     {
         Gate::define('viewHorizon', function (?User $user): bool {
             // En entornos no productivos, super_admin Y panel_user pueden ver.
             // En producción, SOLO super_admin.
-            if ($user === null) {
+            if (! $user instanceof User) {
                 return false;
             }
 
@@ -52,8 +54,11 @@ class HorizonServiceProvider extends HorizonApplicationServiceProvider
                 return $user->hasRole(ShieldUtils::getSuperAdminName());
             }
 
-            return $user->hasRole(ShieldUtils::getSuperAdminName())
-                || $user->hasRole(ShieldUtils::getPanelUserRoleName());
+            if ($user->hasRole(ShieldUtils::getSuperAdminName())) {
+                return true;
+            }
+
+            return $user->hasRole(ShieldUtils::getPanelUserRoleName());
         });
     }
 }

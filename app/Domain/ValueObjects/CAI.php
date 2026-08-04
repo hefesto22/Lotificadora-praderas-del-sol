@@ -20,7 +20,7 @@ use Stringable;
  */
 final readonly class CAI implements Stringable
 {
-    private const REGEX_FORMATO = '/^[A-F0-9]{6}-[A-F0-9]{6}-[A-F0-9]{6}-[A-F0-9]{6}-[A-F0-9]{6}-[A-F0-9]{2}$/';
+    private const string REGEX_FORMATO = '/^[A-F0-9]{6}-[A-F0-9]{6}-[A-F0-9]{6}-[A-F0-9]{6}-[A-F0-9]{6}-[A-F0-9]{2}$/';
 
     public function __construct(
         public string $valor,

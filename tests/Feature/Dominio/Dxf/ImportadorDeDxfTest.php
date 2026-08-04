@@ -7,6 +7,7 @@ use App\Domain\Exceptions\GeneracionDeLotesException;
 use App\Domain\Exceptions\ValueObjectInvalidoException;
 use App\Domain\Plano\Dxf\ImportadorDeDxf;
 use App\Domain\Plano\Dxf\OpcionesDeImportacion;
+use App\Domain\Plano\Dxf\ResultadoDeImportacion;
 use App\Domain\Plano\Dxf\UnidadDxf;
 use App\Models\Bloque;
 use App\Models\Calle;
@@ -80,7 +81,7 @@ describe('Importador — creacion de lotes', function (): void {
 
         expect($resultado->lotesCreados)->toBe(78)
             ->and($resultado->sinRotulo)->toBe(0)
-            ->and($numeros)->toBe(array_map('strval', range(1, 78)));
+            ->and($numeros)->toBe(array_map(strval(...), range(1, 78)));
     });
 
     test('el codigo se deriva solo del proyecto y el bloque', function (): void {
@@ -112,7 +113,7 @@ describe('Importador — creacion de lotes', function (): void {
     });
 
     test('el valor sale del area importada por el precio elegido', function (): void {
-        new ImportadorDeDxf()->importar($this->bloque, $this->dxf, opcionesDeImportacion(dibujadoEnVaras: true, precioVara: '1000.00'));
+        new ImportadorDeDxf()->importar($this->bloque, $this->dxf, opcionesDeImportacion(precioVara: '1000.00', dibujadoEnVaras: true));
 
         $lote = Lote::query()->where('numero', '5')->firstOrFail();
 
@@ -199,7 +200,7 @@ describe('Importador — calles y estado del plano', function (): void {
 
 describe('Importador — se niega a hacer un desastre', function (): void {
     test('una capa sin contornos falla antes de crear nada', function (): void {
-        expect(fn () => new ImportadorDeDxf()->importar($this->bloque, $this->dxf, opcionesDeImportacion(capaDeLotes: 'NO_EXISTE')))->toThrow(GeneracionDeLotesException::class);
+        expect(fn (): ResultadoDeImportacion => new ImportadorDeDxf()->importar($this->bloque, $this->dxf, opcionesDeImportacion(capaDeLotes: 'NO_EXISTE')))->toThrow(GeneracionDeLotesException::class);
 
         expect(Lote::query()->count())->toBe(0);
     });
@@ -215,6 +216,6 @@ describe('Importador — se niega a hacer un desastre', function (): void {
     test('un archivo que no declara unidades exige elegirla', function (): void {
         $sinUnidad = str_replace("\$INSUNITS\r\n 70\r\n6", "\$INSUNITS\r\n 70\r\n0", $this->dxf);
 
-        expect(fn () => new ImportadorDeDxf()->importar($this->bloque, $sinUnidad, opcionesDeImportacion(unidad: UnidadDxf::SinUnidad)))->toThrow(ValueObjectInvalidoException::class);
+        expect(fn (): ResultadoDeImportacion => new ImportadorDeDxf()->importar($this->bloque, $sinUnidad, opcionesDeImportacion(unidad: UnidadDxf::SinUnidad)))->toThrow(ValueObjectInvalidoException::class);
     });
 });

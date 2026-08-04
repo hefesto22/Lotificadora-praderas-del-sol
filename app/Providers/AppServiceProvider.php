@@ -15,11 +15,13 @@ use Illuminate\Auth\Events\Login;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
+use Override;
 use Spatie\Activitylog\Models\Activity;
 use Spatie\Permission\Models\Role;
 
 class AppServiceProvider extends ServiceProvider
 {
+    #[Override]
     public function register(): void
     {
         //

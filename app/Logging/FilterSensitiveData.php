@@ -22,7 +22,7 @@ use Monolog\LogRecord;
 final class FilterSensitiveData
 {
     /** @var array<string, string> */
-    private const PATTERNS = [
+    private const array PATTERNS = [
         // RTN: 14 dígitos consecutivos
         '/\b\d{14}\b/' => '[RTN_REDACTADO]',
         // Tarjetas: 16 dígitos consecutivos (con o sin espacios/guiones)
