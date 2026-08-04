@@ -34,14 +34,15 @@ describe('Cliente — normalización de entrada', function (): void {
     });
 
     /*
-    | §10.4: el auto-mayúsculas NO aplica a nombres de personas. Lo único
-    | que se toca son los espacios sobrantes, que producen duplicados
-    | invisibles al buscar.
+    | El nombre va en MAYÚSCULAS, igual que todo lo demás. Deroga la
+    | excepción que el §10.4 hacía para nombres de personas — ver
+    | docs/mayusculas.md. Los espacios sobrantes se siguen colapsando: son
+    | los que producen duplicados invisibles al buscar.
     */
-    test('el nombre conserva su casing y colapsa espacios', function (): void {
+    test('el nombre se guarda en mayúsculas y colapsa espacios', function (): void {
         $cliente = Cliente::factory()->create(['nombre' => '  María  de los   Ángeles Rodríguez ']);
 
-        expect($cliente->fresh()?->getAttribute('nombre'))->toBe('María de los Ángeles Rodríguez');
+        expect($cliente->fresh()?->getAttribute('nombre'))->toBe('MARÍA DE LOS ÁNGELES RODRÍGUEZ');
     });
 
     test('el teléfono se guarda en dígitos y se formatea al mostrar', function (): void {

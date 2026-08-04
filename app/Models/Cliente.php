@@ -87,6 +87,12 @@ class Cliente extends Model
      * catálogo. Solo se recortan los espacios sobrantes, que sí producen
      * duplicados invisibles al buscar.
      *
+     * DECISION DEL 3/8/2026: los nombres de personas TAMBIEN van en
+     * mayusculas. Deroga la excepcion que traia el §10.4 —"Maria de los
+     * Angeles no es un codigo de catalogo"— por pedido expreso: en este
+     * sistema todo se guarda y se muestra en mayusculas, sin excepciones.
+     * Ver docs/mayusculas.md.
+     *
      * @return Attribute<string|null, string|null>
      */
     protected function nombre(): Attribute
@@ -97,8 +103,22 @@ class Cliente extends Model
                     return null;
                 }
 
-                return (string) preg_replace('/\s+/u', ' ', trim($valor));
+                return mb_strtoupper((string) preg_replace('/\s+/u', ' ', trim($valor)), 'UTF-8');
             },
+        );
+    }
+
+    /**
+     * La direccion tambien va en mayusculas, por la misma decision.
+     *
+     * @return Attribute<string|null, string|null>
+     */
+    protected function direccion(): Attribute
+    {
+        return Attribute::make(
+            set: static fn (?string $valor): ?string => filled($valor)
+                ? mb_strtoupper(trim($valor), 'UTF-8')
+                : null,
         );
     }
 

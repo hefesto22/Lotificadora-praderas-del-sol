@@ -19,8 +19,11 @@ use Filament\Forms\Components\TextInput;
  * Filament está precompilado y una clase que el panel no incluya
  * simplemente no existe ahí (§9.A7).
  *
- * ⚠️ NO aplicar a nombres de personas, correos, contraseñas ni a símbolos
- * con casing significativo como m² o vara².
+ * ⚠️ NO aplicar a correos, contraseñas ni a símbolos con casing
+ * significativo como m² o vara².
+ *
+ * Los nombres de personas SÍ van acá desde el 3/8/2026: la excepción que
+ * hacía el §10.4 quedó derogada. Ver docs/mayusculas.md.
  *
  * Por qué una factory y no una macro: el §10.4 describe el patrón como
  * un modificador encadenable, pero una macro de Laravel no existe para

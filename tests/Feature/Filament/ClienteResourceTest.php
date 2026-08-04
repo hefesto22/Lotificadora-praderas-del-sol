@@ -106,7 +106,7 @@ describe('ClienteResource — formulario', function (): void {
             ->call('create')
             ->assertHasNoFormErrors();
 
-        expect(Cliente::query()->where('nombre', 'Cliente De Apartado')->exists())->toBeTrue();
+        expect(Cliente::query()->where('nombre', 'CLIENTE DE APARTADO')->exists())->toBeTrue();
     });
 
     test('rechaza un DNI de menos de 13 digitos', function (): void {
@@ -171,7 +171,7 @@ describe('ClienteResource — formulario', function (): void {
             ->call('create')
             ->assertHasNoFormErrors();
 
-        expect(Cliente::query()->where('nombre', 'Mayusculas Correo')->value('correo'))
+        expect(Cliente::query()->where('nombre', 'MAYUSCULAS CORREO')->value('correo'))
             ->toBe('rosa.elena@gmail.com');
     });
 });

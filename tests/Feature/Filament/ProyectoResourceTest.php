@@ -95,7 +95,7 @@ describe('ProyectoResource — formulario', function (): void {
             ->call('create')
             ->assertHasNoFormErrors();
 
-        expect(Proyecto::query()->where('nombre', 'Residencial Las Colinas')->value('codigo'))
+        expect(Proyecto::query()->where('nombre', 'RESIDENCIAL LAS COLINAS')->value('codigo'))
             ->toBe('RLC');
     });
 
@@ -126,7 +126,7 @@ describe('ProyectoResource — formulario', function (): void {
             ->call('save')
             ->assertHasNoFormErrors();
 
-        expect($proyecto->fresh()?->getAttribute('municipio'))->toBe('Cucuyagua');
+        expect($proyecto->fresh()?->getAttribute('municipio'))->toBe('CUCUYAGUA');
     });
 });
 

@@ -10,7 +10,6 @@ use Carbon\CarbonInterface;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
-use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
@@ -39,7 +38,7 @@ class ProyectoForm
                         Tab::make('Identificación')
                             ->icon('heroicon-o-identification')
                             ->schema([
-                                TextInput::make('nombre')
+                                MayusculasField::make('nombre')
                                     ->label('Nombre del proyecto')
                                     ->required()
                                     ->maxLength(150)
@@ -70,7 +69,7 @@ class ProyectoForm
                         Tab::make('Ubicación')
                             ->icon('heroicon-o-map-pin')
                             ->schema([
-                                TextInput::make('municipio')
+                                MayusculasField::make('municipio')
                                     ->label('Municipio')
                                     ->maxLength(100)
                                     ->prefixIcon('heroicon-o-map')

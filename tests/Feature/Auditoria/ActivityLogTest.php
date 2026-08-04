@@ -47,8 +47,8 @@ describe('Activity Log v5 — registro de cambios', function (): void {
 
         $actividad = ultimaActividadDe($proyecto, 'updated');
 
-        expect($actividad->attribute_changes?->get('attributes'))->toBe(['nombre' => 'Praderas del Sol II']);
-        expect($actividad->attribute_changes?->get('old'))->toBe(['nombre' => 'Praderas del Sol']);
+        expect($actividad->attribute_changes?->get('attributes'))->toBe(['nombre' => 'PRADERAS DEL SOL II']);
+        expect($actividad->attribute_changes?->get('old'))->toBe(['nombre' => 'PRADERAS DEL SOL']);
         expect($actividad->properties?->toArray() ?? [])->toBe([]);
     });
 

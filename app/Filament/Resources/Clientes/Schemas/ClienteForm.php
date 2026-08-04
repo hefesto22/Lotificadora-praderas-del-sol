@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Clientes\Schemas;
 
 use App\Filament\Schemas\Components\DNIField;
+use App\Filament\Schemas\Components\MayusculasField;
 use App\Filament\Schemas\Components\RTNField;
 use App\Filament\Schemas\Components\TelefonoHondurasField;
 use App\Models\Cliente;
@@ -46,15 +47,17 @@ class ClienteForm
                         Tab::make('Identificación')
                             ->icon('heroicon-o-identification')
                             ->schema([
-                                // §10.4: el auto-mayúsculas NO aplica a nombres de
-                                // personas. "María de los Ángeles" no es un código
-                                // de catálogo.
-                                TextInput::make('nombre')
+                                // El nombre se guarda en MAYÚSCULAS, igual que todo
+                                // lo demás. Deroga la excepción que el §10.4 hacía
+                                // para nombres de personas — ver docs/mayusculas.md.
+                                // El mutador del modelo lo aplica también cuando el
+                                // dato entra por un seeder o por un import.
+                                MayusculasField::make('nombre')
                                     ->label('Nombre completo')
                                     ->required()
                                     ->maxLength(150)
                                     ->prefixIcon('heroicon-o-user')
-                                    ->placeholder('Ej: María de los Ángeles Rodríguez')
+                                    ->placeholder('Ej: MARÍA DE LOS ÁNGELES RODRÍGUEZ')
                                     ->columnSpanFull(),
 
                                 DNIField::make()
@@ -80,6 +83,7 @@ class ClienteForm
                                     ->helperText('Opcional. Se guarda en minúsculas.'),
 
                                 Textarea::make('direccion')
+                                    ->extraInputAttributes(['style' => 'text-transform: uppercase;'])
                                     ->label('Dirección')
                                     ->rows(3)
                                     ->maxLength(500)
