@@ -84,7 +84,10 @@ class ProyectosTable
                 ActionGroup::make([
                     ViewAction::make(),
                     EditAction::make(),
-                    DeleteAction::make(),
+                    // Borrar un proyecto arrastra bloques, lotes y calles
+                    // (ver Proyecto::booted). Que el modal lo diga.
+                    DeleteAction::make()
+                        ->modalDescription('Se borran también sus bloques, sus lotes y sus calles. Si algún lote está apartado o vendido, no se borra nada.'),
                 ]),
             ])
             ->defaultSort('nombre')

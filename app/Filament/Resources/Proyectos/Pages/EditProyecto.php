@@ -24,7 +24,8 @@ class EditProyecto extends EditRecord
     {
         return [
             ViewAction::make(),
-            DeleteAction::make(),
+            DeleteAction::make()
+                ->modalDescription('Se borran también sus bloques, sus lotes y sus calles. Si algún lote está apartado o vendido, no se borra nada.'),
         ];
     }
 }
