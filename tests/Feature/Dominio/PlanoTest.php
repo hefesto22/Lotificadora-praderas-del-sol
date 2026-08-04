@@ -179,6 +179,6 @@ describe('Plano — calles', function (): void {
         Calle::factory()->create(['nombre' => 'Avenida Principal']);
         Calle::factory()->create(['nombre' => 'Avenida Principal']);
 
-        expect(Calle::query()->where('nombre', 'Avenida Principal')->count())->toBe(2);
+        expect(Calle::query()->where('nombre', 'AVENIDA PRINCIPAL')->count())->toBe(2);
     });
 });

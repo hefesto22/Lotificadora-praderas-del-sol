@@ -4,23 +4,33 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Proyectos\Pages;
 
+use App\Domain\Exceptions\CompromisoInvalidoException;
 use App\Domain\Plano\AcomodadorDelPlano;
 use App\Domain\Plano\Dxf\ImportadorDeDxf;
 use App\Domain\Plano\Dxf\OpcionesDeImportacion;
 use App\Domain\Plano\Dxf\UnidadDxf;
 use App\Domain\Plano\ParametrosDeAcomodo;
 use App\Domain\Plano\PlanoDelProyecto;
+use App\Domain\Ventas\RegistroDeCompromisos;
 use App\Filament\Resources\Proyectos\ProyectoResource;
+use App\Filament\Schemas\Components\DNIField;
+use App\Filament\Schemas\Components\MayusculasField;
+use App\Filament\Schemas\Components\TelefonoHondurasField;
 use App\Models\Bloque;
+use App\Models\Cliente;
+use App\Models\Lote;
 use App\Models\Proyecto;
 use Filament\Actions\Action;
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Concerns\InteractsWithRecord;
 use Filament\Resources\Pages\Page;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Validation\Rules\Unique;
 
 /**
  * El plano del proyecto: los lotes dibujados y pintados por estado.
@@ -133,6 +143,281 @@ class VerPlano extends Page
                 ->color('gray')
                 ->url(fn (): string => ProyectoResource::getUrl('view', ['record' => $this->getRecord()])),
         ];
+    }
+
+    // ─── Movimientos del lote, disparados desde el plano ──────────────
+
+    /*
+     * Estas tres acciones no van en la cabecera: se montan desde el panel
+     * lateral con $wire.mountAction('apartarLote', { lote: id }). Filament
+     * las resuelve por el nombre del metodo —{nombre}Action— y les inyecta
+     * los argumentos.
+     *
+     * Ninguna toca el estado del lote por su cuenta: todo pasa por
+     * RegistroDeCompromisos, que deja el respaldo y mueve el estado dentro
+     * de la misma transaccion.
+     */
+    public function apartarLoteAction(): Action
+    {
+        return Action::make('apartarLote')
+            ->label('Apartar lote')
+            ->icon(Heroicon::OutlinedBookmark)
+            ->color('warning')
+            ->modalHeading('Apartar el lote')
+            ->modalDescription('Queda reservado a nombre del cliente. Se puede liberar despues sin consecuencias.')
+            ->modalSubmitActionLabel('Apartar')
+            ->schema([
+                self::selectorDeCliente('¿A nombre de quien?'),
+
+                TextInput::make('monto_senia')
+                    ->label('Seña recibida (opcional)')
+                    ->numeric()
+                    ->helperText('Si se recibio un adelanto para reservar, se anota aca.'),
+
+                DatePicker::make('vence_el')
+                    ->label('Vence el (opcional)')
+                    ->helperText('Hasta cuando se le guarda el lote.'),
+
+                Textarea::make('observaciones')
+                    ->label('Observaciones')
+                    ->rows(2),
+            ])
+            ->action(function (array $arguments, array $data): void {
+                $this->conElLote($arguments, function (Lote $lote) use ($data): string {
+                    $cliente = Cliente::query()->findOrFail($this->entero($data, 'cliente_id', 0));
+
+                    new RegistroDeCompromisos()->apartar(
+                        $lote,
+                        $cliente,
+                        montoSenia: $this->texto($data, 'monto_senia', '') ?: null,
+                        venceEl: $this->texto($data, 'vence_el', '') ?: null,
+                        observaciones: $this->texto($data, 'observaciones', '') ?: null,
+                    );
+
+                    return sprintf(
+                        '%s quedo apartado a nombre de %s.',
+                        (string) $lote->getAttribute('codigo'),
+                        (string) $cliente->getAttribute('nombre')
+                    );
+                });
+            });
+    }
+
+    public function venderLoteAction(): Action
+    {
+        return Action::make('venderLote')
+            ->label('Vender lote')
+            ->icon(Heroicon::OutlinedCheckBadge)
+            ->color('primary')
+            ->modalHeading('Registrar la venta del lote')
+            ->modalDescription(
+                'La venta congela el area, el precio y el valor del lote para siempre (§8.2). '.
+                'Despues de esto el lote ya no se puede repreciar. Si el lote estaba apartado, '.
+                'tiene que ser a nombre de la misma persona.'
+            )
+            ->modalSubmitActionLabel('Registrar la venta')
+            ->schema([
+                self::selectorDeCliente('¿Quien compra?'),
+
+                Textarea::make('observaciones')
+                    ->label('Observaciones')
+                    ->rows(2),
+            ])
+            ->action(function (array $arguments, array $data): void {
+                $this->conElLote($arguments, function (Lote $lote) use ($data): string {
+                    $cliente = Cliente::query()->findOrFail($this->entero($data, 'cliente_id', 0));
+
+                    $venta = new RegistroDeCompromisos()->vender(
+                        $lote,
+                        $cliente,
+                        observaciones: $this->texto($data, 'observaciones', '') ?: null,
+                    );
+
+                    return sprintf(
+                        '%s vendido a %s por %s.',
+                        (string) $lote->getAttribute('codigo'),
+                        (string) $cliente->getAttribute('nombre'),
+                        $venta->montoValor()->formateado()
+                    );
+                });
+            });
+    }
+
+    public function liberarLoteAction(): Action
+    {
+        return Action::make('liberarLote')
+            ->label('Liberar lote')
+            ->icon(Heroicon::OutlinedArrowUturnLeft)
+            ->color('gray')
+            ->modalHeading('Liberar el apartado')
+            ->modalDescription('El lote vuelve a quedar disponible. El apartado queda en el historial con su motivo.')
+            ->modalSubmitActionLabel('Liberar')
+            ->schema([
+                Textarea::make('motivo')
+                    ->label('¿Por que se libera?')
+                    ->required()
+                    ->rows(2)
+                    ->placeholder('Se vencio el plazo, el cliente desistio, ...'),
+            ])
+            ->action(function (array $arguments, array $data): void {
+                $this->conElLote($arguments, function (Lote $lote) use ($data): string {
+                    new RegistroDeCompromisos()->liberar($lote, $this->texto($data, 'motivo', 'Sin motivo'));
+
+                    return (string) $lote->getAttribute('codigo').' volvio a estar disponible.';
+                });
+            });
+    }
+
+    /**
+     * Corre un movimiento sobre el lote de los argumentos y avisa.
+     *
+     * Las excepciones del dominio se muestran como notificacion y no como
+     * pantalla de error: su mensaje esta escrito para quien esta
+     * atendiendo a un cliente, no para un programador.
+     *
+     * @param array<string, mixed> $arguments
+     * @param callable(Lote): string $movimiento
+     */
+    private function conElLote(array $arguments, callable $movimiento): void
+    {
+        $lote = Lote::query()->find($this->entero($arguments, 'lote', 0));
+
+        if (! $lote instanceof Lote) {
+            Notification::make()->title('No se encontro el lote')->danger()->send();
+
+            return;
+        }
+
+        try {
+            $mensaje = $movimiento($lote);
+        } catch (CompromisoInvalidoException $error) {
+            Notification::make()
+                ->title('No se pudo hacer ese movimiento')
+                ->body($error->getMessage())
+                ->danger()
+                ->persistent()
+                ->send();
+
+            return;
+        }
+
+        Notification::make()->title($mensaje)->success()->send();
+
+        $this->redirect(ProyectoResource::getUrl('plano', ['record' => $this->getRecord()]));
+    }
+
+    /**
+     * Selector de cliente con alta rapida incorporada.
+     *
+     * Quien esta atendiendo en ventanilla no deberia tener que abandonar
+     * el plano —y perder el lote que tenia seleccionado— porque el
+     * comprador todavia no esta cargado. Pide lo minimo: nombre, DNI y
+     * telefono. El resto de la ficha se completa despues, desde Clientes.
+     *
+     * Las opciones se resuelven con un closure y no de una vez: asi el
+     * cliente recien creado aparece en la lista sin recargar la pagina.
+     */
+    private static function selectorDeCliente(string $etiqueta): Select
+    {
+        return Select::make('cliente_id')
+            ->label($etiqueta)
+            ->options(static fn (): array => self::clientesDisponibles())
+            ->searchable()
+            ->required()
+            ->createOptionForm(self::altaRapidaDeCliente())
+            ->createOptionUsing(static fn (array $data): int => self::crearClienteRapido($data));
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    private static function altaRapidaDeCliente(): array
+    {
+        /*
+         * Los indices unicos de `clientes` son PARCIALES: llevan
+         * `WHERE deleted_at IS NULL`. La regla `unique` de Laravel no sabe
+         * nada de eso y si mira las filas borradas, asi que sin este
+         * whereNull diria "ya existe" por un cliente archivado que la
+         * persona ni siquiera puede ver. Es el mismo cuidado que ya esta
+         * documentado en ClienteForm.
+         */
+        /*
+         * El parametro se llama $rule y NO $regla: Filament inyecta los
+         * argumentos de este closure POR NOMBRE contra una lista fija. Con
+         * otro nombre la inyeccion falla, cae a resolverlo por tipo desde
+         * el contenedor, e intenta construir un Unique sin tabla.
+         */
+        $soloVivos = static fn (Unique $rule): Unique => $rule->whereNull('deleted_at');
+
+        return [
+            // §10.4: el auto-mayusculas NO aplica a nombres de personas.
+            MayusculasField::make('nombre')
+                ->label('Nombre completo')
+                ->required()
+                ->maxLength(150)
+                ->prefixIcon('heroicon-o-user')
+                ->placeholder('Ej: MARÍA DE LOS ÁNGELES RODRÍGUEZ')
+                ->columnSpanFull(),
+
+            /*
+              * ignoreRecord: false es obligatorio aca. Por defecto Filament
+              * ignora "el registro del formulario", y el registro de esta
+              * pagina es el PROYECTO: sin apagarlo, la consulta de unicidad
+              * sobre `clientes` sale con un "proyectos"."id" <> N pegado y
+              * Postgres la rechaza por una tabla que no esta en el FROM.
+              */
+            DNIField::make()
+                ->unique(
+                    table: Cliente::class,
+                    column: 'dni',
+                    ignoreRecord: false,
+                    modifyRuleUsing: $soloVivos,
+                ),
+
+            TelefonoHondurasField::make('telefono', 'Teléfono'),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private static function crearClienteRapido(array $data): int
+    {
+        $cliente = Cliente::query()->create([
+            'nombre'   => self::campo($data, 'nombre') ?? '',
+            'dni'      => self::campo($data, 'dni'),
+            'telefono' => self::campo($data, 'telefono'),
+            'activo'   => true,
+        ]);
+
+        Notification::make()
+            ->title('Cliente registrado')
+            ->body(sprintf(
+                '%s quedo cargado. Su ficha completa se puede terminar despues, desde Clientes.',
+                (string) $cliente->getAttribute('nombre')
+            ))
+            ->success()
+            ->send();
+
+        return (int) $cliente->getKey();
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private static function campo(array $data, string $nombre): ?string
+    {
+        $valor = $data[$nombre] ?? null;
+
+        return is_scalar($valor) && (string) $valor !== '' ? (string) $valor : null;
+    }
+
+    /**
+     * @return array<int|string, string>
+     */
+    private static function clientesDisponibles(): array
+    {
+        return Cliente::query()->activos()->orderBy('nombre')->pluck('nombre', 'id')->all();
     }
 
     /**

@@ -176,6 +176,23 @@ class Lote extends Model
         return "{$proyecto}-{$bloque}-{$numero}";
     }
 
+    /**
+     * 12B — el número de lote con la letra de su bloque pegada.
+     *
+     * Es lo que se rotula EN EL MAPA, y es distinto del código a
+     * propósito. El código (RPS-B-012) es para el contrato, el recibo y
+     * el teléfono, donde hay lugar. En el mapa hay 2.4 unidades de alto y
+     * trescientos lotes encima: un "12" solo no dice de qué manzana es, y
+     * el código completo no entra.
+     *
+     * Sin relleno de ceros: acá manda que se lea de un vistazo, no que
+     * ordene alfabéticamente.
+     */
+    public static function componerRotulo(string $bloque, string $numero): string
+    {
+        return $numero.$bloque;
+    }
+
     // ─── Dinero ───────────────────────────────────────────────────────
 
     /**

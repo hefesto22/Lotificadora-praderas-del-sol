@@ -6,7 +6,9 @@ namespace App\Domain\Plano;
 
 use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\TipoCalle;
+use App\Models\Bloque;
 use App\Models\Calle;
+use App\Models\Compromiso;
 use App\Models\Lote;
 use App\Models\Proyecto;
 
@@ -30,23 +32,58 @@ final readonly class PlanoDelProyecto
     private const string VIEWBOX_VACIO = '0 0 100 100';
 
     /**
+     * Donde vive el calco del plano original de un proyecto, si lo hay.
+     *
+     * Es el dibujo del topografo tal cual —linderos, calles, areas verdes,
+     * la cancha, y los rotulos con area y numero escritos por el— en las
+     * MISMAS coordenadas en varas que los poligonos. Va encima del color:
+     * lo que se pinta por estado y se clickea siguen siendo los lotes de
+     * la base.
+     *
+     * Existe porque reconstruir un plano nunca sale completo. Con el calco
+     * puesto, un lote que el extractor no logro cerrar igual se ve.
+     */
+    private const string CARPETA_DE_CALCOS = 'planos';
+
+    /**
      * @return array{
      *     viewBox: string,
+     *     calco: string|null,
      *     hayGeometria: bool,
      *     esquematico: bool,
      *     sinDibujar: int,
      *     resumen: array<string, int>,
-     *     lotes: list<array{id: int, codigo: string, numero: string, estado: string, etiqueta: string, color: string, puntos: string, centro: array{float, float}, areaVaras: string, valor: string, valorFormateado: string, desalineado: bool}>,
+     *     lotes: list<array{id: int, codigo: string, numero: string, bloque: string, rotulo: string, estado: string, etiqueta: string, color: string, puntos: string, centro: array{float, float}, cliente: string|null, areaVaras: string, valor: string, valorFormateado: string, desalineado: bool}>,
      *     calles: list<array{nombre: string|null, tipo: string, etiqueta: string, ancho: float, esArea: bool, puntos: string}>
      * }
      */
     public function para(Proyecto $proyecto): array
     {
+        // with('bloque'): la letra del bloque va en el rotulo de cada
+        // lote, y preguntarsela al lote uno por uno es un N+1 de manual
+        // sobre 300 filas (§4.L4).
         /** @var list<Lote> $lotes */
-        $lotes = Lote::query()->delProyecto($proyecto)->orderBy('codigo')->get()->all();
+        $lotes = Lote::query()
+            ->delProyecto($proyecto)
+            ->with('bloque')
+            ->orderBy('codigo')
+            ->get()
+            ->all();
 
         /** @var list<Calle> $calles */
         $calles = Calle::query()->delProyecto($proyecto)->orderBy('orden')->get()->all();
+
+        /*
+         * Una sola consulta para todos los compromisos vigentes del
+         * proyecto. Preguntarle a cada lote por el suyo seria un N+1 de
+         * manual sobre 500 filas (§4.L4).
+         */
+        $comprometidos = Compromiso::query()
+            ->delProyecto($proyecto)
+            ->vigentes()
+            ->with('cliente')
+            ->get()
+            ->keyBy('lote_id');
 
         $lotesDibujados = [];
         $sinDibujar = 0;
@@ -68,15 +105,29 @@ final readonly class PlanoDelProyecto
                 $puntosParaEncuadre[] = $vertice;
             }
 
+            $bloque = $lote->getRelationValue('bloque');
+            $nombreBloque = $bloque instanceof Bloque
+                ? (string) $bloque->getAttribute('nombre')
+                : '';
+
+            $compromiso = $comprometidos->get($lote->getKey());
+
+            $cliente = $compromiso instanceof Compromiso
+                ? $this->textoOpcional($compromiso->cliente?->getAttribute('nombre'))
+                : null;
+
             $lotesDibujados[] = [
                 'id'              => (int) $lote->getKey(),
                 'codigo'          => (string) $lote->getAttribute('codigo'),
                 'numero'          => (string) $lote->getAttribute('numero'),
+                'bloque'          => $nombreBloque,
+                'rotulo'          => Lote::componerRotulo($nombreBloque, (string) $lote->getAttribute('numero')),
                 'estado'          => $estado->value,
                 'etiqueta'        => $estado->etiqueta(),
                 'color'           => $estado->colorHex(),
                 'puntos'          => $this->comoPuntosSvg($vertices),
                 'centro'          => $this->centroDe($vertices),
+                'cliente'         => $cliente,
                 'areaVaras'       => (string) $lote->getAttribute('area_varas'),
                 'valor'           => (string) $lote->getAttribute('valor'),
                 'valorFormateado' => $lote->montoValor()->formateado(),
@@ -88,9 +139,9 @@ final readonly class PlanoDelProyecto
 
         foreach ($calles as $calle) {
             /*
-             * Una calle dibujada a mano es un eje con un ancho; una
-             * importada de un DXF es el poligono de su area. Las dos se
-             * pintan, pero el encuadre las tiene que medir distinto.
+             * Una calle viene de dos formas: importada de un plano es un
+             * AREA (su poligono), dibujada a mano es un EJE con ancho. Un
+             * area necesita tres vertices para existir; un eje, dos.
              */
             $esArea = $calle->esArea();
             $puntos = $esArea ? $calle->verticesDelArea() : $calle->puntos();
@@ -100,22 +151,21 @@ final readonly class PlanoDelProyecto
                 continue;
             }
 
-            $anchoCrudo = $calle->getAttribute('ancho_varas');
-            $ancho = $esArea || ! is_numeric($anchoCrudo) ? 0.0 : (float) $anchoCrudo;
+            $ancho = (float) (string) $calle->getAttribute('ancho_varas');
             $tipo = $calle->getAttribute('tipo');
 
-            foreach ($puntos as $punto) {
-                if ($esArea) {
+            if ($esArea) {
+                foreach ($puntos as $punto) {
                     $puntosParaEncuadre[] = $punto;
-
-                    continue;
                 }
-
-                // El eje se pinta grueso: el encuadre tiene que contemplar
-                // medio ancho a cada lado o la calle del borde aparece
-                // cortada por la mitad.
-                $puntosParaEncuadre[] = [$punto[0] - $ancho / 2, $punto[1] - $ancho / 2];
-                $puntosParaEncuadre[] = [$punto[0] + $ancho / 2, $punto[1] + $ancho / 2];
+            } else {
+                // El trazo se pinta grueso, asi que el encuadre tiene que
+                // contemplar medio ancho a cada lado o la calle del borde
+                // aparece cortada por la mitad.
+                foreach ($puntos as $punto) {
+                    $puntosParaEncuadre[] = [$punto[0] - $ancho / 2, $punto[1] - $ancho / 2];
+                    $puntosParaEncuadre[] = [$punto[0] + $ancho / 2, $punto[1] + $ancho / 2];
+                }
             }
 
             $callesDibujadas[] = [
@@ -130,6 +180,7 @@ final readonly class PlanoDelProyecto
 
         return [
             'viewBox'      => $this->encuadre($puntosParaEncuadre),
+            'calco'        => $this->calcoDe($proyecto),
             'hayGeometria' => $puntosParaEncuadre !== [],
             'esquematico'  => (bool) $proyecto->getAttribute('plano_esquematico'),
             'sinDibujar'   => $sinDibujar,
@@ -163,6 +214,27 @@ final readonly class PlanoDelProyecto
         }
 
         return $resumen;
+    }
+
+    /**
+     * URL del calco del proyecto, o null si no tiene.
+     *
+     * Se busca por codigo de proyecto en minusculas: `RPS` ->
+     * `public/planos/rps-fondo.json`. No se valida el contenido aca; si el
+     * archivo esta roto lo unico que pasa es que el fondo no se dibuja y
+     * los lotes se ven igual.
+     */
+    private function calcoDe(Proyecto $proyecto): ?string
+    {
+        $codigo = $proyecto->getAttribute('codigo');
+
+        if (! is_string($codigo) || $codigo === '') {
+            return null;
+        }
+
+        $relativa = self::CARPETA_DE_CALCOS.'/'.mb_strtolower($codigo).'-fondo.json';
+
+        return is_file(public_path($relativa)) ? asset($relativa) : null;
     }
 
     /**

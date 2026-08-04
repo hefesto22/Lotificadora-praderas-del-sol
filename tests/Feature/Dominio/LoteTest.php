@@ -223,6 +223,19 @@ describe('Lote — código legible', function (): void {
         ['BIS', 'RPS-B-BIS'],     // sin dígitos, se deja tal cual
     ]);
 
+    /*
+    | El rótulo del mapa es lo contrario del código: sin proyecto, sin
+    | guiones y SIN relleno de ceros. Ahí manda que se lea de un vistazo
+    | dentro de un polígono chico, no que ordene alfabéticamente.
+    */
+    test('el rotulo del mapa pega la letra del bloque al numero', function (string $numero, string $esperado): void {
+        expect(Lote::componerRotulo('B', $numero))->toBe($esperado);
+    })->with([
+        ['1', '1B'],
+        ['12', '12B'],
+        ['200', '200B'],
+    ]);
+
     test('el código se genera solo al crear el lote', function (): void {
         $proyecto = Proyecto::factory()->create(['codigo' => 'RPS']);
         $bloque = Bloque::factory()->delProyecto($proyecto)->create(['nombre' => 'B']);

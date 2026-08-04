@@ -44,14 +44,33 @@
         .dark .plano-esquema { background: rgba(251, 191, 36, .1); border-color: rgba(251, 191, 36, .3); color: rgb(253 230 138); }
 
         .plano-grid { display: grid; gap: 1rem; grid-template-columns: 1fr; margin-top: 1rem; }
-        @media (min-width: 1024px) { .plano-grid { grid-template-columns: 2fr 1fr; } }
+        /* 3fr/1fr y no 2fr/1fr: el plano es el trabajo, el panel es la ficha. */
+        @media (min-width: 1024px) { .plano-grid { grid-template-columns: 3fr 1fr; } }
+        @media (min-width: 1536px) { .plano-grid { grid-template-columns: 4fr 1fr; } }
 
         .plano-lienzo { padding: 0; position: relative; overflow: hidden; }
         .plano-lienzo svg {
-            display: block; width: 100%; height: min(72vh, 760px);
+            display: block; width: 100%; height: min(82vh, 1100px);
             touch-action: none; cursor: grab;
             user-select: none; -webkit-user-select: none;
         }
+
+        /* Pantalla completa: el plano tapa todo y la ficha del lote pasa a
+           flotar arriba a la izquierda. Es CSS y no la Fullscreen API del
+           navegador porque asi los modales de Filament —apartar, vender—
+           siguen apareciendo encima y no detras. */
+        .plano-completo { position: fixed; inset: 0; z-index: 50; display: grid;
+            grid-template-columns: 1fr; gap: 0; margin: 0; padding: 0; background: #fff; }
+        .dark .plano-completo { background: rgb(24 24 27); }
+        .plano-completo .plano-lienzo { border-radius: 0; border: 0; height: 100vh; }
+        .plano-completo .plano-lienzo svg { height: 100vh; }
+        .plano-completo .plano-ficha {
+            position: absolute; top: .75rem; left: .75rem; width: min(22rem, calc(100vw - 1.5rem));
+            max-height: calc(100vh - 1.5rem); overflow-y: auto; z-index: 10;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, .18);
+        }
+        @media (min-width: 1024px) { .plano-completo { grid-template-columns: 1fr; } }
+        @media (min-width: 1536px) { .plano-completo { grid-template-columns: 1fr; } }
         .plano-lienzo svg.arrastrando { cursor: grabbing; }
 
         .plano-controles { position: absolute; top: .625rem; right: .625rem; display: flex; gap: .25rem; }
@@ -62,8 +81,16 @@
             backdrop-filter: blur(4px);
         }
         .plano-boton:hover { background: #fff; color: rgb(9 9 11); }
+        .plano-boton.activo { border-color: rgb(161 161 170); background: rgb(39 39 42); color: #fff; }
         .dark .plano-boton { border-color: rgba(255, 255, 255, .15); background: rgba(24, 24, 27, .85); color: rgb(212 212 216); }
         .dark .plano-boton:hover { background: rgb(24 24 27); color: #fff; }
+        .dark .plano-boton.activo { background: rgb(244 244 245); color: rgb(24 24 27); border-color: rgb(244 244 245); }
+
+        /* El calco hereda currentColor: tinta oscura en claro, clara en
+           oscuro. Sin esto el dibujo del topografo desaparece en el tema
+           que no le toca. */
+        .plano-calco { color: rgb(24 24 27); }
+        .dark .plano-calco { color: rgb(228 228 231); }
 
         .plano-pista {
             position: absolute; left: .75rem; bottom: .625rem;
@@ -99,6 +126,21 @@
         .dark .plano-dato dt { color: rgb(161 161 170); }
         .plano-dato dd { font-variant-numeric: tabular-nums; color: rgb(9 9 11); margin: 0; }
         .dark .plano-dato dd { color: #fff; }
+
+        .plano-acciones { margin-top: 1rem; }
+        .plano-botonera { display: flex; gap: .5rem; flex-wrap: wrap; }
+        .plano-accion {
+            flex: 1 1 auto; border: 1px solid rgb(228 228 231); background: #fff;
+            color: rgb(63 63 70); border-radius: .5rem; padding: .5rem .75rem;
+            font-size: .8125rem; font-weight: 600; cursor: pointer;
+        }
+        .plano-accion:hover { background: rgb(250 250 250); }
+        .dark .plano-accion { border-color: rgba(255, 255, 255, .15); background: rgba(255, 255, 255, .05); color: rgb(228 228 231); }
+        .dark .plano-accion:hover { background: rgba(255, 255, 255, .1); }
+        .plano-accion-apartar { border-color: #d97706; color: #b45309; }
+        .dark .plano-accion-apartar { border-color: rgba(217, 119, 6, .5); color: #fbbf24; }
+        .plano-accion-vender { border-color: #2563eb; color: #1d4ed8; }
+        .dark .plano-accion-vender { border-color: rgba(37, 99, 235, .5); color: #93c5fd; }
 
         .plano-aviso {
             margin-top: 1rem; border-radius: .5rem; padding: .75rem;
@@ -149,7 +191,26 @@
                 movio: false,
                 inicio: { x: 0, y: 0, vx: 0, vy: 0 },
 
-                init() { this.ajustar() },
+                /* Calco del plano original. Se pide aparte y no embebido en
+                   la pagina porque pesa ~1.5 MB: asi lo cachea el navegador
+                   y no viaja en cada render de Livewire. Si falla, no pasa
+                   nada: los lotes se dibujan igual. */
+                calco: { obra: '', rotulo: '', textos: [] },
+                verCalco: true,
+                completo: false,
+
+                init() {
+                    this.ajustar();
+
+                    const url = @js($plano['calco']);
+
+                    if (url) {
+                        fetch(url)
+                            .then((r) => r.ok ? r.json() : null)
+                            .then((d) => { if (d) this.calco = d })
+                            .catch(() => {});
+                    }
+                },
 
                 /* El viewBox se escribe con setAttribute y no con :viewBox
                    porque el parser de HTML pasa los atributos a minusculas,
@@ -257,7 +318,7 @@
                     this.seleccionado = this.seleccionado?.id === lote.id ? null : lote;
                 },
             }"
-            class="plano-grid"
+            :class="completo ? 'plano-grid plano-completo' : 'plano-grid'"
         >
             <div class="plano-card plano-lienzo">
                 <svg
@@ -266,6 +327,7 @@
                     preserveAspectRatio="xMidYMid meet"
                     x-effect="$el.setAttribute('viewBox', viewBox)"
                     :class="arrastrando ? 'arrastrando' : ''"
+                    x-on:keydown.escape.window="completo = false"
                     x-on:wheel.prevent="alRodar($event)"
                     x-on:pointerdown.prevent="alPresionar($event)"
                     x-on:pointermove="alMover($event)"
@@ -317,31 +379,93 @@
                         </polygon>
                     @endforeach
 
-                    {{-- Los numeros al final, para que ningun poligono los tape. --}}
-                    @foreach ($plano['lotes'] as $lote)
-                        <text
-                            x="{{ $lote['centro'][0] }}"
-                            y="{{ $lote['centro'][1] }}"
-                            text-anchor="middle"
-                            dominant-baseline="central"
-                            font-size="2.4"
-                            font-weight="600"
-                            fill="#ffffff"
-                            style="pointer-events: none; user-select: none;"
-                        >{{ $lote['numero'] }}</text>
-                    @endforeach
+                    {{-- El calco del plano del topografo, ENCIMA del color.
+
+                         Va arriba y no abajo a proposito: asi se leen sus
+                         cotas y sus numeros sobre el lote pintado, que es
+                         como se lee un plano de ventas. El color queda de
+                         tinte. pointer-events none: lo que se clickea son
+                         los poligonos de la base, no el dibujo. --}}
+                    <g class="plano-calco" x-show="verCalco" style="pointer-events: none;">
+                        {{-- Los rotulos del plano que NO son de lote: nombres de
+                             calle, areas verdes, el norte. Van como texto de
+                             verdad porque el DXF nativo los trae como texto. --}}
+                        <template x-for="t in calco.textos" :key="t.x + ',' + t.y + t.t">
+                            <text
+                                :x="t.x"
+                                :y="t.y"
+                                :font-size="t.h * 1.15"
+                                :transform="`rotate(${t.r} ${t.x} ${t.y})`"
+                                fill="currentColor"
+                                fill-opacity="0.75"
+                                x-text="t.t"
+                            ></text>
+                        </template>
+                        <path
+                            :d="calco.obra"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.3"
+                            vector-effect="non-scaling-stroke"
+                        />
+                    </g>
+
+                    {{-- Los rotulos al final, para que ningun poligono los tape.
+
+                         Van con la letra del bloque pegada —12B— porque en
+                         un plano de 24 manzanas un "12" solo no dice de cual
+                         es, y el codigo entero (RPS-B-012) no entra.
+
+                         Con el calco encendido se ocultan: el dibujo del
+                         topografo ya trae escritos el numero y el area de
+                         cada lote, y encimarle los nuestros deja el mapa
+                         ilegible. --}}
+                    <g x-show="!verCalco">
+                        @foreach ($plano['lotes'] as $lote)
+                            <text
+                                x="{{ $lote['centro'][0] }}"
+                                y="{{ $lote['centro'][1] }}"
+                                text-anchor="middle"
+                                dominant-baseline="central"
+                                font-size="2.4"
+                                font-weight="600"
+                                fill="#ffffff"
+                                style="pointer-events: none; user-select: none;"
+                            >{{ $lote['rotulo'] }}</text>
+                        @endforeach
+                    </g>
                 </svg>
 
                 <div class="plano-controles">
                     <button type="button" class="plano-boton" x-on:click="acercar(1.4)" title="Acercar">+</button>
                     <button type="button" class="plano-boton" x-on:click="acercar(1 / 1.4)" title="Alejar">−</button>
                     <button type="button" class="plano-boton" x-on:click="ajustar()" title="Ver el proyecto completo">Ajustar</button>
+                    <button
+                        type="button"
+                        class="plano-boton"
+                        x-on:click="completo = ! completo; $nextTick(() => ajustar())"
+                        :class="completo ? 'activo' : ''"
+                        :title="completo ? 'Salir de pantalla completa (Esc)' : 'Pantalla completa'"
+                        x-text="completo ? 'Reducir' : 'Ampliar'"
+                    ></button>
+                    @if ($plano['calco'] !== null)
+                        <button
+                            type="button"
+                            class="plano-boton"
+                            x-on:click="verCalco = !verCalco"
+                            :class="verCalco ? 'activo' : ''"
+                            title="Mostrar u ocultar el dibujo del plano original"
+                            x-text="verCalco ? 'Plano' : 'Lotes'"
+                        ></button>
+                    @endif
                 </div>
 
-                <div class="plano-pista">Rueda para acercar · arrastrá para moverte · clic en un lote para verlo</div>
+                <div class="plano-pista" x-text="completo
+                    ? 'Rueda para acercar · arrastrá para moverte · clic en un lote · Esc para salir'
+                    : 'Rueda para acercar · arrastrá para moverte · clic en un lote · «Ampliar» para pantalla completa'"></div>
             </div>
 
-            <div class="plano-card">
+            <div class="plano-card plano-ficha">
                 <template x-if="seleccionado === null">
                     <p class="plano-detalle-vacio">Hacé clic en un lote del plano para ver su información.</p>
                 </template>
@@ -351,7 +475,7 @@
                         <div class="plano-detalle-cabecera">
                             <div>
                                 <p class="plano-detalle-codigo" x-text="seleccionado.codigo"></p>
-                                <p class="plano-detalle-sub">Lote <span x-text="seleccionado.numero"></span></p>
+                                <p class="plano-detalle-sub">Lote <span x-text="seleccionado.rotulo"></span></p>
                             </div>
                             <span
                                 class="plano-badge"
@@ -369,7 +493,54 @@
                                 <dt>Valor</dt>
                                 <dd x-text="seleccionado.valorFormateado"></dd>
                             </div>
+                            <template x-if="seleccionado.cliente">
+                                <div class="plano-dato">
+                                    <dt>Cliente</dt>
+                                    <dd x-text="seleccionado.cliente"></dd>
+                                </div>
+                            </template>
                         </dl>
+
+                        {{--
+                            Los botones montan las acciones de Filament por
+                            nombre. El estado del lote decide cuales tienen
+                            sentido: no se aparta lo que ya esta apartado ni
+                            se libera una venta.
+                        --}}
+                        <div class="plano-acciones">
+                            <template x-if="seleccionado.estado === 'disponible'">
+                                <div class="plano-botonera">
+                                    <button type="button" class="plano-accion plano-accion-apartar"
+                                        x-on:click="$wire.mountAction('apartarLote', { lote: seleccionado.id })">
+                                        Apartar
+                                    </button>
+                                    <button type="button" class="plano-accion plano-accion-vender"
+                                        x-on:click="$wire.mountAction('venderLote', { lote: seleccionado.id })">
+                                        Vender
+                                    </button>
+                                </div>
+                            </template>
+
+                            <template x-if="seleccionado.estado === 'apartado'">
+                                <div class="plano-botonera">
+                                    <button type="button" class="plano-accion plano-accion-vender"
+                                        x-on:click="$wire.mountAction('venderLote', { lote: seleccionado.id })">
+                                        Convertir en venta
+                                    </button>
+                                    <button type="button" class="plano-accion"
+                                        x-on:click="$wire.mountAction('liberarLote', { lote: seleccionado.id })">
+                                        Liberar
+                                    </button>
+                                </div>
+                            </template>
+
+                            <template x-if="seleccionado.estado === 'vendido'">
+                                <p class="plano-detalle-vacio">
+                                    Lote vendido. Deshacer una venta es una rescisión y ese trámite
+                                    todavía no está en el sistema.
+                                </p>
+                            </template>
+                        </div>
 
                         <template x-if="seleccionado.desalineado">
                             <p class="plano-aviso">

@@ -93,6 +93,46 @@ describe('Plano del proyecto — lo que se dibuja', function (): void {
             ->and($lote['centro'])->toBe([5.0, 12.5]);
     });
 
+    /*
+    | En el mapa cada lote se rotula con su numero y la letra de su
+    | bloque pegada: 12B. El codigo entero no entra en 2.4 unidades de
+    | alto, y un "12" solo no dice de cual de las 24 manzanas es.
+    */
+    test('el rotulo del mapa lleva el numero con la letra del bloque', function (): void {
+        Lote::factory()->enBloque($this->bloque)->create([
+            'numero'   => '12',
+            'poligono' => [[0, 0], [10, 0], [10, 25], [0, 25]],
+        ]);
+
+        $lote = new PlanoDelProyecto()->para($this->proyecto)['lotes'][0];
+
+        expect($lote['rotulo'])->toBe('12A')
+            ->and($lote['bloque'])->toBe('A')
+            ->and($lote['numero'])->toBe('12')
+            // El codigo NO cambia: es el del contrato, con su relleno.
+            ->and($lote['codigo'])->toBe('RPS-A-012');
+    });
+
+    test('cada bloque rotula con su propia letra', function (): void {
+        $otroBloque = Bloque::factory()->create([
+            'proyecto_id' => $this->proyecto->getKey(),
+            'nombre'      => 'N',
+        ]);
+
+        Lote::factory()->enBloque($this->bloque)->create([
+            'numero'   => '1',
+            'poligono' => [[0, 0], [10, 0], [10, 25], [0, 25]],
+        ]);
+        Lote::factory()->enBloque($otroBloque)->create([
+            'numero'   => '1',
+            'poligono' => [[20, 0], [30, 0], [30, 25], [20, 25]],
+        ]);
+
+        $rotulos = array_column(new PlanoDelProyecto()->para($this->proyecto)['lotes'], 'rotulo');
+
+        expect($rotulos)->toBe(['1A', '1N']);
+    });
+
     test('el color sale del estado del lote', function (): void {
         Lote::factory()->enBloque($this->bloque)->conEstado(EstadoLote::Apartado)->create([
             'poligono' => [[0, 0], [10, 0], [10, 25], [0, 25]],
@@ -136,7 +176,7 @@ describe('Plano del proyecto — lo que se dibuja', function (): void {
 
         $calle = new PlanoDelProyecto()->para($this->proyecto)['calles'][0];
 
-        expect($calle['nombre'])->toBe('Boulevard Central')
+        expect($calle['nombre'])->toBe('BOULEVARD CENTRAL')
             ->and($calle['tipo'])->toBe('boulevard')
             ->and($calle['ancho'])->toBe(16.0)
             ->and($calle['puntos'])->toBe('0,0 50,0 50,40');
