@@ -8,7 +8,8 @@ use App\Domain\Enums\EstadoVenta;
 use App\Filament\Resources\Ventas\VentaResource;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
-use Filament\Resources\Pages\ListRecords\Tab;
+use Filament\Schemas\Components\Tabs\Tab;
+use Illuminate\Database\Eloquent\Builder;
 use Override;
 
 class ListVentas extends ListRecords
@@ -31,6 +32,12 @@ class ListVentas extends ListRecords
      * contador que no comparte el scoping de su listado filtra información
      * —dice cuántas hay de algo que el usuario no puede ver—.
      *
+     * ⚠️ El `Tab` de las pestañas de listado es
+     * `Filament\Schemas\Components\Tabs\Tab`, **el mismo de los tabs del
+     * formulario**. En Filament v3 vivía en
+     * `Filament\Resources\Pages\ListRecords\Tab`, y esa ruta ya no existe:
+     * el trait `HasTabs` del propio Filament importa la de Schemas.
+     *
      * @return array<string, Tab>
      */
     #[Override]
@@ -49,7 +56,7 @@ class ListVentas extends ListRecords
             }
 
             $tabs[$estado->value] = Tab::make($estado->etiqueta())
-                ->modifyQueryUsing(fn ($query) => $query->where('estado', $estado->value))
+                ->modifyQueryUsing(static fn (Builder $query): Builder => $query->where('estado', $estado->value))
                 ->badge(fn (): int => VentaResource::getEloquentQuery()->where('estado', $estado->value)->count())
                 ->badgeColor($estado->color());
         }

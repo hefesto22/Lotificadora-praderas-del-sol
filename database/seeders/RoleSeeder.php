@@ -4,36 +4,68 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
+use App\Support\Roles;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Illuminate\Database\Seeder;
+use Spatie\Permission\Contracts\Permission as PermisoContrato;
+use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 
 /**
- * Crea los roles base del panel. NO crea permisos.
+ * Los roles del panel y qué puede hacer cada uno.
  *
- * Los permisos los genera `shield:generate` desde AdminUserSeeder, que
- * corre justo después, leyendo los Resources y Pages reales del panel.
+ * §9.E7: **este seeder ES la matriz de verdad**. Por eso usa
+ * `syncPermissions` y no `givePermissionTo`: si alguien le agrega un permiso
+ * a un rol desde la pantalla de Shield y no lo escribe acá, la próxima
+ * corrida lo quita. Es incómodo a propósito — un permiso que solo vive en la
+ * base es un permiso que nadie puede auditar contra el contrato.
  *
- * Antes este seeder creaba a mano ~20 permisos con la convención vieja de
- * Shield (`view_any_user`, `create_role`, `page_MyProfilePage`), pero las
- * policies de este proyecto chequean la convención configurada en
- * config/filament-shield.php — separator ':' y case 'pascal' — o sea
- * `ViewAny:User`, `Create:Role`. Eran dos vocabularios distintos: ningún
- * permiso de los que sembraba este archivo lo leía nadie, y dos de ellos
- * apuntaban a páginas (MyProfilePage, ActivityLogPage) que ni siquiera
- * existen en app/Filament/Pages.
+ * Los permisos los genera `shield:generate` leyendo los Resources reales;
+ * acá solo se reparten. `findOrCreate` es la red por si el seeder corre
+ * antes que Shield (§9.E2, punto 3).
  *
- * Se dejaban 20 filas muertas en la tabla `permissions`. El día que
- * alguien creara el rol receptor y le asignara `view_any_venta` siguiendo
- * ese ejemplo, el permiso no habría hecho absolutamente nada y el bug
- * habría costado medio día encontrarlo.
+ * ═══ EL REPARTO, Y DE DÓNDE SALE ═══
  *
- * Regla: los permisos SIEMPRE los genera Shield. Este seeder solo define
- * qué roles existen.
+ * **Administradora** (doña Rosa Elena): opera todo el negocio. No administra
+ * usuarios ni roles del sistema —eso es super_admin— pero sí ve la bitácora,
+ * porque es la dueña de la operación y necesita saber quién tocó qué.
+ *
+ * **Receptor** (don Elder, don Edwin): **cobra y registra el cobro, y del
+ * resto solo mira** (decidido con Mauricio el 4-ago-2026). Puede abrir un
+ * expediente para saber cuánto debe un cliente que llegó a pagar, pero no
+ * firma ventas: consumir un correlativo y congelar un plan de cuotas es de
+ * la administradora.
+ *
+ * Cuando exista el módulo de pagos, el receptor suma ahí `Create:Pago` y
+ * `Create:Recibo` — que es su trabajo real. Hoy no puede crear nada porque
+ * todavía no hay nada que cobrar en el sistema.
  */
 class RoleSeeder extends Seeder
 {
+    /**
+     * Los Resources del negocio. `User`, `Role` y `Activity` no están:
+     * los dos primeros son de super_admin y la bitácora se reparte aparte.
+     *
+     * @var list<string>
+     */
+    private const array RECURSOS = ['Proyecto', 'Bloque', 'Calle', 'Lote', 'Cliente', 'Compromiso', 'Venta'];
+
+    /**
+     * Todo salvo el borrado definitivo: `ForceDelete` destruye la fila y no
+     * deja rastro, así que queda solo para super_admin.
+     *
+     * @var list<string>
+     */
+    private const array ACCIONES_ADMINISTRADORA = [
+        'ViewAny', 'View', 'Create', 'Update', 'Delete', 'Restore', 'RestoreAny', 'Replicate', 'Reorder',
+    ];
+
+    /**
+     * @var list<string>
+     */
+    private const array ACCIONES_RECEPTOR = ['ViewAny', 'View'];
+
     public function run(): void
     {
         resolve(PermissionRegistrar::class)->forgetCachedPermissions();
@@ -42,12 +74,71 @@ class RoleSeeder extends Seeder
         // permisos generados, desde AdminUserSeeder.
         Role::query()->firstOrCreate(['name' => Utils::getSuperAdminName()], ['guard_name' => 'web']);
 
-        // Acceso al panel sin permisos de Resource. Es la base sobre la
-        // que se construirán los roles del negocio (receptor,
-        // administradora) cuando existan sus Resources y Shield haya
-        // generado sus permisos.
+        // Acceso al panel sin permisos de Resource. Es la base contra la que
+        // se prueban las restricciones (§5: todo módulo se prueba con un rol
+        // que NO sea admin).
         Role::query()->firstOrCreate(['name' => Utils::getPanelUserRoleName()], ['guard_name' => 'web']);
 
-        $this->command?->info('✓ Roles base listos: '.Utils::getSuperAdminName().', '.Utils::getPanelUserRoleName());
+        $this->administradora();
+        $this->receptor();
+
+        resolve(PermissionRegistrar::class)->forgetCachedPermissions();
+
+        $this->command?->info('✓ Roles listos: '.implode(', ', Roles::operativos()));
+    }
+
+    private function administradora(): void
+    {
+        $permisos = $this->permisos(self::ACCIONES_ADMINISTRADORA, self::RECURSOS);
+
+        // La bitácora, solo de lectura: quién tocó qué, sin poder borrarlo.
+        $permisos = [...$permisos, ...$this->permisos(['ViewAny', 'View'], ['Activity'])];
+
+        $this->rol(Roles::ADMINISTRADORA)->syncPermissions($permisos);
+    }
+
+    private function receptor(): void
+    {
+        $this->rol(Roles::RECEPTOR)->syncPermissions(
+            $this->permisos(self::ACCIONES_RECEPTOR, self::RECURSOS)
+        );
+    }
+
+    private function rol(string $nombre): Role
+    {
+        /** @var Role $rol */
+        $rol = Role::query()->firstOrCreate(['name' => $nombre], ['guard_name' => 'web']);
+
+        return $rol;
+    }
+
+    /**
+     * §9.E3: los permisos se nombran uno por uno, NUNCA por patrón.
+     *
+     * Un `LIKE '%:Venta'` parece más corto y es justo como se fugó
+     * `Anular:Compra` a recepción en MAYAP: el día que aparezca una acción
+     * nueva, el patrón se la regala a quien no debía tenerla.
+     *
+     * Devuelve el CONTRATO y no el modelo: `Permission::findOrCreate()` está
+     * tipado contra `Spatie\Permission\Contracts\Permission`, porque la clase
+     * del modelo es configurable en `config/permission.php`. Anotar el modelo
+     * concreto sería prometer algo que el paquete no garantiza.
+     *
+     * @param list<string> $acciones
+     * @param list<string> $recursos
+     *
+     * @return list<PermisoContrato>
+     */
+    private function permisos(array $acciones, array $recursos): array
+    {
+        $permisos = [];
+
+        foreach ($recursos as $recurso) {
+            foreach ($acciones as $accion) {
+                $permisos[] = Permission::findOrCreate("{$accion}:{$recurso}", 'web');
+            }
+        }
+
+        return $permisos;
     }
 }
