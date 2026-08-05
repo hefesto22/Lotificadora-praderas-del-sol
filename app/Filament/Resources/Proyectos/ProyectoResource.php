@@ -9,6 +9,8 @@ use App\Filament\Resources\Proyectos\Pages\EditProyecto;
 use App\Filament\Resources\Proyectos\Pages\ListProyectos;
 use App\Filament\Resources\Proyectos\Pages\VerPlano;
 use App\Filament\Resources\Proyectos\Pages\ViewProyecto;
+use App\Filament\Resources\Proyectos\RelationManagers\BloquesRelationManager;
+use App\Filament\Resources\Proyectos\RelationManagers\LotesRelationManager;
 use App\Filament\Resources\Proyectos\Schemas\ProyectoForm;
 use App\Filament\Resources\Proyectos\Schemas\ProyectoInfolist;
 use App\Filament\Resources\Proyectos\Tables\ProyectosTable;
@@ -93,11 +95,23 @@ class ProyectoResource extends Resource
         return ['nombre', 'codigo', 'municipio'];
     }
 
+    /**
+     * Bloques y lotes se administran DENTRO del proyecto (5-ago-2026).
+     *
+     * Salieron del menú principal porque no son entidades sueltas: no
+     * existe un bloque que no pertenezca a un proyecto, y agregarlo desde
+     * afuera obligaba a elegir el proyecto otra vez. Acá el proyecto ya
+     * está decidido — es el de la ficha— y los formularios son más cortos
+     * por eso.
+     *
+     * @return array<int, string>
+     */
     #[Override]
     public static function getRelations(): array
     {
         return [
-            //
+            BloquesRelationManager::class,
+            LotesRelationManager::class,
         ];
     }
 

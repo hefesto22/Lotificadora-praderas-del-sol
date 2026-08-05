@@ -11,6 +11,20 @@
             ['etiqueta' => 'Cancelados',  'valor' => $resumen['cancelado'],  'color' => EstadoLote::Cancelado->colorHex()],
             ['etiqueta' => 'Sin dibujar', 'valor' => $plano['sinDibujar'],   'color' => null],
         ];
+
+        /*
+        | Los planes de financiamiento salen de config y NO del plano: son
+        | del negocio, no de la geometría. Mientras la lista de precios por
+        | plazo no esté cargada esto viene vacío y el modal lo dice, en vez
+        | de inventar una cuota que un vendedor podría cotizarle a alguien.
+        */
+        $planes = array_values(array_map(
+            static fn (array $plan): array => [
+                'meses'      => (int) $plan['meses'],
+                'precioVara' => (string) $plan['precio_vara'],
+            ],
+            config('lotificadora.financiamiento.planes', []),
+        ));
     @endphp
 
     {{--
@@ -43,10 +57,9 @@
         }
         .dark .plano-esquema { background: rgba(251, 191, 36, .1); border-color: rgba(251, 191, 36, .3); color: rgb(253 230 138); }
 
-        .plano-grid { display: grid; gap: 1rem; grid-template-columns: 1fr; margin-top: 1rem; }
-        /* 3fr/1fr y no 2fr/1fr: el plano es el trabajo, el panel es la ficha. */
-        @media (min-width: 1024px) { .plano-grid { grid-template-columns: 3fr 1fr; } }
-        @media (min-width: 1536px) { .plano-grid { grid-template-columns: 4fr 1fr; } }
+        /* Una sola columna: la ficha lateral se fue al modal (5-ago-2026),
+           asi que el plano se queda con TODO el ancho de la pantalla. */
+        .plano-grid { margin-top: 1rem; }
 
         .plano-lienzo { padding: 0; position: relative; overflow: hidden; }
         .plano-lienzo svg {
@@ -55,22 +68,13 @@
             user-select: none; -webkit-user-select: none;
         }
 
-        /* Pantalla completa: el plano tapa todo y la ficha del lote pasa a
-           flotar arriba a la izquierda. Es CSS y no la Fullscreen API del
-           navegador porque asi los modales de Filament —apartar, vender—
-           siguen apareciendo encima y no detras. */
-        .plano-completo { position: fixed; inset: 0; z-index: 50; display: grid;
-            grid-template-columns: 1fr; gap: 0; margin: 0; padding: 0; background: #fff; }
+        /* Pantalla completa: el plano tapa todo. Es CSS y no la Fullscreen
+           API del navegador porque asi los modales de Filament —apartar,
+           vender— siguen apareciendo encima y no detras. */
+        .plano-completo { position: fixed; inset: 0; z-index: 50; margin: 0; padding: 0; background: #fff; }
         .dark .plano-completo { background: rgb(24 24 27); }
         .plano-completo .plano-lienzo { border-radius: 0; border: 0; height: 100vh; }
         .plano-completo .plano-lienzo svg { height: 100vh; }
-        .plano-completo .plano-ficha {
-            position: absolute; top: .75rem; left: .75rem; width: min(22rem, calc(100vw - 1.5rem));
-            max-height: calc(100vh - 1.5rem); overflow-y: auto; z-index: 10;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, .18);
-        }
-        @media (min-width: 1024px) { .plano-completo { grid-template-columns: 1fr; } }
-        @media (min-width: 1536px) { .plano-completo { grid-template-columns: 1fr; } }
         .plano-lienzo svg.arrastrando { cursor: grabbing; }
 
         .plano-controles { position: absolute; top: .625rem; right: .625rem; display: flex; gap: .25rem; }
@@ -110,22 +114,66 @@
         .plano-vacio-texto { max-width: 34rem; margin: .5rem auto 0; font-size: .875rem; line-height: 1.6; color: rgb(113 113 122); }
         .dark .plano-vacio-texto { color: rgb(161 161 170); }
 
-        .plano-detalle-vacio { font-size: .875rem; color: rgb(113 113 122); }
-        .dark .plano-detalle-vacio { color: rgb(161 161 170); }
-        .plano-detalle-cabecera { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; }
-        .plano-detalle-codigo { font-size: 1.125rem; font-weight: 600; color: rgb(9 9 11); }
-        .dark .plano-detalle-codigo { color: #fff; }
-        .plano-detalle-sub { font-size: .875rem; color: rgb(113 113 122); }
-        .dark .plano-detalle-sub { color: rgb(161 161 170); }
+        /* ── El modal del lote ────────────────────────────────────────────
+           z-index 50, el mismo tope que usa Filament. No es un empate al
+           azar: el modal de Filament se monta al final del <body>, o sea
+           DESPUES de este en el orden del documento, y con igual z-index
+           gana el ultimo. Asi apartar y vender siguen saliendo encima.
+           Aparte, al montar una accion este se cierra solo. */
+        .plano-modal {
+            position: fixed; inset: 0; z-index: 50; display: flex;
+            align-items: center; justify-content: center; padding: 1rem;
+            background: rgba(9, 9, 11, .55); backdrop-filter: blur(2px);
+        }
+        .plano-modal-caja {
+            width: min(66rem, 100%); max-height: min(92vh, 54rem);
+            display: flex; flex-direction: column; overflow: hidden;
+            background: #fff; border-radius: 1rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, .35);
+        }
+        .dark .plano-modal-caja { background: rgb(24 24 27); }
+
+        .plano-modal-cabecera {
+            display: flex; align-items: flex-start; justify-content: space-between;
+            gap: 1rem; padding: 1rem 1.25rem;
+            border-bottom: 1px solid rgb(244 244 245);
+        }
+        .dark .plano-modal-cabecera { border-bottom-color: rgba(255, 255, 255, .1); }
+        .plano-modal-codigo { font-size: 1.25rem; font-weight: 600; color: rgb(9 9 11); }
+        .dark .plano-modal-codigo { color: #fff; }
+        .plano-modal-sub { margin-top: .125rem; font-size: .8125rem; color: rgb(113 113 122); }
+        .dark .plano-modal-sub { color: rgb(161 161 170); }
+        .plano-modal-cerrar {
+            border: 0; background: transparent; cursor: pointer; line-height: 1;
+            font-size: 1.5rem; padding: 0 .25rem; color: rgb(113 113 122);
+        }
+        .plano-modal-cerrar:hover { color: rgb(9 9 11); }
+        .dark .plano-modal-cerrar:hover { color: #fff; }
+
+        .plano-modal-cuerpo {
+            display: grid; grid-template-columns: 1fr; gap: 1.25rem;
+            padding: 1.25rem; overflow-y: auto;
+        }
+        @media (min-width: 900px) { .plano-modal-cuerpo { grid-template-columns: 1.2fr 1fr; } }
+
+        .plano-modal-dibujo {
+            display: block; width: 100%; height: min(48vh, 24rem);
+            background: rgb(250 250 250); border: 1px solid rgb(244 244 245);
+            border-radius: .75rem;
+        }
+        .dark .plano-modal-dibujo { background: rgba(255, 255, 255, .04); border-color: rgba(255, 255, 255, .1); }
+        .plano-modal-escala { margin-top: .5rem; font-size: .6875rem; color: rgb(161 161 170); text-align: center; }
+
         .plano-badge { flex-shrink: 0; border-radius: .375rem; padding: .25rem .5rem; font-size: .75rem; font-weight: 500; color: #fff; }
 
-        .plano-datos { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgb(244 244 245); font-size: .875rem; }
-        .dark .plano-datos { border-top-color: rgba(255, 255, 255, .1); }
-        .plano-dato { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: .25rem 0; }
+        .plano-datos { font-size: .875rem; }
+        .plano-dato { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: .3125rem 0; border-bottom: 1px solid rgb(250 250 250); }
+        .dark .plano-dato { border-bottom-color: rgba(255, 255, 255, .06); }
         .plano-dato dt { color: rgb(113 113 122); }
         .dark .plano-dato dt { color: rgb(161 161 170); }
-        .plano-dato dd { font-variant-numeric: tabular-nums; color: rgb(9 9 11); margin: 0; }
+        .plano-dato dd { font-variant-numeric: tabular-nums; color: rgb(9 9 11); margin: 0; font-weight: 500; }
         .dark .plano-dato dd { color: #fff; }
+        .plano-dato-fuerte dd { font-size: 1.125rem; font-weight: 600; }
 
         .plano-acciones { margin-top: 1rem; }
         .plano-botonera { display: flex; gap: .5rem; flex-wrap: wrap; }
@@ -142,12 +190,38 @@
         .plano-accion-vender { border-color: #2563eb; color: #1d4ed8; }
         .dark .plano-accion-vender { border-color: rgba(37, 99, 235, .5); color: #93c5fd; }
 
+        .plano-detalle-vacio { font-size: .875rem; color: rgb(113 113 122); }
+        .dark .plano-detalle-vacio { color: rgb(161 161 170); }
+
         .plano-aviso {
             margin-top: 1rem; border-radius: .5rem; padding: .75rem;
             background: rgb(255 251 235); color: rgb(120 53 15);
             font-size: .75rem; line-height: 1.6;
         }
         .dark .plano-aviso { background: rgba(251, 191, 36, .1); color: rgb(253 230 138); }
+
+        .plano-planes { margin-top: 1.25rem; border-top: 1px solid rgb(244 244 245); padding-top: 1rem; }
+        .dark .plano-planes { border-top-color: rgba(255, 255, 255, .1); }
+        .plano-planes-titulo { font-size: .8125rem; font-weight: 600; color: rgb(9 9 11); }
+        .dark .plano-planes-titulo { color: #fff; }
+        .plano-prima { display: flex; align-items: center; gap: .5rem; margin: .625rem 0; font-size: .8125rem; color: rgb(113 113 122); }
+        .plano-prima input {
+            width: 9rem; border: 1px solid rgb(228 228 231); border-radius: .5rem;
+            padding: .3125rem .5rem; font-size: .8125rem; text-align: right;
+            font-variant-numeric: tabular-nums; background: #fff; color: rgb(9 9 11);
+        }
+        .dark .plano-prima input { border-color: rgba(255, 255, 255, .15); background: rgba(255, 255, 255, .05); color: #fff; }
+        .plano-tabla { width: 100%; border-collapse: collapse; font-size: .8125rem; font-variant-numeric: tabular-nums; }
+        .plano-tabla th {
+            text-align: right; font-weight: 500; color: rgb(113 113 122);
+            padding: .375rem .5rem; border-bottom: 1px solid rgb(228 228 231);
+        }
+        .dark .plano-tabla th { color: rgb(161 161 170); border-bottom-color: rgba(255, 255, 255, .1); }
+        .plano-tabla th:first-child, .plano-tabla td:first-child { text-align: left; }
+        .plano-tabla td { padding: .375rem .5rem; border-bottom: 1px solid rgb(250 250 250); text-align: right; color: rgb(9 9 11); }
+        .dark .plano-tabla td { border-bottom-color: rgba(255, 255, 255, .06); color: rgb(228 228 231); }
+        .plano-tabla td.cuota { font-weight: 600; }
+        .plano-planes-nota { margin-top: .5rem; font-size: .6875rem; line-height: 1.6; color: rgb(161 161 170); }
     </style>
 
     <div class="plano-stats">
@@ -184,9 +258,12 @@
         <div
             x-data="{
                 lotes: @js($plano['lotes']),
+                planes: @js($planes),
                 base: @js($plano['viewBox']).split(' ').map(Number),
                 vista: { x: 0, y: 0, w: 1, h: 1 },
                 seleccionado: null,
+                abierto: false,
+                prima: '',
                 arrastrando: false,
                 movio: false,
                 inicio: { x: 0, y: 0, vx: 0, vy: 0 },
@@ -211,6 +288,7 @@
                             .catch(() => {});
                     }
                 },
+
 
                 /* El viewBox se escribe con setAttribute y no con :viewBox
                    porque el parser de HTML pasa los atributos a minusculas,
@@ -303,22 +381,304 @@
                     const debajo = document.elementFromPoint(e.clientX, e.clientY);
                     const indice = debajo?.dataset?.indice;
 
-                    this.seleccionar(indice === undefined ? null : Number(indice));
+                    this.seleccionar(indice === undefined ? null : Number(indice), debajo);
                 },
 
-                seleccionar(indice) {
-                    // Soltar sobre el fondo deselecciona.
+                /*
+                   El estado, el color y el cliente NO se leen del arreglo
+                   `lotes`: se leen de los data-* del poligono.
+
+                   Motivo: `lotes` se serializo una sola vez, cuando se
+                   pinto la pagina, y Alpine no vuelve a evaluar x-data
+                   cuando Livewire re-renderiza. Los atributos del poligono
+                   si los actualiza el morph. Sin esto, apartar un lote y
+                   volver a abrirlo lo seguiria mostrando disponible.
+                */
+                seleccionar(indice, elemento = null) {
+                    // Soltar sobre el fondo cierra y deselecciona.
                     if (indice === null || Number.isNaN(indice) || ! this.lotes[indice]) {
                         this.seleccionado = null;
+                        this.abierto = false;
 
                         return;
                     }
 
-                    const lote = this.lotes[indice];
-                    this.seleccionado = this.seleccionado?.id === lote.id ? null : lote;
+                    const datos = elemento?.dataset ?? {};
+
+                    this.seleccionado = {
+                        ...this.lotes[indice],
+                        estado: datos.estado ?? this.lotes[indice].estado,
+                        etiqueta: datos.etiqueta ?? this.lotes[indice].etiqueta,
+                        color: datos.color ?? this.lotes[indice].color,
+                        cliente: datos.cliente ? datos.cliente : null,
+                    };
+
+                    this.prima = '';
+                    this.abierto = true;
+                },
+
+                cerrar() { this.abierto = false },
+
+                /*
+                   La geometria del lote para dibujarlo solo, en grande.
+
+                   Las coordenadas ya vienen en VARAS y sin transformar
+                   (ver PlanoDelProyecto: el sistema es el de SVG y no se
+                   invierte ningun eje), asi que el largo de cada lado es
+                   directamente la medida del lote. No hay que escalar nada.
+                */
+                get figura() {
+                    const lote = this.seleccionado;
+
+                    if (! lote || ! lote.puntos) return null;
+
+                    const puntos = String(lote.puntos).trim().split(/\s+/)
+                        .map((par) => par.split(',').map(Number))
+                        .filter((p) => p.length === 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]));
+
+                    if (puntos.length < 3) return null;
+
+                    const xs = puntos.map((p) => p[0]);
+                    const ys = puntos.map((p) => p[1]);
+                    const minX = Math.min(...xs);
+                    const maxX = Math.max(...xs);
+                    const minY = Math.min(...ys);
+                    const maxY = Math.max(...ys);
+                    const cx = xs.reduce((a, b) => a + b, 0) / xs.length;
+                    const cy = ys.reduce((a, b) => a + b, 0) / ys.length;
+
+                    const diagonal = Math.hypot(maxX - minX, maxY - minY) || 1;
+                    const separacion = diagonal * 0.055;
+                    const fuente = diagonal * 0.05;
+
+                    const lados = [];
+
+                    for (let i = 0; i < puntos.length; i++) {
+                        const a = puntos[i];
+                        const b = puntos[(i + 1) % puntos.length];
+                        const dx = b[0] - a[0];
+                        const dy = b[1] - a[1];
+                        const largo = Math.hypot(dx, dy);
+
+                        // Un lado de menos de 2% de la diagonal es ruido del
+                        // trazado, no una medida que alguien vaya a cotar.
+                        if (largo < diagonal * 0.02) continue;
+
+                        const mx = (a[0] + b[0]) / 2;
+                        const my = (a[1] + b[1]) / 2;
+
+                        // Normal unitaria, girada hacia AFUERA: si apunta
+                        // hacia el centro del lote se invierte.
+                        let nx = -dy / largo;
+                        let ny = dx / largo;
+
+                        if ((mx - cx) * nx + (my - cy) * ny < 0) { nx = -nx; ny = -ny }
+
+                        // El texto se lee siempre de izquierda a derecha:
+                        // pasados los 90 grados se voltea media vuelta.
+                        let angulo = Math.atan2(dy, dx) * 180 / Math.PI;
+
+                        if (angulo > 90) angulo -= 180;
+                        if (angulo < -90) angulo += 180;
+
+                        lados.push({ a, b, mx, my, nx, ny, largo, angulo, extra: 0 });
+                    }
+
+                    /*
+                       Dos linderos cortos y seguidos —esquinas recortadas,
+                       lotes en cuña— dejaban sus cotas una encima de la
+                       otra y no se leia ninguna.
+
+                       El choque NO se mide de centro a centro: «12.59 V» es
+                       cinco veces mas ancho que alto, y dos textos con los
+                       centros lejos igual se cruzan. Se muestrea cada
+                       etiqueta a lo largo de su propia linea de texto —que
+                       va girada con el lado— y se compara punto contra
+                       punto. Al chocar se empuja hacia afuera la del lado
+                       MAS CORTO, que es la que menos lugar propio tiene.
+                    */
+                    const muestrasDe = (lado) => {
+                        const distancia = separacion + fuente * 0.85 + lado.extra;
+                        const x = lado.mx + lado.nx * distancia;
+                        const y = lado.my + lado.ny * distancia;
+
+                        // 0.55 em por caracter: el ancho tipico de un digito
+                        // en las fuentes de palo seco que usa el panel.
+                        const ancho = (lado.largo.toFixed(2).length + 2) * fuente * 0.55;
+                        const radianes = lado.angulo * Math.PI / 180;
+                        const ux = Math.cos(radianes);
+                        const uy = Math.sin(radianes);
+                        const puntos = [];
+
+                        for (let k = -2; k <= 2; k++) {
+                            puntos.push([x + ux * ancho * k / 4, y + uy * ancho * k / 4]);
+                        }
+
+                        return puntos;
+                    };
+
+                    const tope = fuente * 8;
+
+                    for (let paso = 0; paso < 12; paso++) {
+                        let choco = false;
+
+                        for (let i = 0; i < lados.length; i++) {
+                            for (let j = i + 1; j < lados.length; j++) {
+                                const unos = muestrasDe(lados[i]);
+                                const otros = muestrasDe(lados[j]);
+                                let cerca = Infinity;
+
+                                for (const p of unos) {
+                                    for (const q of otros) {
+                                        cerca = Math.min(cerca, Math.hypot(p[0] - q[0], p[1] - q[1]));
+                                    }
+                                }
+
+                                const minima = fuente * 1.15;
+
+                                if (cerca >= minima) continue;
+
+                                const corto = lados[i].largo <= lados[j].largo ? lados[i] : lados[j];
+
+                                if (corto.extra >= tope) continue;
+
+                                corto.extra += Math.max(minima - cerca, fuente * 0.25);
+                                choco = true;
+                            }
+                        }
+
+                        if (! choco) break;
+                    }
+
+                    const empujado = Math.max(0, ...lados.map((l) => l.extra));
+                    const margen = separacion + fuente * 2.6 + empujado;
+
+                    return {
+                        lados,
+                        cx,
+                        cy,
+                        fuente,
+                        separacion,
+                        viewBox: `${minX - margen} ${minY - margen} ${maxX - minX + margen * 2} ${maxY - minY + margen * 2}`,
+                    };
+                },
+
+                /*
+                   Las cotas se construyen con createElementNS y no con un
+                   x-for. Es a proposito: <template> dentro de <svg> no es
+                   un template de verdad —el namespace SVG no define
+                   .content— y Alpine lo ignora en silencio. Ya paso una vez
+                   con los rotulos del calco.
+                */
+                dibujarCotas(g) {
+                    const NS = 'http://www.w3.org/2000/svg';
+                    const figura = this.figura;
+
+                    while (g.firstChild) g.removeChild(g.firstChild);
+
+                    if (! figura) return;
+
+                    for (const lado of figura.lados) {
+                        // `extra` mueve la cota ENTERA —linea, patitas y
+                        // texto— para que el numero nunca quede flotando
+                        // lejos de la linea que esta acotando.
+                        const sep = figura.separacion + lado.extra;
+
+                        const linea = document.createElementNS(NS, 'line');
+                        linea.setAttribute('x1', lado.a[0] + lado.nx * sep);
+                        linea.setAttribute('y1', lado.a[1] + lado.ny * sep);
+                        linea.setAttribute('x2', lado.b[0] + lado.nx * sep);
+                        linea.setAttribute('y2', lado.b[1] + lado.ny * sep);
+                        linea.setAttribute('stroke', '#dc2626');
+                        linea.setAttribute('stroke-width', '1.2');
+                        linea.setAttribute('vector-effect', 'non-scaling-stroke');
+                        g.appendChild(linea);
+
+                        // Las dos patitas que amarran la cota al vertice.
+                        for (const punta of [lado.a, lado.b]) {
+                            const pata = document.createElementNS(NS, 'line');
+                            pata.setAttribute('x1', punta[0]);
+                            pata.setAttribute('y1', punta[1]);
+                            pata.setAttribute('x2', punta[0] + lado.nx * sep * 1.25);
+                            pata.setAttribute('y2', punta[1] + lado.ny * sep * 1.25);
+                            pata.setAttribute('stroke', '#fca5a5');
+                            pata.setAttribute('stroke-width', '1');
+                            pata.setAttribute('vector-effect', 'non-scaling-stroke');
+                            g.appendChild(pata);
+                        }
+
+                        const tx = lado.mx + lado.nx * (sep + figura.fuente * 0.85 + lado.extra);
+                        const ty = lado.my + lado.ny * (sep + figura.fuente * 0.85 + lado.extra);
+
+                        const texto = document.createElementNS(NS, 'text');
+                        texto.setAttribute('x', tx);
+                        texto.setAttribute('y', ty);
+                        texto.setAttribute('text-anchor', 'middle');
+                        texto.setAttribute('dominant-baseline', 'central');
+                        texto.setAttribute('font-size', figura.fuente);
+                        texto.setAttribute('font-weight', '600');
+                        texto.setAttribute('fill', '#b91c1c');
+                        texto.setAttribute('transform', `rotate(${lado.angulo} ${tx} ${ty})`);
+                        texto.textContent = `${lado.largo.toFixed(2)} V`;
+                        g.appendChild(texto);
+                    }
+                },
+
+                /*
+                   El cuadro de plazos. Se calcula EN EL MOMENTO y con
+                   centavos enteros, no con decimales de punto flotante.
+
+                   Es un estimado para cotizar de pie frente al cliente: el
+                   plan que se firma lo arma PlanDeCuotas del lado del
+                   servidor, que es el que reparte el residuo del redondeo
+                   en la ultima cuota.
+                */
+                get planesCalculados() {
+                    const lote = this.seleccionado;
+
+                    if (! lote || this.planes.length === 0) return [];
+
+                    const area = Number(String(lote.areaVaras).replace(/,/g, ''));
+
+                    if (! Number.isFinite(area) || area <= 0) return [];
+
+                    const prima = Math.max(0, Math.round((Number(this.prima) || 0) * 100));
+
+                    return this.planes.map((plan) => {
+                        const total = Math.round(area * Number(plan.precioVara) * 100);
+                        const saldo = Math.max(total - prima, 0);
+
+                        return {
+                            meses: plan.meses,
+                            etiqueta: plan.meses > 0 ? `${plan.meses} meses` : 'Contado',
+                            precioVara: this.lempiras(Math.round(Number(plan.precioVara) * 100)),
+                            total: this.lempiras(total),
+                            cuota: plan.meses > 0 ? this.lempiras(Math.round(saldo / plan.meses)) : '—',
+                        };
+                    });
+                },
+
+                /* Dos decimales y separador de miles, para todo lo que se
+                   mira: el area viene de la base con cuatro decimales
+                   (1200.5700) y asi no se le enseña a nadie. */
+                numero(valor, decimales = 2) {
+                    const partido = Number(valor).toFixed(decimales).split('.');
+                    const miles = partido[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+                    return partido.length > 1 ? `${miles}.${partido[1]}` : miles;
+                },
+
+                lempiras(centavos) { return `L ${this.numero(centavos / 100)}` },
+
+                get areaFormateada() {
+                    const crudo = String(this.seleccionado?.areaVaras ?? '').replace(/,/g, '');
+                    const area = Number(crudo);
+
+                    return Number.isFinite(area) ? this.numero(area) : crudo;
                 },
             }"
             :class="completo ? 'plano-grid plano-completo' : 'plano-grid'"
+            x-on:keydown.escape.window="if (abierto) { cerrar() } else { completo = false }"
         >
             <div class="plano-card plano-lienzo">
                 <svg
@@ -327,7 +687,6 @@
                     preserveAspectRatio="xMidYMid meet"
                     x-effect="$el.setAttribute('viewBox', viewBox)"
                     :class="arrastrando ? 'arrastrando' : ''"
-                    x-on:keydown.escape.window="completo = false"
                     x-on:wheel.prevent="alRodar($event)"
                     x-on:pointerdown.prevent="alPresionar($event)"
                     x-on:pointermove="alMover($event)"
@@ -362,7 +721,12 @@
 
                     {{-- non-scaling-stroke: el borde se mide en pixeles de
                          pantalla, asi que al acercarse no se convierte en
-                         una franja gruesa que se come el lote. --}}
+                         una franja gruesa que se come el lote.
+
+                         Los data-* son la fuente FRESCA del estado: los
+                         escribe el servidor y los actualiza el morph de
+                         Livewire despues de apartar, vender o liberar. Ver
+                         el comentario de seleccionar(). --}}
                     @foreach ($plano['lotes'] as $indice => $lote)
                         <polygon
                             points="{{ $lote['puntos'] }}"
@@ -372,6 +736,10 @@
                             vector-effect="non-scaling-stroke"
                             class="lote"
                             data-indice="{{ $indice }}"
+                            data-estado="{{ $lote['estado'] }}"
+                            data-etiqueta="{{ $lote['etiqueta'] }}"
+                            data-color="{{ $lote['color'] }}"
+                            data-cliente="{{ $lote['cliente'] }}"
                             :stroke="seleccionado?.id === {{ $lote['id'] }} ? '#0f172a' : '#ffffff'"
                             :stroke-width="seleccionado?.id === {{ $lote['id'] }} ? 2.5 : 1"
                         >
@@ -387,20 +755,23 @@
                          tinte. pointer-events none: lo que se clickea son
                          los poligonos de la base, no el dibujo. --}}
                     <g class="plano-calco" x-show="verCalco" style="pointer-events: none;">
-                        {{-- Los rotulos del plano que NO son de lote: nombres de
-                             calle, areas verdes, el norte. Van como texto de
-                             verdad porque el DXF nativo los trae como texto. --}}
-                        <template x-for="t in calco.textos" :key="t.x + ',' + t.y + t.t">
-                            <text
-                                :x="t.x"
-                                :y="t.y"
-                                :font-size="t.h * 1.15"
-                                :transform="`rotate(${t.r} ${t.x} ${t.y})`"
-                                fill="currentColor"
-                                fill-opacity="0.75"
-                                x-text="t.t"
-                            ></text>
-                        </template>
+                        {{-- Los rotulos del topografo —CALLE PUBLICA, BLOQUE X,
+                             las areas verdes— NO se dibujan (5-ago-2026).
+
+                             Vienen en el JSON del calco y estuvieron rotos
+                             desde el principio por un <template x-for> dentro
+                             del <svg>, que en contexto SVG no es un template
+                             de verdad. Al arreglarlo se vieron por primera
+                             vez, y la conclusion fue que estorban: se
+                             amontonan sobre los lotes, compiten con nuestros
+                             propios numeros y no dicen nada que la persona no
+                             sepa mirando el dibujo.
+
+                             El dato sigue en el JSON (`calco.textos`) por si
+                             algun dia se quieren, por ejemplo solo a partir
+                             de cierto acercamiento. Lo que se dibuja es el
+                             TRAZO del topografo, que es lo que sirve de
+                             referencia. --}}
                         <path
                             :d="calco.obra"
                             fill="none"
@@ -465,92 +836,210 @@
                     : 'Rueda para acercar · arrastrá para moverte · clic en un lote · «Ampliar» para pantalla completa'"></div>
             </div>
 
-            <div class="plano-card plano-ficha">
-                <template x-if="seleccionado === null">
-                    <p class="plano-detalle-vacio">Hacé clic en un lote del plano para ver su información.</p>
-                </template>
+            {{--
+                La ficha del lote, en modal.
 
-                <template x-if="seleccionado !== null">
-                    <div>
-                        <div class="plano-detalle-cabecera">
+                Antes era un panel fijo al costado que se comia un cuarto de
+                pantalla estuviera vacio o no. Ahora el plano usa el ancho
+                completo y el lote se abre encima, con su dibujo en grande y
+                las medidas de cada lindero — que es como se le enseña un
+                lote a un cliente.
+            --}}
+            <template x-if="abierto && seleccionado !== null">
+                <div class="plano-modal" x-on:click.self="cerrar()">
+                    <div class="plano-modal-caja" x-transition>
+                        <div class="plano-modal-cabecera">
                             <div>
-                                <p class="plano-detalle-codigo" x-text="seleccionado.codigo"></p>
-                                <p class="plano-detalle-sub">Lote <span x-text="seleccionado.rotulo"></span></p>
-                            </div>
-                            <span
-                                class="plano-badge"
-                                :style="`background: ${seleccionado.color}`"
-                                x-text="seleccionado.etiqueta"
-                            ></span>
-                        </div>
-
-                        <dl class="plano-datos">
-                            <div class="plano-dato">
-                                <dt>Área</dt>
-                                <dd><span x-text="seleccionado.areaVaras"></span> v²</dd>
-                            </div>
-                            <div class="plano-dato">
-                                <dt>Valor</dt>
-                                <dd x-text="seleccionado.valorFormateado"></dd>
-                            </div>
-                            <template x-if="seleccionado.cliente">
-                                <div class="plano-dato">
-                                    <dt>Cliente</dt>
-                                    <dd x-text="seleccionado.cliente"></dd>
-                                </div>
-                            </template>
-                        </dl>
-
-                        {{--
-                            Los botones montan las acciones de Filament por
-                            nombre. El estado del lote decide cuales tienen
-                            sentido: no se aparta lo que ya esta apartado ni
-                            se libera una venta.
-                        --}}
-                        <div class="plano-acciones">
-                            <template x-if="seleccionado.estado === 'disponible'">
-                                <div class="plano-botonera">
-                                    <button type="button" class="plano-accion plano-accion-apartar"
-                                        x-on:click="$wire.mountAction('apartarLote', { lote: seleccionado.id })">
-                                        Apartar
-                                    </button>
-                                    <button type="button" class="plano-accion plano-accion-vender"
-                                        x-on:click="$wire.mountAction('venderLote', { lote: seleccionado.id })">
-                                        Vender
-                                    </button>
-                                </div>
-                            </template>
-
-                            <template x-if="seleccionado.estado === 'apartado'">
-                                <div class="plano-botonera">
-                                    <button type="button" class="plano-accion plano-accion-vender"
-                                        x-on:click="$wire.mountAction('venderLote', { lote: seleccionado.id })">
-                                        Convertir en venta
-                                    </button>
-                                    <button type="button" class="plano-accion"
-                                        x-on:click="$wire.mountAction('liberarLote', { lote: seleccionado.id })">
-                                        Liberar
-                                    </button>
-                                </div>
-                            </template>
-
-                            <template x-if="seleccionado.estado === 'vendido'">
-                                <p class="plano-detalle-vacio">
-                                    Lote vendido. Deshacer una venta es una rescisión y ese trámite
-                                    todavía no está en el sistema.
+                                <p class="plano-modal-codigo" x-text="seleccionado.codigo"></p>
+                                <p class="plano-modal-sub">
+                                    Bloque <span x-text="seleccionado.bloque"></span> ·
+                                    lote <span x-text="seleccionado.numero"></span>
                                 </p>
-                            </template>
+                            </div>
+
+                            <div style="display: flex; align-items: center; gap: .75rem;">
+                                <span
+                                    class="plano-badge"
+                                    :style="`background: ${seleccionado.color}`"
+                                    x-text="seleccionado.etiqueta"
+                                ></span>
+                                <button type="button" class="plano-modal-cerrar" x-on:click="cerrar()" title="Cerrar (Esc)">&times;</button>
+                            </div>
                         </div>
 
-                        <template x-if="seleccionado.desalineado">
-                            <p class="plano-aviso">
-                                El dibujo de este lote no coincide con su área cargada. Manda el área del plano
-                                legal — el polígono solo está avisando que alguien tiene que mirarlo.
-                            </p>
-                        </template>
+                        <div class="plano-modal-cuerpo">
+                            <div>
+                                {{-- Mismo truco del viewBox que en el plano
+                                     grande: el parser baja los atributos a
+                                     minusculas y 'viewbox' no existe en SVG. --}}
+                                <svg
+                                    class="plano-modal-dibujo"
+                                    preserveAspectRatio="xMidYMid meet"
+                                    x-effect="$el.setAttribute('viewBox', figura ? figura.viewBox : '0 0 100 100')"
+                                >
+                                    <polygon
+                                        :points="seleccionado.puntos"
+                                        :fill="seleccionado.color"
+                                        fill-opacity="0.22"
+                                        :stroke="seleccionado.color"
+                                        stroke-width="1.8"
+                                        stroke-linejoin="round"
+                                        vector-effect="non-scaling-stroke"
+                                    />
+
+                                    {{-- Solo el area en el centro. El numero
+                                         del lote NO va: ya esta arriba en el
+                                         encabezado del modal —el codigo y el
+                                         "Bloque Q · lote 2"— y repetirlo
+                                         adentro del dibujo solo estorba. --}}
+                                    <text
+                                        x-show="figura"
+                                        :x="figura?.cx"
+                                        :y="figura?.cy"
+                                        text-anchor="middle"
+                                        dominant-baseline="central"
+                                        :font-size="figura ? figura.fuente * 1.35 : 1"
+                                        font-weight="600"
+                                        fill="#3f3f46"
+                                        x-text="`${areaFormateada} v²`"
+                                    ></text>
+
+                                    <g x-effect="dibujarCotas($el)"></g>
+                                </svg>
+
+                                <p class="plano-modal-escala">Medidas en varas, tomadas del plano del topógrafo.</p>
+                            </div>
+
+                            <div>
+                                <dl class="plano-datos">
+                                    <div class="plano-dato">
+                                        <dt>Área</dt>
+                                        <dd><span x-text="areaFormateada"></span> v²</dd>
+                                    </div>
+                                    <div class="plano-dato plano-dato-fuerte">
+                                        <dt>Valor</dt>
+                                        <dd x-text="seleccionado.valorFormateado"></dd>
+                                    </div>
+                                    <template x-if="seleccionado.cliente">
+                                        <div class="plano-dato">
+                                            <dt>Cliente</dt>
+                                            <dd x-text="seleccionado.cliente"></dd>
+                                        </div>
+                                    </template>
+                                </dl>
+
+                                {{--
+                                    Los botones montan las acciones de Filament
+                                    por nombre y cierran este modal en el acto:
+                                    el de Filament se monta al final del <body>
+                                    y no tendria por que pelear con este por
+                                    quien va encima.
+                                --}}
+                                <div class="plano-acciones">
+                                    <template x-if="seleccionado.estado === 'disponible'">
+                                        <div class="plano-botonera">
+                                            <button type="button" class="plano-accion plano-accion-apartar"
+                                                x-on:click="$wire.mountAction('apartarLote', { lote: seleccionado.id }); abierto = false">
+                                                Apartar
+                                            </button>
+                                            <button type="button" class="plano-accion plano-accion-vender"
+                                                x-on:click="$wire.mountAction('venderLote', { lote: seleccionado.id }); abierto = false">
+                                                Vender
+                                            </button>
+                                        </div>
+                                    </template>
+
+                                    <template x-if="seleccionado.estado === 'apartado'">
+                                        <div class="plano-botonera">
+                                            <button type="button" class="plano-accion plano-accion-vender"
+                                                x-on:click="$wire.mountAction('venderLote', { lote: seleccionado.id }); abierto = false">
+                                                Convertir en venta
+                                            </button>
+                                            <button type="button" class="plano-accion"
+                                                x-on:click="$wire.mountAction('liberarLote', { lote: seleccionado.id }); abierto = false">
+                                                Liberar
+                                            </button>
+                                        </div>
+                                    </template>
+
+                                    <template x-if="seleccionado.estado === 'vendido'">
+                                        <p class="plano-detalle-vacio">
+                                            Lote vendido. Deshacer una venta es una rescisión y ese trámite
+                                            todavía no está en el sistema.
+                                        </p>
+                                    </template>
+                                </div>
+
+                                <template x-if="seleccionado.desalineado">
+                                    <p class="plano-aviso">
+                                        El dibujo de este lote no coincide con su área cargada. Manda el área del plano
+                                        legal — el polígono solo está avisando que alguien tiene que mirarlo.
+                                    </p>
+                                </template>
+
+                                {{--
+                                    Planes de pago.
+
+                                    La lista de precios por plazo vive en
+                                    config/lotificadora.php y hoy viene vacía:
+                                    el precio de la vara no es el mismo a 1 año
+                                    que a 4, y ese cuadro todavía no lo tenemos
+                                    por escrito. Mientras no esté, acá no sale
+                                    ninguna cuota — un número inventado en esta
+                                    pantalla es un número que alguien le cotiza
+                                    a un cliente.
+                                --}}
+                                <div class="plano-planes">
+                                    <p class="plano-planes-titulo">Planes de pago</p>
+
+                                    <template x-if="planes.length === 0">
+                                        <p class="plano-planes-nota">
+                                            Falta cargar el precio por vara² de cada plazo. En cuanto esté,
+                                            este cuadro calcula la cuota de cada plan sobre este lote.
+                                        </p>
+                                    </template>
+
+                                    <template x-if="planes.length > 0">
+                                        <div>
+                                            <label class="plano-prima">
+                                                Prima
+                                                <input type="number" min="0" step="0.01" placeholder="0.00" x-model="prima">
+                                                L
+                                            </label>
+
+                                            <table class="plano-tabla">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Plazo</th>
+                                                        <th>Precio v²</th>
+                                                        <th>Valor</th>
+                                                        <th>Cuota</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <template x-for="plan in planesCalculados" :key="plan.meses">
+                                                        <tr>
+                                                            <td x-text="plan.etiqueta"></td>
+                                                            <td x-text="plan.precioVara"></td>
+                                                            <td x-text="plan.total"></td>
+                                                            <td class="cuota" x-text="plan.cuota"></td>
+                                                        </tr>
+                                                    </template>
+                                                </tbody>
+                                            </table>
+
+                                            <p class="plano-planes-nota">
+                                                Estimado para cotizar. El plan que se firma se arma al registrar
+                                                la venta: ahí el residuo del redondeo va a la última cuota.
+                                            </p>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                </template>
-            </div>
+                </div>
+            </template>
         </div>
     @endif
 </x-filament-panels::page>

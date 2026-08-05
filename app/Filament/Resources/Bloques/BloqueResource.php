@@ -39,6 +39,23 @@ class BloqueResource extends Resource
     #[Override]
     protected static ?int $navigationSort = 2;
 
+    /**
+     * Fuera del menú principal (5-ago-2026).
+     *
+     * Los bloques no se dan de alta desde acá: entran con el plano, que el
+     * importador de DXF lee del archivo del topógrafo. Esta pantalla es para
+     * consultar y corregir, y se llega a ella desde la ficha del proyecto.
+     *
+     * El Resource sigue existiendo entero —rutas, permisos y policy— así que
+     * los enlaces directos y `getUrl()` funcionan igual. Lo único que cambia
+     * es que no ocupa un renglón del menú de doña Rosa Elena (§14).
+     */
+    #[Override]
+    public static function shouldRegisterNavigation(): bool
+    {
+        return false;
+    }
+
     #[Override]
     public static function getNavigationGroup(): ?string
     {

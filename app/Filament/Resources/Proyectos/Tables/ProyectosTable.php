@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Proyectos\Tables;
 
+use App\Filament\Resources\Proyectos\ProyectoResource;
+use App\Models\Proyecto;
+use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TernaryFilter;
@@ -81,6 +85,21 @@ class ProyectosTable
                     ->falseLabel('Solo inactivos'),
             ])
             ->recordActions([
+                /*
+                | Fuera del menú de tres puntos a propósito.
+                |
+                | El plano es a lo que se entra todos los días —es la
+                | pantalla donde se aparta y se vende— así que no debería
+                | costar dos clics y adivinar qué hay detrás del menú. Ver,
+                | editar y borrar sí van adentro: son ocasionales.
+                */
+                Action::make('plano')
+                    ->label('Ver plano')
+                    ->icon(Heroicon::OutlinedMap)
+                    ->button()
+                    ->color('warning')
+                    ->url(fn (Proyecto $record): string => ProyectoResource::getUrl('plano', ['record' => $record])),
+
                 ActionGroup::make([
                     ViewAction::make(),
                     EditAction::make(),

@@ -42,6 +42,24 @@ class LoteResource extends Resource
     #[Override]
     protected static ?int $navigationSort = 3;
 
+    /**
+     * Fuera del menú principal (5-ago-2026).
+     *
+     * Los 301 lotes entraron con el importador de DXF, no tecleados uno por
+     * uno, así que esta no es una pantalla de alta. Y para el uso diario
+     * —"¿qué hay disponible?"— el plano dice lo mismo y mejor: los muestra
+     * todos coloreados por estado, con clic para apartar o vender.
+     *
+     * Queda como pantalla de corrección y de búsqueda por código, a la que
+     * se llega desde la ficha del proyecto. El Resource no se toca: rutas,
+     * permisos y policy siguen igual.
+     */
+    #[Override]
+    public static function shouldRegisterNavigation(): bool
+    {
+        return false;
+    }
+
     #[Override]
     public static function getNavigationGroup(): ?string
     {
