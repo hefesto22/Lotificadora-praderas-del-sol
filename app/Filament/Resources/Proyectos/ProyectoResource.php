@@ -11,6 +11,7 @@ use App\Filament\Resources\Proyectos\Pages\VerPlano;
 use App\Filament\Resources\Proyectos\Pages\ViewProyecto;
 use App\Filament\Resources\Proyectos\RelationManagers\BloquesRelationManager;
 use App\Filament\Resources\Proyectos\RelationManagers\LotesRelationManager;
+use App\Filament\Resources\Proyectos\RelationManagers\PlanesDePagoRelationManager;
 use App\Filament\Resources\Proyectos\Schemas\ProyectoForm;
 use App\Filament\Resources\Proyectos\Schemas\ProyectoInfolist;
 use App\Filament\Resources\Proyectos\Tables\ProyectosTable;
@@ -112,6 +113,7 @@ class ProyectoResource extends Resource
         return [
             BloquesRelationManager::class,
             LotesRelationManager::class,
+            PlanesDePagoRelationManager::class,
         ];
     }
 

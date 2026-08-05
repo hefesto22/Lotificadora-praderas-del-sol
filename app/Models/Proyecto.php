@@ -214,6 +214,19 @@ class Proyecto extends Model
     }
 
     /**
+     * El precio de la vara² a cada plazo (5-ago-2026).
+     *
+     * No es interes: R1 sigue en pie y el saldo no devenga nada. Es el
+     * precio de lista, que a 48 meses no es el mismo que de contado.
+     *
+     * @return HasMany<PlanDePago, $this>
+     */
+    public function planesDePago(): HasMany
+    {
+        return $this->hasMany(PlanDePago::class);
+    }
+
+    /**
      * @param Builder<Proyecto> $query
      *
      * @return Builder<Proyecto>

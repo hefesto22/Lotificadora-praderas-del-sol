@@ -11,20 +11,6 @@
             ['etiqueta' => 'Cancelados',  'valor' => $resumen['cancelado'],  'color' => EstadoLote::Cancelado->colorHex()],
             ['etiqueta' => 'Sin dibujar', 'valor' => $plano['sinDibujar'],   'color' => null],
         ];
-
-        /*
-        | Los planes de financiamiento salen de config y NO del plano: son
-        | del negocio, no de la geometría. Mientras la lista de precios por
-        | plazo no esté cargada esto viene vacío y el modal lo dice, en vez
-        | de inventar una cuota que un vendedor podría cotizarle a alguien.
-        */
-        $planes = array_values(array_map(
-            static fn (array $plan): array => [
-                'meses'      => (int) $plan['meses'],
-                'precioVara' => (string) $plan['precio_vara'],
-            ],
-            config('lotificadora.financiamiento.planes', []),
-        ));
     @endphp
 
     {{--
@@ -650,7 +636,7 @@
 
                         return {
                             meses: plan.meses,
-                            etiqueta: plan.meses > 0 ? `${plan.meses} meses` : 'Contado',
+                            etiqueta: plan.etiqueta || (plan.meses > 0 ? `${plan.meses} meses` : 'Contado'),
                             precioVara: this.lempiras(Math.round(Number(plan.precioVara) * 100)),
                             total: this.lempiras(total),
                             cuota: plan.meses > 0 ? this.lempiras(Math.round(saldo / plan.meses)) : '—',
@@ -994,8 +980,9 @@
 
                                     <template x-if="planes.length === 0">
                                         <p class="plano-planes-nota">
-                                            Falta cargar el precio por vara² de cada plazo. En cuanto esté,
-                                            este cuadro calcula la cuota de cada plan sobre este lote.
+                                            Falta cargar el precio por vara² de cada plazo. Se cargan en el
+                                            proyecto, pestaña «Planes de pago»; en cuanto haya uno, este cuadro
+                                            calcula la cuota de cada plan sobre este lote.
                                         </p>
                                     </template>
 

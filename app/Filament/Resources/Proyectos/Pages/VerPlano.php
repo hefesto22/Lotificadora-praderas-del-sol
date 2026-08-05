@@ -19,6 +19,7 @@ use App\Filament\Schemas\Components\TelefonoHondurasField;
 use App\Models\Bloque;
 use App\Models\Cliente;
 use App\Models\Lote;
+use App\Models\PlanDePago;
 use App\Models\Proyecto;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
@@ -608,6 +609,22 @@ class VerPlano extends Page
 
         return [
             'plano' => new PlanoDelProyecto()->para($proyecto),
+
+            /*
+             * Los planes NO pasan por PlanoDelProyecto: son del negocio y
+             * no de la geometria. Solo los que se ofrecen hoy, y ya
+             * convertidos a strings —el precio nunca viaja como float.
+             */
+            'planes' => $proyecto->planesDePago()
+                ->activos()
+                ->orderBy('meses')
+                ->get()
+                ->map(static fn (PlanDePago $plan): array => [
+                    'meses'      => (int) $plan->getAttribute('meses'),
+                    'etiqueta'   => $plan->nombre(),
+                    'precioVara' => $plan->montoPrecioVara()->redondeado(),
+                ])
+                ->all(),
         ];
     }
 }
