@@ -14,6 +14,7 @@ use App\Models\Lote;
 use Carbon\CarbonImmutable;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -21,7 +22,9 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
+use Illuminate\Database\Eloquent\Builder;
 use Throwable;
 
 /**
@@ -74,14 +77,61 @@ class VentaForm
                                     ->columnSpanFull()
                                     ->helperText('El código del proyecto es el prefijo del número de contrato.'),
 
-                                Select::make('lotes')
-                                    ->label('Lotes')
-                                    ->multiple()
-                                    ->required()
-                                    ->live()
+                                /*
+                                | Un repetidor y no un multi-select porque
+                                | cada lote lleva SU precio: el de lista viene
+                                | precargado y se puede bajar, con motivo (R4).
+                                |
+                                | Ojo: no hay forma de impedir desde el
+                                | formulario que el mismo lote entre dos veces
+                                | —Select v5 no trae ->distinct()—. Lo rechaza
+                                | el dominio, con nombre y apellido del lote.
+                                */
+                                Repeater::make('detalle')
+                                    ->label('Lotes del contrato')
+                                    ->addActionLabel('Agregar otro lote')
                                     ->columnSpanFull()
-                                    ->options(fn (Get $get): array => self::lotesDisponibles($get))
-                                    ->disabled(fn (Get $get): bool => blank($get('proyecto_id')))
+                                    ->columns(12)
+                                    ->live()
+                                    ->minItems(1)
+                                    ->defaultItems(1)
+                                    ->itemLabel(fn (array $state): ?string => self::rotuloDeFila($state))
+                                    ->schema([
+                                        Select::make('lote_id')
+                                            ->label('Lote')
+                                            ->options(fn (Get $get): array => self::lotesDisponibles($get))
+                                            ->disabled(fn (Get $get): bool => blank($get('../../proyecto_id')))
+                                            ->searchable()
+                                            ->required()
+                                            ->live()
+                                            ->columnSpan(5)
+                                            // Al elegir el lote se trae su precio de lista. De
+                                            // ahi en adelante el campo es del usuario.
+                                            ->afterStateUpdated(function (Set $set, mixed $state): void {
+                                                $set('precio_vara', self::precioDeLista($state));
+                                                $set('motivo_descuento', null);
+                                            }),
+
+                                        MontoField::make('precio_vara', 'Precio por vara²')
+                                            ->live(onBlur: true)
+                                            ->columnSpan(3),
+
+                                        Placeholder::make('valor_lote')
+                                            ->label('Valor')
+                                            ->columnSpan(4)
+                                            ->content(fn (Get $get): string => self::valorDeFila($get)),
+
+                                        TextInput::make('motivo_descuento')
+                                            ->label('Motivo del descuento')
+                                            ->maxLength(200)
+                                            ->columnSpanFull()
+                                            ->visible(fn (Get $get): bool => self::hayDescuento($get))
+                                            ->required(fn (Get $get): bool => self::hayDescuento($get))
+                                            ->helperText(
+                                                'Este lote va por debajo del precio de lista. R4: queda '.
+                                                'guardado con tu usuario y la fecha. Sin motivo no se graba.'
+                                            ),
+                                    ])
                                     ->helperText(
                                         'Un contrato puede llevar varios lotes. Solo se listan los '.
                                         'disponibles y los apartados; un apartado a nombre de otra '.
@@ -229,13 +279,13 @@ class VentaForm
      */
     private static function resumen(Get $get): array
     {
-        $ids = self::ids($get('lotes'));
+        $renglones = self::renglones($get('detalle'));
 
-        if ($ids === []) {
+        if ($renglones === []) {
             return ['error' => 'Elegí al menos un lote para ver el plan.'];
         }
 
-        $valor = self::sumaDeValores($ids);
+        $valor = self::sumaDeRenglones($renglones);
         $prima = self::monto($get('prima'));
         $plazo = (int) $get('plazo_meses');
         $diaPago = (int) $get('dia_pago');
@@ -265,31 +315,130 @@ class VentaForm
     // ─── Opciones ─────────────────────────────────────────────────────
 
     /**
+     * Los lotes vendibles del proyecto elegido.
+     *
+     * `../../proyecto_id` y no `proyecto_id`: esto corre DENTRO de una fila
+     * del repetidor, y ahi el scope es la fila. Dos saltos suben al
+     * formulario — uno sale del item, el otro del repetidor.
+     *
      * @return array<int, string>
      */
     private static function lotesDisponibles(Get $get): array
     {
-        $proyecto = $get('proyecto_id');
+        $proyecto = $get('../../proyecto_id');
 
         if (blank($proyecto)) {
             return [];
         }
 
-        return Lote::query()
+        return self::vendibles()
             ->where('proyecto_id', $proyecto)
-            ->whereIn('estado', [EstadoLote::Disponible->value, EstadoLote::Apartado->value])
-            ->orderBy('codigo')
             ->get()
             ->mapWithKeys(static fn (Lote $lote): array => [
                 (int) $lote->getKey() => sprintf(
-                    '%s — %s vr² — %s%s',
+                    '%s — %s vr² — %s la vara²%s',
                     (string) $lote->getAttribute('codigo'),
                     (string) $lote->getAttribute('area_varas'),
-                    $lote->montoValor()->formateado(),
+                    new Monto((string) $lote->getAttribute('precio_vara'))->formateado(),
                     $lote->getAttribute('estado') === EstadoLote::Apartado ? ' (apartado)' : '',
                 ),
             ])
             ->all();
+    }
+
+    /**
+     * @return Builder<Lote>
+     */
+    private static function vendibles(): Builder
+    {
+        return Lote::query()
+            ->whereIn('estado', [EstadoLote::Disponible->value, EstadoLote::Apartado->value])
+            ->orderBy('codigo');
+    }
+
+    /**
+     * El precio de lista del lote, para precargar el campo.
+     *
+     * Se devuelve como string con dos decimales porque el campo es un
+     * MontoField: si acá entrara un float, el §8.3.1 se rompe en el primer
+     * lote cuyo precio no sea representable en binario.
+     */
+    private static function precioDeLista(mixed $loteId): string
+    {
+        $lote = self::lote($loteId);
+
+        return $lote instanceof Lote
+            ? new Monto((string) $lote->getAttribute('precio_vara'))->redondeado()
+            : '';
+    }
+
+    /**
+     * El valor de una fila: área del lote × precio tecleado.
+     *
+     * Dice también el precio de lista cuando el tecleado es menor, para que
+     * quien está armando la venta vea el descuento sin tener que abrir otra
+     * pantalla a comparar.
+     */
+    private static function valorDeFila(Get $get): string
+    {
+        $lote = self::lote($get('lote_id'));
+
+        if (! $lote instanceof Lote) {
+            return '—';
+        }
+
+        $area = (string) $lote->getAttribute('area_varas');
+        $lista = new Monto((string) $lote->getAttribute('precio_vara'));
+        $precio = self::monto($get('precio_vara'));
+        $valor = new Monto($precio->multiplicarPor($area)->redondeado());
+
+        if (! $precio->menorQue($lista)) {
+            return $valor->formateado();
+        }
+
+        $descuento = new Monto($lista->restar($precio)->multiplicarPor($area)->redondeado());
+
+        return sprintf(
+            '%s  ·  %s menos que la lista',
+            $valor->formateado(),
+            $descuento->formateado(),
+        );
+    }
+
+    /**
+     * ¿Esta fila va por debajo del precio de lista? (R4)
+     */
+    private static function hayDescuento(Get $get): bool
+    {
+        $lote = self::lote($get('lote_id'));
+
+        if (! $lote instanceof Lote) {
+            return false;
+        }
+
+        return self::monto($get('precio_vara'))
+            ->menorQue(new Monto((string) $lote->getAttribute('precio_vara')));
+    }
+
+    /**
+     * El título plegado de cada fila del repetidor.
+     *
+     * @param array<string, mixed> $state
+     */
+    private static function rotuloDeFila(array $state): ?string
+    {
+        $lote = self::lote($state['lote_id'] ?? null);
+
+        return $lote instanceof Lote ? (string) $lote->getAttribute('codigo') : null;
+    }
+
+    private static function lote(mixed $id): ?Lote
+    {
+        if (! is_numeric($id)) {
+            return null;
+        }
+
+        return Lote::query()->find((int) $id);
     }
 
     /**
@@ -323,29 +472,66 @@ class VentaForm
     // ─── Conversiones ─────────────────────────────────────────────────
 
     /**
-     * @return list<int>
+     * Las filas del repetidor que ya tienen lote elegido.
+     *
+     * El estado de un repetidor es un mapa con claves uuid, no una lista, y
+     * las filas a medio llenar son normales: alguien apretó «Agregar» y
+     * todavía no eligió. Se descartan sin protestar.
+     *
+     * @return list<array{lote_id: int, precio: string}>
      */
-    private static function ids(mixed $valor): array
+    private static function renglones(mixed $valor): array
     {
         if (! is_array($valor)) {
             return [];
         }
 
-        return array_values(array_filter(array_map(
-            static fn (mixed $id): int => is_numeric($id) ? (int) $id : 0,
-            $valor,
-        )));
+        $filas = [];
+
+        foreach ($valor as $fila) {
+            if (! is_array($fila) || ! is_numeric($fila['lote_id'] ?? null)) {
+                continue;
+            }
+
+            $precio = $fila['precio_vara'] ?? null;
+
+            $filas[] = [
+                'lote_id' => (int) $fila['lote_id'],
+                'precio'  => is_string($precio) || is_int($precio) ? (string) $precio : '0',
+            ];
+        }
+
+        return $filas;
     }
 
     /**
-     * @param list<int> $ids
+     * El valor de la venta: la suma de área × precio PACTADO de cada fila.
+     *
+     * Una sola consulta para todos los lotes y no una por fila: esto se
+     * recalcula en cada tecla que cambia el formulario (§4.L4).
+     *
+     * @param list<array{lote_id: int, precio: string}> $renglones
      */
-    private static function sumaDeValores(array $ids): Monto
+    private static function sumaDeRenglones(array $renglones): Monto
     {
+        $areas = Lote::query()
+            ->whereIn('id', array_column($renglones, 'lote_id'))
+            ->pluck('area_varas', 'id');
+
         $total = Monto::cero();
 
-        foreach (Lote::query()->whereIn('id', $ids)->get() as $lote) {
-            $total = $total->sumar($lote->montoValor());
+        foreach ($renglones as $renglon) {
+            $area = $areas->get($renglon['lote_id']);
+
+            // Un lote que ya no está —lo borraron mientras se armaba la
+            // venta— no suma. El Service lo va a rechazar con nombre propio.
+            if (! is_string($area) && ! is_int($area)) {
+                continue;
+            }
+
+            $total = $total->sumar(
+                new Monto(self::monto($renglon['precio'])->multiplicarPor((string) $area)->redondeado())
+            );
         }
 
         return $total;

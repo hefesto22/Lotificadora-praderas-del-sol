@@ -27,6 +27,11 @@ use Spatie\Activitylog\Support\LogOptions;
  * manana sube el precio por vara del proyecto, la venta cerrada conserva
  * el suyo y el estado de cuenta del cliente sigue cuadrando.
  *
+ * Los precios son DOS: `precio_vara_lista` es lo que el lote valia ese dia
+ * y `precio_vara` es lo que se firmo. En un apartado coinciden; en una
+ * venta pueden no coincidir, porque se negocia caso por caso (R4), y ahi
+ * `motivo_descuento` es obligatorio — lo exige un CHECK de la base.
+ *
  * Un lote puede tener muchos compromisos a lo largo del tiempo, pero uno
  * solo VIGENTE. Eso no se valida acá: lo garantiza un indice unico parcial
  * en la base, que ni un import ni dos pestañas abiertas pueden saltear.
@@ -40,7 +45,9 @@ use Spatie\Activitylog\Support\LogOptions;
     'estado',
     'area_varas',
     'precio_vara',
+    'precio_vara_lista',
     'valor',
+    'motivo_descuento',
     'monto_senia',
     'fecha',
     'vence_el',

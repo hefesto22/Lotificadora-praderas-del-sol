@@ -35,7 +35,7 @@ nadie puede auditar contra el contrato.
 | 8 | ¿Un lote puede tener dos dueños? | **Sí**, marido y mujer o socios en el mismo contrato |
 | 8b | ¿Los dos pagan y piden estado de cuenta, o hay titular? | *sin respuesta* → ver §4 |
 | 9 | ¿Una venta puede incluir varios lotes? | **Sí**, dos o tres lotes en un solo contrato |
-| 10 | Talonario con CAI | **No se usa CAI.** Los recibos son solo de uso interno |
+| 10 | Talonario con CAI | **No se usa CAI.** Solo recibos de venta, de uso interno |
 | 11 | Formas de pago | **Efectivo, transferencia y depósito bancario.** Cheque no. Se anota la referencia |
 | 12 | Numeración de recibos internos | **Una sola numeración** para toda la lotificadora |
 | 13 | ¿Se cobra sin venta asignada? | **No**, siempre hay una venta o un apartado de por medio |
@@ -89,6 +89,16 @@ Dos bordes que hay que cerrar en el código:
 por pronto pago. El sistema deja registrar un descuento a mano, y para eso exige **motivo
 escrito** y guarda **qué usuario lo aplicó y cuándo**. Un descuento sin motivo no se graba.
 
+Construido el 5-ago-2026. El descuento no es un monto aparte: es un **precio por vara² menor**,
+que se teclea lote por lote al armar la venta y queda congelado junto al de lista (ver R9). «Un
+descuento sin motivo no se graba» es literal — lo hace cumplir el CHECK
+`compromisos_descuento_con_motivo_chk`, no una validación de formulario. El quién y el cuándo
+los traen `created_by` y `created_at`.
+
+**Quién puede descontar:** cualquiera que pueda crear ventas, receptores incluidos. El control
+es posterior —queda el registro— y no previo. Decidido el 5-ago-2026; si la contratante
+prefiere que solo la administración pueda, es un permiso, no una migración.
+
 > **Por qué importa:** "caso por caso" significa que la decisión es de la administración, no
 > del sistema. Lo que el sistema aporta es que después se pueda saber quién autorizó qué.
 
@@ -141,14 +151,34 @@ nombre de quien paga con mención del contrato, y **el estado de cuenta sale a n
 titular** con los demás listados. Cambiarlo después es una regla de presentación, no una
 migración.
 
-**R9 · Una venta puede incluir varios lotes.** La venta se relaciona con lotes de muchos a
-muchos (`venta_lote`), y **cada lote congela ahí su área, su precio por vara y su valor**, como
-ya lo hace `compromisos`. El valor de la venta es la suma de los valores congelados.
+**R9 · Una venta puede incluir varios lotes.** Cada lote congela **su área, sus dos precios
+por vara y su valor**, y el valor de la venta es la suma de esos valores congelados.
+
+Dónde se congela: en `compromisos`, no en una tabla `venta_lote`. La primera redacción de esta
+regla decía `venta_lote`; al implementarla se vio que `compromisos` ya congela exactamente eso
+al momento de vender, y que agregar una segunda tabla sería tener dos lugares donde el dinero
+puede discrepar. Los lotes de una venta son sus compromisos de tipo `venta` (5-ago-2026).
+
+**Los precios son dos, no uno** (esto sale de R4, y se decidió el 5-ago-2026):
+
+| Columna | Qué guarda |
+|---|---|
+| `precio_vara_lista` | Lo que el lote valía en la lista **ese día** |
+| `precio_vara` | Lo que efectivamente **se firmó** |
+| `motivo_descuento` | Obligatorio si el segundo es menor que el primero |
+
+En un apartado los dos coinciden. En una venta pueden no coincidir, porque el precio se
+negocia caso por caso. Guardar solo el pactado haría imposible contestar «¿cuánto se descontó
+este mes?», porque el precio de lista del lote cambia con el tiempo.
+
+El lote **no se toca**: conserva su precio de lista. Si la venta se rescinde, el lote vuelve a
+la vitrina al precio del proyecto y no al que se le hizo a un cliente puntual.
 
 ### Dinero que entra
 
-**R10 · No hay CAI. Los recibos son internos.** La contratante no usa talonario autorizado por
-el SAR para estos cobros. Esto **saca de la Etapa 1** toda la maquinaria fiscal que estaba
+**R10 · No hay CAI. Solo recibos de venta, de uso interno.** La contratante no usa talonario
+autorizado por el SAR para estos cobros: el único documento que se entrega es el recibo de
+venta, interno. Esto **saca de la Etapa 1** toda la maquinaria fiscal que estaba
 prevista: validación del formato del CAI, rango autorizado, fecha límite de emisión y las
 alertas de talonario por agotarse.
 
@@ -254,7 +284,8 @@ Etapa 2.
 
 ## 4. Lo que sigue abierto
 
-Ninguno de estos tres puntos frena el motor de cuotas. Se anotan acá para que no se olviden
+Ninguno de los tres primeros frena el motor de cuotas; el cuarto solo frena el cuadro de
+planes del plano. Se anotan acá para que no se olviden
 y para que quede claro qué módulo bloquea cada uno.
 
 **1. Copropietarios: ¿los dos pueden todo, o hay un titular con más facultades?** — *no bloquea*
@@ -274,9 +305,24 @@ La respuesta dice que el dinero se devuelve, pero no dice si es automático al v
 alguien tiene que autorizarlo. El sistema arranca exigiendo **autorización explícita**, porque
 el dinero no debería salir de la caja por un vencimiento de calendario.
 
-**Además, conviene dejar por escrito de la contratante:** que no se usa CAI (R10) y que las
-ventas no llevan ISV (R17) vinieron como aclaración verbal. Son las dos respuestas con
-consecuencia fiscal, y son justamente las que conviene tener firmadas.
+**4. El precio de la vara según el plazo: falta la lista.** — *bloquea el cuadro de planes*
+
+Dato nuevo, del 5-ago-2026, que no venía en el cuestionario: el precio de la vara no es el
+mismo a 1 año que a 4. **No es interés** —R1 sigue en pie, no hay amortización ni saldo que
+devengue— sino precios de lista distintos según el plazo; elegido el plazo, el precio queda
+fijo y la cuota sigue siendo (valor − prima) ÷ meses.
+
+Falta la tabla por escrito: plazo → precio por vara². Hasta que llegue, `financiamiento.planes`
+en `config/lotificadora.php` va vacío y el plano no muestra ninguna cuota, porque un precio
+inventado en esa pantalla es un precio que un vendedor le cotiza a un cliente.
+
+Cuando llegue hay que decidir además de dónde toma el formulario el precio precargado: hoy
+trae el de lista del lote, y con lista por plazo tendría que traer el del plan elegido.
+
+**Nada más queda abierto de los bloques 3 y 6.** Que no se usa CAI (R10) y que las ventas no
+llevan ISV (R17) **son respuestas de la contratante igual que las marcadas en el PDF**:
+llegaron junto con él, el 3 de agosto de 2026. No son una suposición de Olympo ni están
+pendientes de confirmar.
 
 ---
 

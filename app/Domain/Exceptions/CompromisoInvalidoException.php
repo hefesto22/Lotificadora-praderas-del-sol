@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Domain\Exceptions;
 
+use App\Domain\ValueObjects\Monto;
+
 /**
  * No se puede comprometer ese lote de esa manera.
  *
@@ -67,6 +69,22 @@ final class CompromisoInvalidoException extends GrupoOlympoException
         return new self(
             "El lote {$codigo} tiene una venta registrada, no un apartado. Una venta no se ".
             'libera: se rescinde, y ese tramite todavia no esta en el sistema.'
+        );
+    }
+
+    /**
+     * R4: un descuento sin motivo no se graba.
+     *
+     * La contratante contesto «se negocia caso por caso», y lo que aporta
+     * el sistema es que despues se pueda saber quien autorizo que. Sin
+     * motivo escrito, el descuento es indistinguible de un error de tipeo.
+     */
+    public static function porDescuentoSinMotivo(string $codigo, Monto $lista, Monto $pactado): self
+    {
+        return new self(
+            "El lote {$codigo} se esta vendiendo a {$pactado->formateado()} la vara² cuando ".
+            "el precio de lista es {$lista->formateado()}. Un precio menor se puede registrar, ".
+            'pero hay que escribir el motivo: queda anotado con el usuario y la fecha.'
         );
     }
 }

@@ -39,7 +39,10 @@ use Illuminate\Support\Facades\DB;
  *  1. Se bloquean los lotes y **se vuelve a mirar su estado** (§8.3.2).
  *     Entre que se armo el formulario y se apreto Guardar, otro receptor
  *     pudo apartar uno desde su computadora.
- *  2. Se congelan area y valor sumando lo que dice cada lote HOY.
+ *  2. Se congela el area de cada lote y se resuelve su PRECIO: el de lista
+ *     que tiene el lote hoy, o el pactado si esta venta se negocio. Si el
+ *     pactado baja del de lista sin motivo escrito, se corta aca (R4) —
+ *     antes de quemar el correlativo del paso 4.
  *  3. Se arma el plan de cuotas y **se verifica que cierre exacto** antes
  *     de escribir nada.
  *  4. Se consume el correlativo — recien aca, con todo lo demas ya
@@ -63,6 +66,7 @@ final readonly class RegistroDeVentas
      *
      * @param list<Lote> $lotes los lotes que entran al contrato
      * @param list<Cliente> $clientes duenos; **el primero queda como titular** (R8)
+     * @param list<PrecioPactado> $precios precios negociados, para los lotes que no van al de lista
      *
      * @throws VentaInvalidaException
      */
@@ -75,11 +79,20 @@ final readonly class RegistroDeVentas
         int $diaPago,
         ?CarbonImmutable $fechaContrato = null,
         ?string $observaciones = null,
+        array $precios = [],
     ): Venta {
         $this->verificarConjuntos($proyecto, $lotes, $clientes);
 
         $fecha = $fechaContrato ?? CarbonImmutable::parse(today()->toDateString());
         $titular = $clientes[0];
+
+        // Un precio de un lote que no esta en la venta no es un error del
+        // usuario: es una fila que quedo en el formulario. Se ignora.
+        $pactados = [];
+
+        foreach ($precios as $precio) {
+            $pactados[$precio->loteId] = $precio;
+        }
 
         return DB::transaction(function () use (
             $proyecto,
@@ -90,14 +103,16 @@ final readonly class RegistroDeVentas
             $plazoMeses,
             $diaPago,
             $fecha,
-            $observaciones
+            $observaciones,
+            $pactados
         ): Venta {
             // 1. Bloquear y re-mirar. Lo que decia la pantalla no vale.
             $frescos = $this->bloquearYVerificar($lotes, $titular);
 
-            // 2. Congelar area y valor.
+            // 2. Congelar area y valor, AL PRECIO QUE SE FIRMA.
+            $renglones = $this->congelarPrecios($frescos, $pactados);
             $areaTotal = $this->sumarAreas($frescos);
-            $valorTotal = $this->sumarValores($frescos);
+            $valorTotal = $this->sumarValores($renglones);
 
             if ($prima->mayorQue($valorTotal)) {
                 throw VentaInvalidaException::porPrimaMayorAlValor($prima, $valorTotal);
@@ -135,8 +150,14 @@ final readonly class RegistroDeVentas
             // 6. Los duenos, y los lotes ligados a su venta.
             $this->asentarClientes($venta, $clientes);
 
-            foreach ($frescos as $lote) {
-                $this->compromisos->vender($lote, $titular, venta: $venta);
+            foreach ($renglones as $renglon) {
+                $this->compromisos->vender(
+                    $renglon['lote'],
+                    $titular,
+                    venta: $venta,
+                    precioVara: $renglon['precio'],
+                    motivoDescuento: $renglon['motivo'],
+                );
             }
 
             // 7. El plan congelado (§9.D6).
@@ -237,6 +258,58 @@ final readonly class RegistroDeVentas
     }
 
     /**
+     * Resuelve el precio de cada lote y arma su renglon del contrato.
+     *
+     * El precio de LISTA se lee del lote recien bloqueado, no del que traia
+     * el formulario: entre que se armo la pantalla y se apreto Guardar,
+     * alguien pudo re-precificar el bloque entero.
+     *
+     * El valor del renglon es area × precio PACTADO. No se lee `lotes.valor`
+     * porque ese es el valor de lista, y con un descuento serian dos
+     * numeros distintos diciendo ser el mismo.
+     *
+     * @param list<Lote> $lotes
+     * @param array<int, PrecioPactado> $pactados por id de lote
+     *
+     * @return list<array{lote: Lote, precio: Monto, motivo: string|null, valor: Monto}>
+     *
+     * @throws VentaInvalidaException
+     */
+    private function congelarPrecios(array $lotes, array $pactados): array
+    {
+        $renglones = [];
+
+        foreach ($lotes as $lote) {
+            $id = (int) $lote->getKey();
+            $lista = $this->montoDe($lote, 'precio_vara');
+
+            $acuerdo = $pactados[$id] ?? null;
+
+            // `->` y no `?->`: el `??` ya absorbe el acceso sobre null, y con
+            // el nullsafe delante PHPStan lo marca como redundante. En la
+            // linea de abajo si hace falta, porque ahi hay una llamada.
+            $precio = $acuerdo->precioVara ?? $lista;
+            $motivo = $acuerdo?->motivoLimpio();
+
+            if (PrecioPactado::exigeMotivo($lista, $precio, $motivo)) {
+                throw VentaInvalidaException::porDescuentoSinMotivo($this->codigo($lote), $lista, $precio);
+            }
+
+            $renglones[] = [
+                'lote'   => $lote,
+                'precio' => $precio,
+                'motivo' => $motivo,
+                // La MISMA expresion que usa RegistroDeCompromisos::valorDe()
+                // y que exige el CHECK de la base. Si los tres no dan el
+                // mismo numero, la venta no se graba — y asi tiene que ser.
+                'valor' => new Monto($precio->multiplicarPor($this->decimalDe($lote, 'area_varas'))->redondeado()),
+            ];
+        }
+
+        return $renglones;
+    }
+
+    /**
      * @param list<Lote> $lotes
      */
     private function sumarAreas(array $lotes): Monto
@@ -251,14 +324,14 @@ final readonly class RegistroDeVentas
     }
 
     /**
-     * @param list<Lote> $lotes
+     * @param list<array{lote: Lote, precio: Monto, motivo: string|null, valor: Monto}> $renglones
      */
-    private function sumarValores(array $lotes): Monto
+    private function sumarValores(array $renglones): Monto
     {
         $total = Monto::cero();
 
-        foreach ($lotes as $lote) {
-            $total = $total->sumar($this->montoDe($lote, 'valor'));
+        foreach ($renglones as $renglon) {
+            $total = $total->sumar($renglon['valor']);
         }
 
         return $total;
@@ -319,9 +392,21 @@ final readonly class RegistroDeVentas
 
     private function montoDe(Lote $lote, string $columna): Monto
     {
+        return new Monto($this->decimalDe($lote, $columna));
+    }
+
+    /**
+     * Un decimal del lote como string, que es lo unico que Monto acepta.
+     *
+     * Postgres devuelve NUMERIC como string, pero un factory o un cast
+     * podrian dejar un int. Lo que no puede entrar al camino del dinero es
+     * un float (§8.3.1).
+     */
+    private function decimalDe(Lote $lote, string $columna): string
+    {
         $valor = $lote->getAttribute($columna);
 
-        return new Monto(is_string($valor) || is_int($valor) ? $valor : '0');
+        return is_string($valor) || is_int($valor) ? (string) $valor : '0';
     }
 
     private function codigo(Lote $lote): string

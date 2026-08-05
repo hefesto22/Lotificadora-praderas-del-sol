@@ -75,6 +75,24 @@ final class VentaInvalidaException extends GrupoOlympoException
     }
 
     /**
+     * R4, verificada ANTES de que se queme el correlativo.
+     *
+     * La misma regla vive como CHECK en `compromisos` y como guarda en
+     * `RegistroDeCompromisos`. Se adelanta aca porque cuando el compromiso
+     * se escribe el numero de contrato ya se consumio: la transaccion lo
+     * devolveria igual, pero una validacion que se puede hacer antes no
+     * tiene por que hacerse despues.
+     */
+    public static function porDescuentoSinMotivo(string $codigo, Monto $lista, Monto $pactado): self
+    {
+        return new self(
+            "El lote {$codigo} se esta vendiendo a {$pactado->formateado()} la vara² cuando "
+            ."el precio de lista es {$lista->formateado()}. Un precio menor se puede registrar, "
+            .'pero hay que escribir el motivo del descuento: queda anotado con el usuario y la fecha.'
+        );
+    }
+
+    /**
      * La red de seguridad del §8.3.4.
      *
      * Si el plan no suma exactamente el saldo, no se escribe ni una cuota.

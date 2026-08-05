@@ -108,6 +108,41 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | El precio de la vara según el plazo (⚠️ PENDIENTE)
+    |--------------------------------------------------------------------------
+    |
+    | «No es el mismo precio de vara a 1 año que a 4 años» —Mauricio,
+    | 5-ago-2026. Es un dato NUEVO: no venía en el cuestionario, así que
+    | todavía no tiene regla propia en docs/dominio.md.
+    |
+    | Ojo con leerlo como interés: no lo es, y por eso R1 sigue en pie. No
+    | hay amortización, ni capital e interés separados, ni saldo que
+    | devengue nada. Lo que hay son PRECIOS DE LISTA distintos según el
+    | plazo; elegido el plazo, el precio queda fijo y la cuota sigue siendo
+    | (valor − prima) ÷ meses, exactamente como la calcula PlanDeCuotas.
+    |
+    | Va vacío a propósito hasta tener la lista por escrito. El plano
+    | muestra el cuadro de planes solo si acá hay algo: un precio inventado
+    | en esta pantalla es un precio que un vendedor le cotiza a un cliente.
+    |
+    | Al llenarlo hay que tocar también RegistroDeVentas: hoy la venta
+    | congela `lotes.precio_vara`, y con lista por plazo el precio que se
+    | congela es el del plan que se firmó, no el de la ficha del lote.
+    |
+    | Formato —el precio es string porque entra a bcmath, y `meses` 0 es
+    | contado:
+    |
+    |   ['meses' => 0,  'precio_vara' => '1400.00'],
+    |   ['meses' => 12, 'precio_vara' => '1500.00'],
+    |   ['meses' => 48, 'precio_vara' => '1800.00'],
+    |
+    */
+    'financiamiento' => [
+        'planes' => [],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Correlativos
     |--------------------------------------------------------------------------
     |

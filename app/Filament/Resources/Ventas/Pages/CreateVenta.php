@@ -6,6 +6,7 @@ namespace App\Filament\Resources\Ventas\Pages;
 
 use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\ValueObjects\Monto;
+use App\Domain\Ventas\PrecioPactado;
 use App\Domain\Ventas\RegistroDeVentas;
 use App\Filament\Resources\Ventas\VentaResource;
 use App\Models\Cliente;
@@ -61,6 +62,7 @@ class CreateVenta extends CreateRecord
                 diaPago: (int) ($data['dia_pago'] ?? 1),
                 fechaContrato: CarbonImmutable::parse((string) $data['fecha_contrato']),
                 observaciones: is_string($data['observaciones'] ?? null) ? $data['observaciones'] : null,
+                precios: $this->precios($data),
             );
         } catch (GrupoOlympoException $e) {
             Notification::make()
@@ -75,7 +77,7 @@ class CreateVenta extends CreateRecord
     }
 
     /**
-     * Los lotes en el mismo orden en que se eligieron.
+     * Los lotes elegidos, en el orden en que están en el formulario.
      *
      * @param array<string, mixed> $data
      *
@@ -83,12 +85,78 @@ class CreateVenta extends CreateRecord
      */
     private function lotes(array $data): array
     {
-        $ids = is_array($data['lotes'] ?? null) ? array_map(intval(...), $data['lotes']) : [];
+        $ids = array_column($this->filas($data), 'lote_id');
 
         /** @var list<Lote> $lotes */
         $lotes = Lote::query()->whereIn('id', $ids)->get()->all();
 
         return $lotes;
+    }
+
+    /**
+     * El precio que se tecleó para cada lote, con su motivo si lo lleva.
+     *
+     * Se manda SIEMPRE, aunque sea igual al de lista: el Service compara
+     * contra el precio del lote recién bloqueado, no contra el que traía la
+     * pantalla, y ahí decide si hace falta motivo. Filtrarlo acá sería
+     * decidir con datos viejos.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return list<PrecioPactado>
+     */
+    private function precios(array $data): array
+    {
+        $precios = [];
+
+        foreach ($this->filas($data) as $fila) {
+            $precios[] = new PrecioPactado(
+                loteId: $fila['lote_id'],
+                precioVara: new Monto($fila['precio_vara']),
+                motivo: $fila['motivo_descuento'],
+            );
+        }
+
+        return $precios;
+    }
+
+    /**
+     * Las filas del repetidor, limpias.
+     *
+     * El estado de un `Repeater` es un mapa con claves uuid, no una lista;
+     * el orden de inserción es el orden en pantalla. Una fila sin lote es
+     * alguien que apretó «Agregar» y no llenó: se descarta.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return list<array{lote_id: int, precio_vara: string, motivo_descuento: string|null}>
+     */
+    private function filas(array $data): array
+    {
+        $detalle = $data['detalle'] ?? null;
+
+        if (! is_array($detalle)) {
+            return [];
+        }
+
+        $filas = [];
+
+        foreach ($detalle as $fila) {
+            if (! is_array($fila) || ! is_numeric($fila['lote_id'] ?? null)) {
+                continue;
+            }
+
+            $precio = $fila['precio_vara'] ?? null;
+            $motivo = $fila['motivo_descuento'] ?? null;
+
+            $filas[] = [
+                'lote_id'          => (int) $fila['lote_id'],
+                'precio_vara'      => is_string($precio) || is_int($precio) ? (string) $precio : '0',
+                'motivo_descuento' => is_string($motivo) && trim($motivo) !== '' ? trim($motivo) : null,
+            ];
+        }
+
+        return $filas;
     }
 
     /**

@@ -27,6 +27,12 @@ use Illuminate\Support\Facades\DB;
  * El area, el precio y el valor se CONGELAN en el compromiso al momento de
  * crearlo (§8.2). Despues de eso, el lote puede cambiar de precio sin que
  * la venta cerrada se entere.
+ *
+ * Se congelan DOS precios y no uno: `precio_vara_lista` es lo que el lote
+ * valia ese dia y `precio_vara` es lo que se firmo. En un apartado son el
+ * mismo numero; en una venta pueden no serlo, porque el precio se negocia
+ * caso por caso (R4). Guardar solo el pactado haria imposible saber
+ * despues cuanto se descontó, porque el precio de lista del lote cambia.
  */
 final readonly class RegistroDeCompromisos
 {
@@ -78,12 +84,26 @@ final readonly class RegistroDeCompromisos
      * Cuando la venta viene, la pasa `RegistroDeVentas::activar()` desde
      * adentro de su transaccion, y el compromiso queda ligado a su
      * expediente.
+     *
+     * ═══ EL PRECIO PACTADO ═══
+     *
+     * `$precioVara` es lo que se firmo, cuando no es el precio de lista. Si
+     * viene null se usa el del lote, que es el caso normal. Si viene y es
+     * MENOR que el de lista, R4 exige motivo escrito y aca se rechaza sin
+     * motivo — antes de que lo rechace el CHECK de la base, para que quien
+     * esta atendiendo lea una frase y no una violacion de constraint.
+     *
+     * El `valor` se recalcula: es area × precio pactado, no el valor que
+     * traia el lote. Si no, el descuento quedaria en el precio pero no en
+     * el total, que es el numero que va al contrato.
      */
     public function vender(
         Lote $lote,
         Cliente $cliente,
         ?string $observaciones = null,
         ?Venta $venta = null,
+        ?Monto $precioVara = null,
+        ?string $motivoDescuento = null,
     ): Compromiso {
         $estado = $this->estadoDe($lote);
         $codigo = $this->codigoDe($lote);
@@ -111,7 +131,24 @@ final readonly class RegistroDeCompromisos
             }
         }
 
-        return DB::transaction(function () use ($lote, $cliente, $observaciones, $vigente, $venta): Compromiso {
+        $lista = new Monto($this->decimalDe($lote, 'precio_vara'));
+        $pactado = $precioVara ?? $lista;
+        $motivo = trim($motivoDescuento ?? '');
+
+        if (PrecioPactado::exigeMotivo($lista, $pactado, $motivo)) {
+            throw CompromisoInvalidoException::porDescuentoSinMotivo($codigo, $lista, $pactado);
+        }
+
+        return DB::transaction(function () use (
+            $lote,
+            $cliente,
+            $observaciones,
+            $vigente,
+            $venta,
+            $lista,
+            $pactado,
+            $motivo
+        ): Compromiso {
             /*
              * El apartado se cierra ANTES de crear la venta. El indice
              * unico parcial solo admite un compromiso vigente por lote, y
@@ -124,8 +161,12 @@ final readonly class RegistroDeCompromisos
             ]);
 
             $compromiso = $this->crear($lote, $cliente, TipoCompromiso::Venta, [
-                'observaciones' => $observaciones,
-                'venta_id'      => $venta?->getKey(),
+                'observaciones'     => $observaciones,
+                'venta_id'          => $venta?->getKey(),
+                'precio_vara_lista' => $lista->redondeado(),
+                'precio_vara'       => $pactado->redondeado(),
+                'valor'             => $this->valorDe($lote, $pactado),
+                'motivo_descuento'  => $motivo === '' ? null : $motivo,
             ]);
 
             $lote->update(['estado' => EstadoLote::Vendido]);
@@ -178,6 +219,9 @@ final readonly class RegistroDeCompromisos
     }
 
     /**
+     * Los defaults valen para un apartado, que siempre va al precio de
+     * lista. `vender()` pisa precio y valor cuando hubo negociacion.
+     *
      * @param array<string, mixed> $extra
      */
     private function crear(Lote $lote, Cliente $cliente, TipoCompromiso $tipo, array $extra): Compromiso
@@ -191,9 +235,38 @@ final readonly class RegistroDeCompromisos
             // Copias, no referencias: es lo que congela el §8.2.
             'area_varas'  => $lote->getAttribute('area_varas'),
             'precio_vara' => $lote->getAttribute('precio_vara'),
-            'valor'       => $lote->getAttribute('valor'),
-            'fecha'       => today(),
+            // El de lista del dia, para poder medir el descuento despues:
+            // el del lote cambia y este ya no.
+            'precio_vara_lista' => $lote->getAttribute('precio_vara'),
+            'valor'             => $lote->getAttribute('valor'),
+            'fecha'             => today(),
         ], $extra));
+    }
+
+    /**
+     * area × precio, redondeado a dos como la columna.
+     *
+     * Es la misma cuenta que hace `Lote::calcularValor()` y la misma que
+     * exige el CHECK `valor = ROUND(area_varas * precio_vara, 2)`. Va por
+     * Monto —bcmath— y nunca por float (§8.3.1).
+     */
+    private function valorDe(Lote $lote, Monto $precioVara): string
+    {
+        return $precioVara->multiplicarPor($this->decimalDe($lote, 'area_varas'))->redondeado();
+    }
+
+    /**
+     * Un decimal del lote como string, que es lo unico que Monto acepta.
+     *
+     * Las columnas NUMERIC de Postgres llegan como string, pero un cast o
+     * un factory podrian dejar un int. Lo que no puede pasar es que entre
+     * un float al camino del dinero.
+     */
+    private function decimalDe(Lote $lote, string $campo): string
+    {
+        $valor = $lote->getAttribute($campo);
+
+        return is_string($valor) || is_int($valor) ? (string) $valor : '0';
     }
 
     private function estadoDe(Lote $lote): EstadoLote
