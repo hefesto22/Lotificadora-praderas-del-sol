@@ -1,4 +1,5 @@
 @use('App\Domain\Enums\EstadoLote')
+@use('App\Domain\ValueObjects\Monto')
 
 <x-filament-panels::page>
     @php
@@ -10,6 +11,22 @@
             ['etiqueta' => 'Vendidos',    'valor' => $resumen['vendido'],    'color' => EstadoLote::Vendido->colorHex()],
             ['etiqueta' => 'Cancelados',  'valor' => $resumen['cancelado'],  'color' => EstadoLote::Cancelado->colorHex()],
             ['etiqueta' => 'Sin dibujar', 'valor' => $plano['sinDibujar'],   'color' => null],
+        ];
+
+        /*
+        | Los tres numeros de R14, para proponerlos en el panel de apartar en
+        | vez de preguntarlos en blanco. El monto pasa por Monto y no por
+        | number_format: hasta para mostrarlo, el dinero no toca un float.
+        */
+        $diasDeApartado = (int) config('lotificadora.apartados.dias_de_vigencia', 15);
+        $montoDeApartado = new Monto((string) config('lotificadora.apartados.monto', '0.00'));
+
+        $apartado = [
+            'monto'           => $montoDeApartado->redondeado(),
+            'montoFormateado' => $montoDeApartado->formateado(),
+            'dias'            => $diasDeApartado,
+            'vence'           => today()->addDays($diasDeApartado)->format('d/m/Y'),
+            'venceIso'        => today()->addDays($diasDeApartado)->toDateString(),
         ];
     @endphp
 
@@ -106,13 +123,16 @@
            DESPUES de este en el orden del documento, y con igual z-index
            gana el ultimo. Asi apartar y vender siguen saliendo encima.
            Aparte, al montar una accion este se cierra solo. */
+        /* El velo tapa de verdad: con .55 y 2px de desenfoque se seguian
+           leyendo las tarjetas de arriba y el plano de abajo, y el modal
+           parecia flotando sobre ruido. */
         .plano-modal {
             position: fixed; inset: 0; z-index: 50; display: flex;
-            align-items: center; justify-content: center; padding: 1rem;
-            background: rgba(9, 9, 11, .55); backdrop-filter: blur(2px);
+            align-items: center; justify-content: center; padding: 1.5rem;
+            background: rgba(9, 9, 11, .78); backdrop-filter: blur(8px);
         }
         .plano-modal-caja {
-            width: min(66rem, 100%); max-height: min(92vh, 54rem);
+            width: min(74rem, 100%); max-height: min(92vh, 56rem);
             display: flex; flex-direction: column; overflow: hidden;
             background: #fff; border-radius: 1rem;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, .35);
@@ -125,9 +145,9 @@
             border-bottom: 1px solid rgb(244 244 245);
         }
         .dark .plano-modal-cabecera { border-bottom-color: rgba(255, 255, 255, .1); }
-        .plano-modal-codigo { font-size: 1.25rem; font-weight: 600; color: rgb(9 9 11); }
+        .plano-modal-codigo { font-size: 1.5rem; font-weight: 600; letter-spacing: -.01em; color: rgb(9 9 11); }
         .dark .plano-modal-codigo { color: #fff; }
-        .plano-modal-sub { margin-top: .125rem; font-size: .8125rem; color: rgb(113 113 122); }
+        .plano-modal-sub { margin-top: .1875rem; font-size: .875rem; color: rgb(113 113 122); }
         .dark .plano-modal-sub { color: rgb(161 161 170); }
         .plano-modal-cerrar {
             border: 0; background: transparent; cursor: pointer; line-height: 1;
@@ -137,36 +157,39 @@
         .dark .plano-modal-cerrar:hover { color: #fff; }
 
         .plano-modal-cuerpo {
-            display: grid; grid-template-columns: 1fr; gap: 1.25rem;
-            padding: 1.25rem; overflow-y: auto;
+            display: grid; grid-template-columns: 1fr; gap: 1.75rem;
+            padding: 1.5rem; overflow-y: auto;
         }
-        @media (min-width: 900px) { .plano-modal-cuerpo { grid-template-columns: 1.2fr 1fr; } }
+        /* 1fr : 1.05fr y no 1.2 : 1 — el cuadro de planes tiene cuatro
+           columnas de numeros y con menos lugar partia "Plan a 12 Meses" y
+           los montos en dos renglones. */
+        @media (min-width: 900px) { .plano-modal-cuerpo { grid-template-columns: 1fr 1.05fr; } }
 
         .plano-modal-dibujo {
-            display: block; width: 100%; height: min(48vh, 24rem);
+            display: block; width: 100%; height: min(52vh, 26rem);
             background: rgb(250 250 250); border: 1px solid rgb(244 244 245);
             border-radius: .75rem;
         }
         .dark .plano-modal-dibujo { background: rgba(255, 255, 255, .04); border-color: rgba(255, 255, 255, .1); }
-        .plano-modal-escala { margin-top: .5rem; font-size: .6875rem; color: rgb(161 161 170); text-align: center; }
+        .plano-modal-escala { margin-top: .625rem; font-size: .75rem; color: rgb(161 161 170); text-align: center; }
 
         .plano-badge { flex-shrink: 0; border-radius: .375rem; padding: .25rem .5rem; font-size: .75rem; font-weight: 500; color: #fff; }
 
-        .plano-datos { font-size: .875rem; }
-        .plano-dato { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: .3125rem 0; border-bottom: 1px solid rgb(250 250 250); }
+        .plano-datos { font-size: .9375rem; }
+        .plano-dato { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding: .5rem 0; border-bottom: 1px solid rgb(244 244 245); }
         .dark .plano-dato { border-bottom-color: rgba(255, 255, 255, .06); }
         .plano-dato dt { color: rgb(113 113 122); }
         .dark .plano-dato dt { color: rgb(161 161 170); }
         .plano-dato dd { font-variant-numeric: tabular-nums; color: rgb(9 9 11); margin: 0; font-weight: 500; }
         .dark .plano-dato dd { color: #fff; }
-        .plano-dato-fuerte dd { font-size: 1.125rem; font-weight: 600; }
+        .plano-dato-fuerte dd { font-size: 1.375rem; font-weight: 700; }
 
         .plano-acciones { margin-top: 1rem; }
         .plano-botonera { display: flex; gap: .5rem; flex-wrap: wrap; }
         .plano-accion {
             flex: 1 1 auto; border: 1px solid rgb(228 228 231); background: #fff;
-            color: rgb(63 63 70); border-radius: .5rem; padding: .5rem .75rem;
-            font-size: .8125rem; font-weight: 600; cursor: pointer;
+            color: rgb(63 63 70); border-radius: .5rem; padding: .6875rem 1rem;
+            font-size: .9375rem; font-weight: 600; cursor: pointer;
         }
         .plano-accion:hover { background: rgb(250 250 250); }
         .dark .plano-accion { border-color: rgba(255, 255, 255, .15); background: rgba(255, 255, 255, .05); color: rgb(228 228 231); }
@@ -190,24 +213,95 @@
         .dark .plano-planes { border-top-color: rgba(255, 255, 255, .1); }
         .plano-planes-titulo { font-size: .8125rem; font-weight: 600; color: rgb(9 9 11); }
         .dark .plano-planes-titulo { color: #fff; }
-        .plano-prima { display: flex; align-items: center; gap: .5rem; margin: .625rem 0; font-size: .8125rem; color: rgb(113 113 122); }
+        .plano-prima { display: flex; align-items: center; gap: .5rem; margin: .75rem 0; font-size: .875rem; color: rgb(113 113 122); }
         .plano-prima input {
             width: 9rem; border: 1px solid rgb(228 228 231); border-radius: .5rem;
             padding: .3125rem .5rem; font-size: .8125rem; text-align: right;
             font-variant-numeric: tabular-nums; background: #fff; color: rgb(9 9 11);
         }
         .dark .plano-prima input { border-color: rgba(255, 255, 255, .15); background: rgba(255, 255, 255, .05); color: #fff; }
-        .plano-tabla { width: 100%; border-collapse: collapse; font-size: .8125rem; font-variant-numeric: tabular-nums; }
+        .plano-tabla { width: 100%; border-collapse: collapse; font-size: .875rem; font-variant-numeric: tabular-nums; }
         .plano-tabla th {
             text-align: right; font-weight: 500; color: rgb(113 113 122);
-            padding: .375rem .5rem; border-bottom: 1px solid rgb(228 228 231);
+            padding: .5rem .375rem; border-bottom: 1px solid rgb(228 228 231);
+            white-space: nowrap;
         }
         .dark .plano-tabla th { color: rgb(161 161 170); border-bottom-color: rgba(255, 255, 255, .1); }
         .plano-tabla th:first-child, .plano-tabla td:first-child { text-align: left; }
-        .plano-tabla td { padding: .375rem .5rem; border-bottom: 1px solid rgb(250 250 250); text-align: right; color: rgb(9 9 11); }
+        .plano-tabla td { padding: .5rem .375rem; border-bottom: 1px solid rgb(250 250 250); text-align: right; color: rgb(9 9 11); white-space: nowrap; }
         .dark .plano-tabla td { border-bottom-color: rgba(255, 255, 255, .06); color: rgb(228 228 231); }
         .plano-tabla td.cuota { font-weight: 600; }
-        .plano-planes-nota { margin-top: .5rem; font-size: .6875rem; line-height: 1.6; color: rgb(161 161 170); }
+        .plano-planes-nota { margin-top: .625rem; font-size: .75rem; line-height: 1.6; color: rgb(161 161 170); }
+
+        /* El mismo conmutador que las pestañas de la ficha del proyecto. */
+        /* width: fit-content + margin auto = la pastilla centrada sin
+           estirarse. Con inline-flex a secas se pegaba a la izquierda. */
+        .plano-toggle {
+            display: flex; gap: .25rem; width: fit-content;
+            margin: .25rem auto 1rem;
+            padding: .25rem; border-radius: .625rem;
+            background: rgb(244 244 245); border: 1px solid rgb(228 228 231);
+        }
+        .dark .plano-toggle { background: rgba(255, 255, 255, .05); border-color: rgba(255, 255, 255, .1); }
+        .plano-toggle button {
+            border: 0; background: transparent; cursor: pointer;
+            border-radius: .5rem; padding: .5rem 1.5rem; min-width: 9rem;
+            font-size: .875rem; font-weight: 500; color: rgb(113 113 122);
+        }
+        .plano-toggle button:hover { color: rgb(9 9 11); }
+        .dark .plano-toggle button:hover { color: #fff; }
+        .plano-toggle button.activo {
+            background: #fff; color: rgb(180 83 9); font-weight: 600;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, .06);
+        }
+        .dark .plano-toggle button.activo { background: rgb(39 39 42); color: #fbbf24; }
+
+        .plano-panel { margin-top: .25rem; }
+
+        /* Campos con la etiqueta ARRIBA y la caja completa como zona de
+           foco: dos <label> sueltos en fila quedaban de anchos distintos y
+           se leian como un formulario a medio hacer. */
+        .plano-campos { display: grid; grid-template-columns: 1fr 1fr; gap: .875rem; }
+        .plano-campo { display: flex; flex-direction: column; gap: .375rem; }
+        .plano-campo > span { font-size: .8125rem; font-weight: 500; color: rgb(113 113 122); }
+        .dark .plano-campo > span { color: rgb(161 161 170); }
+        .plano-campo-caja {
+            display: flex; align-items: center; gap: .375rem;
+            border: 1px solid rgb(228 228 231); border-radius: .5rem;
+            padding: 0 .625rem; background: #fff;
+        }
+        .dark .plano-campo-caja { border-color: rgba(255, 255, 255, .15); background: rgba(255, 255, 255, .05); }
+        .plano-campo-caja:focus-within { border-color: #d97706; box-shadow: 0 0 0 3px rgba(217, 119, 6, .12); }
+        .plano-campo-prefijo { font-size: .875rem; color: rgb(161 161 170); }
+        .plano-campo-caja input {
+            flex: 1; min-width: 0; border: 0; outline: none; background: transparent;
+            padding: .5625rem 0; font-size: .9375rem; color: rgb(9 9 11);
+            font-variant-numeric: tabular-nums;
+        }
+        .dark .plano-campo-caja input { color: #fff; }
+
+        .plano-terminos {
+            margin: 1rem 0 0; padding: .875rem 1rem .875rem 2rem;
+            border-radius: .625rem; background: rgb(250 250 250);
+            font-size: .8125rem; line-height: 1.7; color: rgb(82 82 91);
+        }
+        .dark .plano-terminos { background: rgba(255, 255, 255, .04); color: rgb(212 212 216); }
+        .plano-terminos li { margin: 0; }
+        .plano-terminos strong { color: rgb(9 9 11); font-weight: 600; }
+        .dark .plano-terminos strong { color: #fff; }
+        .plano-accion-ancha { display: block; width: 100%; margin-top: 1rem; }
+        .plano-fila-plan { cursor: pointer; }
+        .plano-fila-plan:hover td { background: rgb(250 250 250); }
+        .dark .plano-fila-plan:hover td { background: rgba(255, 255, 255, .04); }
+        .plano-fila-plan.elegido td { background: rgb(239 246 255); }
+        .dark .plano-fila-plan.elegido td { background: rgba(59, 130, 246, .12); }
+        .plano-precio {
+            width: 6.75rem; border: 1px solid rgb(228 228 231); border-radius: .375rem;
+            padding: .3125rem .5rem; font-size: .875rem; text-align: right;
+            font-variant-numeric: tabular-nums; background: #fff; color: rgb(9 9 11);
+        }
+        .plano-precio.tocado { border-color: #d97706; color: #b45309; font-weight: 600; }
+        .dark .plano-precio { border-color: rgba(255, 255, 255, .15); background: rgba(255, 255, 255, .05); color: #fff; }
     </style>
 
     <div class="plano-stats">
@@ -250,6 +344,22 @@
                 seleccionado: null,
                 abierto: false,
                 prima: '',
+
+                /* Lo que se cotiza en el modal viaja al formulario de venta:
+                   el plazo elegido y, si se toco, el precio de esa fila. */
+                plazoElegido: null,
+                preciosTocados: {},
+
+                /* Que pestaña del modal se esta mirando: 'vender' o
+                   'apartar'. Se reinicia con cada lote. */
+                modo: 'vender',
+                senia: '',
+                venceEl: '',
+
+                /* Los terminos de R14, para proponerlos en vez de dejar los
+                   campos en blanco. Editables: si un dia se recibe otra
+                   cantidad, se anota la que se recibio. */
+                apartado: @js($apartado),
                 arrastrando: false,
                 movio: false,
                 inicio: { x: 0, y: 0, vx: 0, vy: 0 },
@@ -400,6 +510,11 @@
                     };
 
                     this.prima = '';
+                    this.modo = 'vender';
+                    this.senia = this.apartado.monto;
+                    this.venceEl = this.apartado.venceIso;
+                    this.preciosTocados = {};
+                    this.plazoElegido = this.planes.length > 0 ? this.planes[0].meses : null;
                     this.abierto = true;
                 },
 
@@ -631,13 +746,15 @@
                     const prima = Math.max(0, Math.round((Number(this.prima) || 0) * 100));
 
                     return this.planes.map((plan) => {
-                        const total = Math.round(area * Number(plan.precioVara) * 100);
+                        const precio = this.precioDe(plan);
+                        const total = Math.round(area * precio * 100);
                         const saldo = Math.max(total - prima, 0);
 
                         return {
                             meses: plan.meses,
                             etiqueta: plan.etiqueta || (plan.meses > 0 ? `${plan.meses} meses` : 'Contado'),
-                            precioVara: this.lempiras(Math.round(Number(plan.precioVara) * 100)),
+                            precioVara: precio,
+                            deLista: Number(plan.precioVara),
                             total: this.lempiras(total),
                             cuota: plan.meses > 0 ? this.lempiras(Math.round(saldo / plan.meses)) : '—',
                         };
@@ -655,6 +772,41 @@
                 },
 
                 lempiras(centavos) { return `L ${this.numero(centavos / 100)}` },
+
+                /* Lo que se le pasa a la accion de apartar. Vacio significa
+                   lo de siempre, y el formulario pone los numeros de R14. */
+                get reserva() {
+                    const senia = Number(this.senia);
+
+                    return {
+                        lote: this.seleccionado.id,
+                        senia: Number.isFinite(senia) && senia > 0 ? senia.toFixed(2) : null,
+                        vence: this.venceEl || null,
+                    };
+                },
+
+                /* El precio que manda para un plan: el que se tecleo en la
+                   fila, o el de la lista si no se toco ninguno. */
+                precioDe(plan) {
+                    const tocado = Number(this.preciosTocados[plan.meses]);
+
+                    return Number.isFinite(tocado) && tocado > 0 ? tocado : Number(plan.precioVara);
+                },
+
+                /* Lo que se le pasa a la accion de vender. El formulario llega
+                   con esto puesto y de ahi se puede seguir cambiando: el
+                   servidor vuelve a validar todo, esto es solo el arranque. */
+                get cotizacion() {
+                    const plan = this.planes.find((p) => p.meses === this.plazoElegido);
+                    const prima = Number(this.prima);
+
+                    return {
+                        lote: this.seleccionado.id,
+                        plazo: this.plazoElegido,
+                        precio: plan ? this.precioDe(plan).toFixed(2) : null,
+                        prima: Number.isFinite(prima) && prima > 0 ? prima.toFixed(2) : null,
+                    };
+                },
 
                 get areaFormateada() {
                     const crudo = String(this.seleccionado?.areaVaras ?? '').replace(/,/g, '');
@@ -915,46 +1067,198 @@
                                 </dl>
 
                                 {{--
-                                    Los botones montan las acciones de Filament
-                                    por nombre y cierran este modal en el acto:
-                                    el de Filament se monta al final del <body>
-                                    y no tendria por que pelear con este por
-                                    quien va encima.
+                                    Vender y Apartar como PESTAÑAS, no como dos
+                                    botones sueltos: el mismo conmutador que
+                                    Bloques / Lotes / Planes de pago en la ficha
+                                    del proyecto.
+
+                                    Cada pestaña muestra lo suyo y termina en un
+                                    boton que monta la accion de Filament con lo
+                                    que se cotizo. El modal se cierra en el acto:
+                                    el de Filament se monta al final del <body> y
+                                    no tiene por que pelear por quien va encima.
                                 --}}
-                                <div class="plano-acciones">
-                                    <template x-if="seleccionado.estado === 'disponible'">
-                                        <div class="plano-botonera">
-                                            <button type="button" class="plano-accion plano-accion-apartar"
-                                                x-on:click="$wire.mountAction('apartarLote', { lote: seleccionado.id }); abierto = false">
-                                                Apartar
-                                            </button>
-                                            <button type="button" class="plano-accion plano-accion-vender"
-                                                x-on:click="$wire.mountAction('venderLote', { lote: seleccionado.id }); abierto = false">
-                                                Vender
-                                            </button>
+                                <template x-if="seleccionado.estado !== 'vendido'">
+                                    <div>
+                                        <div class="plano-toggle">
+                                            <button
+                                                type="button"
+                                                :class="modo === 'vender' ? 'activo' : ''"
+                                                x-on:click="modo = 'vender'"
+                                                x-text="seleccionado.estado === 'apartado' ? 'Convertir en venta' : 'Vender'"
+                                            ></button>
+                                            <button
+                                                type="button"
+                                                :class="modo === 'apartar' ? 'activo' : ''"
+                                                x-on:click="modo = 'apartar'"
+                                                x-text="seleccionado.estado === 'apartado' ? 'Liberar' : 'Apartar'"
+                                            ></button>
                                         </div>
-                                    </template>
 
-                                    <template x-if="seleccionado.estado === 'apartado'">
-                                        <div class="plano-botonera">
-                                            <button type="button" class="plano-accion plano-accion-vender"
-                                                x-on:click="$wire.mountAction('venderLote', { lote: seleccionado.id }); abierto = false">
-                                                Convertir en venta
-                                            </button>
-                                            <button type="button" class="plano-accion"
-                                                x-on:click="$wire.mountAction('liberarLote', { lote: seleccionado.id }); abierto = false">
-                                                Liberar
-                                            </button>
-                                        </div>
-                                    </template>
+                                        {{-- ── Vender ──────────────────────────── --}}
+                                        <template x-if="modo === 'vender'">
+                                            <div class="plano-panel">
+                                                <template x-if="planes.length === 0">
+                                                    <p class="plano-planes-nota">
+                                                        Falta cargar el precio por vara² de cada plazo. Se cargan en el
+                                                        proyecto, pestaña «Planes de pago»; en cuanto haya uno, este
+                                                        cuadro calcula la cuota de cada plan sobre este lote.
+                                                    </p>
+                                                </template>
 
-                                    <template x-if="seleccionado.estado === 'vendido'">
-                                        <p class="plano-detalle-vacio">
-                                            Lote vendido. Deshacer una venta es una rescisión y ese trámite
-                                            todavía no está en el sistema.
-                                        </p>
-                                    </template>
-                                </div>
+                                                <template x-if="planes.length > 0">
+                                                    <div>
+                                                        <label class="plano-prima">
+                                                            Prima
+                                                            <input type="number" min="0" step="0.01" placeholder="0.00" x-model="prima">
+                                                            L
+                                                        </label>
+
+                                                        {{-- El plazo se ELIGE acá y el precio se puede tocar
+                                                             acá: lo que quede marcado viaja al formulario de
+                                                             venta ya puesto. El servidor lo revalida igual —
+                                                             esto es el arranque, no la última palabra. --}}
+                                                        <table class="plano-tabla">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th></th>
+                                                                    <th>Plazo</th>
+                                                                    <th>Precio v²</th>
+                                                                    <th>Valor</th>
+                                                                    <th>Cuota</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                <template x-for="plan in planesCalculados" :key="plan.meses">
+                                                                    <tr
+                                                                        class="plano-fila-plan"
+                                                                        :class="plan.meses === plazoElegido ? 'elegido' : ''"
+                                                                        x-on:click="plazoElegido = plan.meses"
+                                                                    >
+                                                                        <td>
+                                                                            <input
+                                                                                type="radio"
+                                                                                :value="plan.meses"
+                                                                                :checked="plan.meses === plazoElegido"
+                                                                                x-on:change="plazoElegido = plan.meses"
+                                                                            >
+                                                                        </td>
+                                                                        <td x-text="plan.etiqueta"></td>
+                                                                        <td>
+                                                                            <input
+                                                                                type="number"
+                                                                                min="0"
+                                                                                step="0.01"
+                                                                                class="plano-precio"
+                                                                                :class="plan.precioVara !== plan.deLista ? 'tocado' : ''"
+                                                                                :placeholder="numero(plan.deLista)"
+                                                                                :value="preciosTocados[plan.meses] ?? ''"
+                                                                                x-on:click.stop
+                                                                                x-on:input="preciosTocados[plan.meses] = $event.target.value"
+                                                                            >
+                                                                        </td>
+                                                                        <td x-text="plan.total"></td>
+                                                                        <td class="cuota" x-text="plan.cuota"></td>
+                                                                    </tr>
+                                                                </template>
+                                                            </tbody>
+                                                        </table>
+
+                                                        <p class="plano-planes-nota">
+                                                            Marcá el plazo con el que se va a vender. El precio se puede
+                                                            cambiar acá mismo; vacío es el de lista. El plan definitivo
+                                                            se arma al registrar la venta, y ahí el residuo del redondeo
+                                                            va a la última cuota.
+                                                        </p>
+                                                    </div>
+                                                </template>
+
+                                                <button
+                                                    type="button"
+                                                    class="plano-accion plano-accion-vender plano-accion-ancha"
+                                                    x-on:click="$wire.mountAction('venderLote', cotizacion); abierto = false"
+                                                    x-text="seleccionado.estado === 'apartado' ? 'Convertir en venta' : 'Vender este lote'"
+                                                ></button>
+                                            </div>
+                                        </template>
+
+                                        {{-- ── Apartar / Liberar ───────────────── --}}
+                                        <template x-if="modo === 'apartar'">
+                                            <div class="plano-panel">
+                                                <template x-if="seleccionado.estado === 'apartado'">
+                                                    <div>
+                                                        <p class="plano-planes-nota">
+                                                            El lote vuelve a quedar disponible. El apartado queda en el
+                                                            historial con su motivo, que se pide al confirmar.
+                                                        </p>
+
+                                                        <button
+                                                            type="button"
+                                                            class="plano-accion plano-accion-ancha"
+                                                            x-on:click="$wire.mountAction('liberarLote', { lote: seleccionado.id }); abierto = false"
+                                                        >
+                                                            Liberar el apartado
+                                                        </button>
+                                                    </div>
+                                                </template>
+
+                                                <template x-if="seleccionado.estado !== 'apartado'">
+                                                    <div>
+                                                        {{-- Los campos llegan LLENOS con los términos que fijó
+                                                             la contratante (R14). Editables igual: si un día se
+                                                             recibe otra cantidad, se anota la que se recibió. --}}
+                                                        <div class="plano-campos">
+                                                            <label class="plano-campo">
+                                                                <span>Monto del apartado</span>
+                                                                <div class="plano-campo-caja">
+                                                                    <span class="plano-campo-prefijo">L</span>
+                                                                    <input type="number" min="0" step="0.01" x-model="senia">
+                                                                </div>
+                                                            </label>
+
+                                                            <label class="plano-campo">
+                                                                <span>Vence el</span>
+                                                                <div class="plano-campo-caja">
+                                                                    <input type="date" x-model="venceEl">
+                                                                </div>
+                                                            </label>
+                                                        </div>
+
+                                                        <ul class="plano-terminos">
+                                                            <li>
+                                                                Se reserva a nombre del cliente y se puede liberar
+                                                                después sin consecuencias.
+                                                            </li>
+                                                            <li>
+                                                                El monto <strong>cuenta como parte de la prima</strong>
+                                                                cuando la venta se firme.
+                                                            </li>
+                                                            <li>
+                                                                Si vence sin que el cliente vuelva, el lote se libera y
+                                                                <strong>el dinero se devuelve</strong>.
+                                                            </li>
+                                                        </ul>
+
+                                                        <button
+                                                            type="button"
+                                                            class="plano-accion plano-accion-apartar plano-accion-ancha"
+                                                            x-on:click="$wire.mountAction('apartarLote', reserva); abierto = false"
+                                                        >
+                                                            Apartar este lote
+                                                        </button>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+
+                                <template x-if="seleccionado.estado === 'vendido'">
+                                    <p class="plano-detalle-vacio">
+                                        Lote vendido. Deshacer una venta es una rescisión y ese trámite
+                                        todavía no está en el sistema.
+                                    </p>
+                                </template>
 
                                 <template x-if="seleccionado.desalineado">
                                     <p class="plano-aviso">
@@ -963,65 +1267,6 @@
                                     </p>
                                 </template>
 
-                                {{--
-                                    Planes de pago.
-
-                                    La lista de precios por plazo vive en
-                                    config/lotificadora.php y hoy viene vacía:
-                                    el precio de la vara no es el mismo a 1 año
-                                    que a 4, y ese cuadro todavía no lo tenemos
-                                    por escrito. Mientras no esté, acá no sale
-                                    ninguna cuota — un número inventado en esta
-                                    pantalla es un número que alguien le cotiza
-                                    a un cliente.
-                                --}}
-                                <div class="plano-planes">
-                                    <p class="plano-planes-titulo">Planes de pago</p>
-
-                                    <template x-if="planes.length === 0">
-                                        <p class="plano-planes-nota">
-                                            Falta cargar el precio por vara² de cada plazo. Se cargan en el
-                                            proyecto, pestaña «Planes de pago»; en cuanto haya uno, este cuadro
-                                            calcula la cuota de cada plan sobre este lote.
-                                        </p>
-                                    </template>
-
-                                    <template x-if="planes.length > 0">
-                                        <div>
-                                            <label class="plano-prima">
-                                                Prima
-                                                <input type="number" min="0" step="0.01" placeholder="0.00" x-model="prima">
-                                                L
-                                            </label>
-
-                                            <table class="plano-tabla">
-                                                <thead>
-                                                    <tr>
-                                                        <th>Plazo</th>
-                                                        <th>Precio v²</th>
-                                                        <th>Valor</th>
-                                                        <th>Cuota</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    <template x-for="plan in planesCalculados" :key="plan.meses">
-                                                        <tr>
-                                                            <td x-text="plan.etiqueta"></td>
-                                                            <td x-text="plan.precioVara"></td>
-                                                            <td x-text="plan.total"></td>
-                                                            <td class="cuota" x-text="plan.cuota"></td>
-                                                        </tr>
-                                                    </template>
-                                                </tbody>
-                                            </table>
-
-                                            <p class="plano-planes-nota">
-                                                Estimado para cotizar. El plan que se firma se arma al registrar
-                                                la venta: ahí el residuo del redondeo va a la última cuota.
-                                            </p>
-                                        </div>
-                                    </template>
-                                </div>
                             </div>
                         </div>
                     </div>

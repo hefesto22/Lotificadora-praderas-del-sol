@@ -59,6 +59,7 @@ final readonly class RegistroDeVentas
     public function __construct(
         private ConsumoDeCorrelativos $correlativos,
         private RegistroDeCompromisos $compromisos,
+        private ListaDePrecios $lista,
     ) {}
 
     /**
@@ -110,7 +111,7 @@ final readonly class RegistroDeVentas
             $frescos = $this->bloquearYVerificar($lotes, $titular);
 
             // 2. Congelar area y valor, AL PRECIO QUE SE FIRMA.
-            $renglones = $this->congelarPrecios($frescos, $pactados);
+            $renglones = $this->congelarPrecios($proyecto, $frescos, $pactados, $plazoMeses);
             $areaTotal = $this->sumarAreas($frescos);
             $valorTotal = $this->sumarValores($renglones);
 
@@ -157,6 +158,7 @@ final readonly class RegistroDeVentas
                     venta: $venta,
                     precioVara: $renglon['precio'],
                     motivoDescuento: $renglon['motivo'],
+                    precioVaraLista: $renglon['lista'],
                 );
             }
 
@@ -271,17 +273,24 @@ final readonly class RegistroDeVentas
      * @param list<Lote> $lotes
      * @param array<int, PrecioPactado> $pactados por id de lote
      *
-     * @return list<array{lote: Lote, precio: Monto, motivo: string|null, valor: Monto}>
+     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, valor: Monto}>
      *
      * @throws VentaInvalidaException
      */
-    private function congelarPrecios(array $lotes, array $pactados): array
+    private function congelarPrecios(Proyecto $proyecto, array $lotes, array $pactados, int $plazoMeses): array
     {
         $renglones = [];
 
         foreach ($lotes as $lote) {
             $id = (int) $lote->getKey();
-            $lista = $this->montoDe($lote, 'precio_vara');
+
+            /*
+             * El precio de lista es EL DEL PLAZO QUE SE ELIGIO, no el de la
+             * ficha del lote. Si no, vender de contado a L 1,300 con el lote
+             * fijado en L 1,500 contaria como descuento y pediria motivo —
+             * por un precio de lista oficial.
+             */
+            $lista = $this->lista->deListaPara($proyecto, $lote, $plazoMeses);
 
             $acuerdo = $pactados[$id] ?? null;
 
@@ -297,6 +306,7 @@ final readonly class RegistroDeVentas
 
             $renglones[] = [
                 'lote'   => $lote,
+                'lista'  => $lista,
                 'precio' => $precio,
                 'motivo' => $motivo,
                 // La MISMA expresion que usa RegistroDeCompromisos::valorDe()
@@ -324,7 +334,7 @@ final readonly class RegistroDeVentas
     }
 
     /**
-     * @param list<array{lote: Lote, precio: Monto, motivo: string|null, valor: Monto}> $renglones
+     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, valor: Monto}> $renglones
      */
     private function sumarValores(array $renglones): Monto
     {

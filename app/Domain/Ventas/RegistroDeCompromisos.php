@@ -104,6 +104,7 @@ final readonly class RegistroDeCompromisos
         ?Venta $venta = null,
         ?Monto $precioVara = null,
         ?string $motivoDescuento = null,
+        ?Monto $precioVaraLista = null,
     ): Compromiso {
         $estado = $this->estadoDe($lote);
         $codigo = $this->codigoDe($lote);
@@ -131,7 +132,16 @@ final readonly class RegistroDeCompromisos
             }
         }
 
-        $lista = new Monto($this->decimalDe($lote, 'precio_vara'));
+        /*
+         * El precio de lista puede venir de afuera: cuando la venta se firma
+         * con un PLAN, la lista es la del plazo elegido y no la de la ficha
+         * del lote. Sin esto, el precio de contado de la lista contaria como
+         * descuento y pediria motivo (R4) sin haberlo.
+         *
+         * Vendiendo un lote suelto —sin expediente— no hay plazo del que
+         * hablar, y manda el del lote.
+         */
+        $lista = $precioVaraLista ?? new Monto($this->decimalDe($lote, 'precio_vara'));
         $pactado = $precioVara ?? $lista;
         $motivo = trim($motivoDescuento ?? '');
 

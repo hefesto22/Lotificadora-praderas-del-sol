@@ -3,11 +3,16 @@
 declare(strict_types=1);
 
 use App\Filament\Resources\Proyectos\Pages\VerPlano;
+use App\Filament\Resources\Proyectos\Pages\ViewProyecto;
 use App\Filament\Resources\Proyectos\ProyectoResource;
+use App\Filament\Resources\Proyectos\RelationManagers\BloquesRelationManager;
+use App\Filament\Resources\Proyectos\RelationManagers\LotesRelationManager;
+use App\Filament\Resources\Proyectos\RelationManagers\PlanesDePagoRelationManager;
 use App\Models\Bloque;
 use App\Models\Lote;
 use App\Models\PlanDePago;
 use App\Models\Proyecto;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
@@ -164,10 +169,79 @@ describe('Lo que llega al plano', function (): void {
 
 describe('La pestaña del proyecto', function (): void {
     test('la ficha del proyecto lista los planes cargados', function (): void {
-        PlanDePago::factory()->delProyecto($this->proyecto)->aPlazo(24, '1650.00')->create();
+        $plan = PlanDePago::factory()->delProyecto($this->proyecto)->aPlazo(24, '1650.00')->create();
 
-        $this->get(ProyectoResource::getUrl('view', ['record' => $this->proyecto]))
-            ->assertOk()
-            ->assertSee('Planes de pago');
+        // La ficha abre...
+        $this->get(ProyectoResource::getUrl('view', ['record' => $this->proyecto]))->assertOk();
+
+        // ...y la pestaña trae el plan. Se pregunta por los REGISTROS de la
+        // tabla y no por el HTML de la pagina: las pestanas se montan como
+        // componentes aparte y su contenido no esta en la primera respuesta.
+        Livewire::test(PlanesDePagoRelationManager::class, [
+            'ownerRecord' => $this->proyecto,
+            'pageClass'   => ViewProyecto::class,
+        ])->assertCanSeeTableRecords([$plan]);
+    });
+
+    /*
+    | Este test existe por un sintoma concreto: la pestana abria vacia y sin
+    | ningun boton para cargar el primero. Renderizar no alcanza — hay que
+    | preguntar si la accion esta AHI y visible.
+    |
+    | La causa no eran los permisos: Filament trae los relation managers de
+    | una pagina de VISTA en solo lectura. Se arregla en el panel con
+    | ->readOnlyRelationManagersOnResourceViewPagesByDefault(false), y este
+    | test es el que se pone rojo si alguien lo saca. Lo mismo le pasaba a
+    | Bloques y a Lotes sin que nadie lo notara, porque Praderas ya venia
+    | con sus 24 bloques y sus 301 lotes cargados del DXF.
+    */
+    test('con la tabla vacia hay como cargar el primer plan', function (): void {
+        $relacion = fn (): object => Livewire::test(PlanesDePagoRelationManager::class, [
+            'ownerRecord' => $this->proyecto,
+            'pageClass'   => ViewProyecto::class,
+        ]);
+
+        // Con la tabla VACIA, que es el caso que estaba roto: la pestana abria
+        // sin un solo boton y no habia por donde cargar el primero.
+        $relacion()->assertActionVisible(TestAction::make('create')->table());
+    });
+
+    /*
+    | §9.E9. Y ojo con este: PlanDePago no es un Resource, asi que
+    | shield:generate no le genera permisos. Si el RoleSeeder no los nombra
+    | uno por uno, Filament —que permite lo que no tiene politica— dejaba a
+    | cualquiera editar el precio de lista del proyecto entero.
+    */
+    test('un usuario sin permisos no puede tocar los precios', function (): void {
+        actingAsPanelUser();
+
+        Livewire::test(PlanesDePagoRelationManager::class, [
+            'ownerRecord' => $this->proyecto,
+            'pageClass'   => ViewProyecto::class,
+        ])->assertActionHidden(TestAction::make('create')->table());
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| El mismo default, en las otras dos pestanas
+|--------------------------------------------------------------------------
+| Bloques y Lotes se movieron adentro del proyecto el 5-ago-2026 y quedaron
+| de solo lectura sin que nadie lo viera: Praderas ya tenia sus 24 bloques y
+| sus 301 lotes cargados del DXF, asi que nunca hizo falta el boton.
+*/
+describe('Bloques y Lotes tambien se administran desde el proyecto', function (): void {
+    test('se puede crear un bloque desde la ficha', function (): void {
+        Livewire::test(BloquesRelationManager::class, [
+            'ownerRecord' => $this->proyecto,
+            'pageClass'   => ViewProyecto::class,
+        ])->assertActionVisible(TestAction::make('create')->table());
+    });
+
+    test('se puede crear un lote desde la ficha', function (): void {
+        Livewire::test(LotesRelationManager::class, [
+            'ownerRecord' => $this->proyecto,
+            'pageClass'   => ViewProyecto::class,
+        ])->assertActionVisible(TestAction::make('create')->table());
     });
 });

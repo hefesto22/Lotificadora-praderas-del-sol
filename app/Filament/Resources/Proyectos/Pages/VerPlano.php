@@ -4,35 +4,46 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Proyectos\Pages;
 
-use App\Domain\Exceptions\CompromisoInvalidoException;
+use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\Plano\AcomodadorDelPlano;
 use App\Domain\Plano\Dxf\ImportadorDeDxf;
 use App\Domain\Plano\Dxf\OpcionesDeImportacion;
 use App\Domain\Plano\Dxf\UnidadDxf;
 use App\Domain\Plano\ParametrosDeAcomodo;
 use App\Domain\Plano\PlanoDelProyecto;
+use App\Domain\ValueObjects\Monto;
+use App\Domain\Ventas\ListaDePrecios;
+use App\Domain\Ventas\PlanDeCuotas;
+use App\Domain\Ventas\PrecioPactado;
 use App\Domain\Ventas\RegistroDeCompromisos;
+use App\Domain\Ventas\RegistroDeVentas;
 use App\Filament\Resources\Proyectos\ProyectoResource;
 use App\Filament\Schemas\Components\DNIField;
 use App\Filament\Schemas\Components\MayusculasField;
+use App\Filament\Schemas\Components\MontoField;
 use App\Filament\Schemas\Components\TelefonoHondurasField;
 use App\Models\Bloque;
 use App\Models\Cliente;
 use App\Models\Lote;
 use App\Models\PlanDePago;
 use App\Models\Proyecto;
+use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Concerns\InteractsWithRecord;
 use Filament\Resources\Pages\Page;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Validation\Rules\Unique;
 use Override;
+use Throwable;
 
 /**
  * El plano del proyecto: los lotes dibujados y pintados por estado.
@@ -155,14 +166,33 @@ class VerPlano extends Page
     // ─── Movimientos del lote, disparados desde el plano ──────────────
 
     /*
-     * Estas tres acciones no van en la cabecera: se montan desde el panel
-     * lateral con $wire.mountAction('apartarLote', { lote: id }). Filament
+     * Estas tres acciones no van en la cabecera: se montan desde el modal
+     * del lote con $wire.mountAction('apartarLote', { lote: id }). Filament
      * las resuelve por el nombre del metodo —{nombre}Action— y les inyecta
      * los argumentos.
      *
-     * Ninguna toca el estado del lote por su cuenta: todo pasa por
-     * RegistroDeCompromisos, que deja el respaldo y mueve el estado dentro
-     * de la misma transaccion.
+     * Apartar y liberar pasan por RegistroDeCompromisos. VENDER pasa por
+     * RegistroDeVentas, que es otra cosa: numera el expediente y arma el
+     * plan de cuotas.
+     */
+
+    /**
+     * Apartar: el formulario pide SOLO el cliente.
+     *
+     * El monto y el vencimiento se eligen en el modal del lote —y llegan
+     * con los numeros de R14 puestos—, asi que volver a pedirlos aca era
+     * hacerle el mismo tramite dos veces a la misma persona. Viajan en
+     * campos ocultos y se muestran como resumen, para que se vea que se
+     * esta confirmando.
+     *
+     * ═══ POR QUE CAMPOS OCULTOS Y NO $arguments ═══
+     *
+     * `$arguments` se inyecta en los closures de la ACCION —fillForm,
+     * action— pero NO en los de un componente del schema: Filament tira
+     * BindingResolutionException al evaluar el content() de un Placeholder.
+     * El estado del formulario si llega a todos lados, y un `Hidden` se
+     * deshidrata aunque no se vea (a diferencia de un campo con
+     * visible(false), que no se envia).
      */
     public function apartarLoteAction(): Action
     {
@@ -170,20 +200,20 @@ class VerPlano extends Page
             ->label('Apartar lote')
             ->icon(Heroicon::OutlinedBookmark)
             ->color('warning')
-            ->modalHeading('Apartar el lote')
-            ->modalDescription('Queda reservado a nombre del cliente. Se puede liberar despues sin consecuencias.')
+            ->modalHeading('¿A nombre de quien?')
+            ->modalDescription('Queda reservado para esa persona. Se puede liberar despues sin consecuencias.')
             ->modalSubmitActionLabel('Apartar')
+            ->modalWidth('lg')
+            ->fillForm(fn (array $arguments): array => $this->datosInicialesDeApartado($arguments))
             ->schema([
-                $this->selectorDeCliente('¿A nombre de quien?'),
+                Hidden::make('monto_senia'),
+                Hidden::make('vence_el'),
 
-                TextInput::make('monto_senia')
-                    ->label('Seña recibida (opcional)')
-                    ->numeric()
-                    ->helperText('Si se recibio un adelanto para reservar, se anota aca.'),
+                $this->selectorDeCliente('Cliente'),
 
-                DatePicker::make('vence_el')
-                    ->label('Vence el (opcional)')
-                    ->helperText('Hasta cuando se le guarda el lote.'),
+                Placeholder::make('resumen')
+                    ->label('Condiciones')
+                    ->content(fn (Get $get): string => $this->resumenDeApartado($get)),
 
                 Textarea::make('observaciones')
                     ->label('Observaciones')
@@ -210,21 +240,86 @@ class VerPlano extends Page
             });
     }
 
+    /**
+     * Vender: tambien pide solo lo que falta.
+     *
+     * El plazo, el precio por vara y la prima se cotizan en el modal del
+     * lote. Aca se muestran en un resumen —con la cuota, calculada con el
+     * mismo PlanDeCuotas que despues persiste (§10.8)— y se pregunta lo
+     * que el modal no puede: quien compra, que dia paga y con que fecha.
+     *
+     * Los tres SOLO aparecen como campos cuando el modal no los mando, que
+     * es el caso de un proyecto sin planes cargados. El formulario pregunta
+     * lo que falta, literalmente.
+     *
+     * Detras sigue mandando el servidor: RegistroDeVentas revalida el
+     * precio contra la lista del plazo y exige motivo si baja (R4). Lo que
+     * viaja por la pantalla no es autoridad sobre el dinero.
+     */
     public function venderLoteAction(): Action
     {
         return Action::make('venderLote')
             ->label('Vender lote')
             ->icon(Heroicon::OutlinedCheckBadge)
             ->color('primary')
-            ->modalHeading('Registrar la venta del lote')
+            ->modalHeading('Firmar la venta')
             ->modalDescription(
-                'La venta congela el area, el precio y el valor del lote para siempre (§8.2). '.
-                'Despues de esto el lote ya no se puede repreciar. Si el lote estaba apartado, '.
-                'tiene que ser a nombre de la misma persona.'
+                'Se numera el expediente, se congelan el area y el precio, y queda armado el plan '.
+                'de cuotas. Si el lote estaba apartado, tiene que ser a nombre de la misma persona.'
             )
-            ->modalSubmitActionLabel('Registrar la venta')
+            ->modalSubmitActionLabel('Firmar la venta')
+            ->modalWidth('2xl')
+            ->fillForm(fn (array $arguments): array => $this->datosInicialesDeVenta($arguments))
             ->schema([
+                Hidden::make('lote_id'),
+                Hidden::make('cotizado'),
+
                 $this->selectorDeCliente('¿Quien compra?'),
+
+                Placeholder::make('resumen')
+                    ->label('Lo que se va a firmar')
+                    ->content(fn (Get $get): string => $this->resumenDeVenta($get)),
+
+                TextInput::make('plazo_meses')
+                    ->label('Plazo en meses')
+                    ->numeric()
+                    ->minValue(0)
+                    ->maxValue(PlanDeCuotas::PLAZO_MAXIMO_MESES)
+                    ->required()
+                    ->live(onBlur: true)
+                    ->visible(fn (Get $get): bool => ! $get('cotizado'))
+                    ->helperText('0 es contado, sin cuotas.'),
+
+                MontoField::make('precio_vara', 'Precio por vara²')
+                    ->live(onBlur: true)
+                    ->visible(fn (Get $get): bool => ! $get('cotizado')),
+
+                MontoField::make('prima', 'Prima')
+                    ->live(onBlur: true)
+                    ->visible(fn (Get $get): bool => ! $get('cotizado'))
+                    ->helperText('Se paga completa al firmar (R5).'),
+
+                Select::make('dia_pago')
+                    ->label('Dia de pago')
+                    ->options($this->diasDelMes())
+                    ->required()
+                    ->live()
+                    ->native(false)
+                    ->helperText('En los meses cortos se corre al ultimo dia.'),
+
+                DatePicker::make('fecha_contrato')
+                    ->label('Fecha del contrato')
+                    ->required()
+                    ->live()
+                    ->native(false)
+                    ->displayFormat('d/m/Y'),
+
+                TextInput::make('motivo_descuento')
+                    ->label('Motivo del descuento')
+                    ->maxLength(200)
+                    ->visible(fn (Get $get): bool => $this->hayDescuento($get))
+                    ->required(fn (Get $get): bool => $this->hayDescuento($get))
+                    ->helperText('El precio va por debajo del de lista. R4: queda con tu usuario y la fecha.'),
 
                 Textarea::make('observaciones')
                     ->label('Observaciones')
@@ -234,17 +329,33 @@ class VerPlano extends Page
                 $this->conElLote($arguments, function (Lote $lote) use ($data): string {
                     $cliente = Cliente::query()->findOrFail($this->entero($data, 'cliente_id', 0));
 
-                    $venta = new RegistroDeCompromisos()->vender(
-                        $lote,
-                        $cliente,
+                    /** @var Proyecto $proyecto */
+                    $proyecto = $this->getRecord();
+
+                    $venta = app(RegistroDeVentas::class)->activar(
+                        proyecto: $proyecto,
+                        lotes: [$lote],
+                        clientes: [$cliente],
+                        prima: $this->monto($this->texto($data, 'prima', '0')),
+                        plazoMeses: $this->entero($data, 'plazo_meses', 0),
+                        diaPago: $this->entero($data, 'dia_pago', 1),
+                        fechaContrato: CarbonImmutable::parse(
+                            $this->texto($data, 'fecha_contrato', today()->toDateString())
+                        ),
                         observaciones: $this->texto($data, 'observaciones', '') ?: null,
+                        precios: [new PrecioPactado(
+                            loteId: (int) $lote->getKey(),
+                            precioVara: $this->monto($this->texto($data, 'precio_vara', '0')),
+                            motivo: $this->texto($data, 'motivo_descuento', '') ?: null,
+                        )],
                     );
 
                     return sprintf(
-                        '%s vendido a %s por %s.',
+                        '%s vendido a %s. Contrato %s por %s.',
                         (string) $lote->getAttribute('codigo'),
                         (string) $cliente->getAttribute('nombre'),
-                        $venta->montoValor()->formateado()
+                        (string) $venta->getAttribute('numero_contrato'),
+                        $venta->montoValorTotal()->formateado(),
                     );
                 });
             });
@@ -275,6 +386,299 @@ class VerPlano extends Page
             });
     }
 
+    // ─── Ayudas de la venta desde el plano ────────────────────────────
+
+    /**
+     * Con que llega precargado el formulario al abrirse.
+     *
+     * Se propone el plan MAS CORTO que ofrezca el proyecto: es el que menos
+     * compromete al cliente. Si no hay ninguno, manda el precio propio del
+     * lote, que es lo que habia antes de que existiera la lista por plazo.
+     *
+     * @param array<string, mixed> $arguments
+     *
+     * @return array<string, mixed>
+     */
+    private function datosInicialesDeVenta(array $arguments): array
+    {
+        $lote = Lote::query()->find($this->entero($arguments, 'lote', 0));
+
+        /*
+         * Lo que se cotizo en el modal del lote MANDA. El vendedor ya marco
+         * el plazo, quizas toco el precio y quizas escribio la prima: llegar
+         * al formulario con todo eso en blanco seria pedirselo dos veces.
+         *
+         * Nada de esto se cree a ciegas: el Service revalida el precio
+         * contra la lista del plazo y exige motivo si baja (R4).
+         */
+        $plazo = $this->entero($arguments, 'plazo', -1);
+        $plan = $plazo >= 0 ? $this->planDelPlazo($plazo) : $this->primerPlan();
+        $propio = $lote?->getAttribute('precio_vara');
+        $cotizado = $this->texto($arguments, 'precio', '');
+
+        return [
+            'plazo_meses' => match (true) {
+                $plazo >= 0                 => $plazo,
+                $plan instanceof PlanDePago => (int) $plan->getAttribute('meses'),
+                default                     => $this->configEntero('lotificadora.ventas.plazo_meses_default', 60),
+            },
+            'precio_vara' => match (true) {
+                $cotizado !== ''            => $cotizado,
+                $plan instanceof PlanDePago => $plan->montoPrecioVara()->redondeado(),
+                default                     => is_string($propio) || is_int($propio) ? (string) $propio : '0',
+            },
+            'prima'    => $this->texto($arguments, 'prima', '') ?: null,
+            'dia_pago' => $this->configEntero('lotificadora.ventas.dia_pago_default', 5),
+
+            /*
+             * Al estado, no a $arguments: los closures de un componente del
+             * schema no reciben $arguments —Filament revienta al evaluarlos—
+             * pero el estado del formulario si llega a todos lados.
+             */
+            'lote_id'        => $lote?->getKey(),
+            'cotizado'       => $this->vinoCotizado($arguments),
+            'fecha_contrato' => today()->toDateString(),
+        ];
+    }
+
+    /**
+     * Con que llega precargado el apartado.
+     *
+     * Si el vendedor escribio monto o vencimiento en el modal del lote,
+     * manda eso. Vacio son los numeros de R14, que es lo normal: los tres
+     * los fijo la contratante y no se negocian por venta.
+     *
+     * @param array<string, mixed> $arguments
+     *
+     * @return array<string, mixed>
+     */
+    private function datosInicialesDeApartado(array $arguments): array
+    {
+        $senia = $this->texto($arguments, 'senia', '');
+        $vence = $this->texto($arguments, 'vence', '');
+
+        return [
+            'monto_senia' => $senia !== ''
+                ? $senia
+                : $this->configTexto('lotificadora.apartados.monto', '0.00'),
+            'vence_el' => $vence !== ''
+                ? $vence
+                : today()
+                    ->addDays($this->configEntero('lotificadora.apartados.dias_de_vigencia', 15))
+                    ->toDateString(),
+        ];
+    }
+
+    /**
+     * ¿La cotizacion vino del modal del lote?
+     *
+     * Si vino, el formulario no vuelve a preguntar plazo, precio ni prima:
+     * los muestra en el resumen. Si no vino —proyecto sin planes cargados—
+     * los pide, porque si no la venta no se puede armar.
+     *
+     * @param array<string, mixed> $arguments
+     */
+    private function vinoCotizado(array $arguments): bool
+    {
+        return $this->entero($arguments, 'plazo', -1) >= 0;
+    }
+
+    /**
+     * Plazo, precio y prima, leidos del estado del formulario.
+     *
+     * Un campo con visible(false) NO se envia —Filament no deshidrata lo
+     * invisible—, asi que cuando la cotizacion vino del modal los tres se
+     * llenan igual por fillForm y quedan ahi aunque no se vean.
+     *
+     * @return array{plazo: int, precio: Monto, prima: Monto}
+     */
+    private function condicionesEnPantalla(Get $get): array
+    {
+        return [
+            'plazo'  => (int) $get('plazo_meses'),
+            'precio' => $this->monto($get('precio_vara')),
+            'prima'  => $this->monto($get('prima')),
+        ];
+    }
+
+    /**
+     * El resumen del apartado: los dos numeros que se estan confirmando.
+     */
+    private function resumenDeApartado(Get $get): string
+    {
+        $monto = $this->monto($get('monto_senia'));
+        $vence = $get('vence_el');
+
+        return sprintf(
+            '%s, vence el %s. Al vender cuenta como parte de la prima; si vence sin que el cliente vuelva, el lote se libera y el dinero se devuelve.',
+            $monto->formateado(),
+            $this->fechaDe(is_string($vence) ? $vence : null)->format('d/m/Y'),
+        );
+    }
+
+    /**
+     * Valor, saldo y cuota, con el mismo motor que despues persiste.
+     */
+    private function resumenDeVenta(Get $get): string
+    {
+        $lote = Lote::query()->find($this->entero(['id' => $get('lote_id')], 'id', 0));
+
+        if (! $lote instanceof Lote) {
+            return 'No se encontro el lote.';
+        }
+
+        $condiciones = $this->condicionesEnPantalla($get);
+        $precio = $condiciones['precio'];
+        $prima = $condiciones['prima'];
+        $valor = new Monto($precio->multiplicarPor((string) $lote->getAttribute('area_varas'))->redondeado());
+
+        try {
+            $plan = PlanDeCuotas::nuevo(
+                $valor,
+                $prima,
+                $condiciones['plazo'],
+                (int) $get('dia_pago'),
+                $this->fechaDe($get('fecha_contrato')),
+            );
+        } catch (GrupoOlympoException $error) {
+            // El mensaje del dominio ya esta escrito para quien atiende.
+            return $error->getMessage();
+        }
+
+        $encabezado = sprintf(
+            '%s la vara² · valor %s · prima %s · saldo %s',
+            $precio->formateado(),
+            $valor->formateado(),
+            $prima->formateado(),
+            $plan->saldoFinanciado->formateado(),
+        );
+
+        $cuota = $plan->cuotaMensual();
+
+        if (! $cuota instanceof Monto) {
+            return $encabezado.' · de contado, sin cuotas.';
+        }
+
+        return $encabezado.sprintf(
+            ' · %d cuotas de %s (la ultima, %s).',
+            $plan->count(),
+            $cuota->formateado(),
+            $plan->ultima()?->monto->formateado() ?? '—',
+        );
+    }
+
+    /**
+     * ¿El precio tecleado va por debajo del de lista PARA ESE PLAZO? (R4)
+     */
+    private function hayDescuento(Get $get): bool
+    {
+        $lote = Lote::query()->find($this->entero(['id' => $get('lote_id')], 'id', 0));
+
+        if (! $lote instanceof Lote) {
+            return false;
+        }
+
+        /** @var Proyecto $proyecto */
+        $proyecto = $this->getRecord();
+
+        $condiciones = $this->condicionesEnPantalla($get);
+        $lista = app(ListaDePrecios::class)->deListaPara($proyecto, $lote, $condiciones['plazo']);
+
+        return $condiciones['precio']->menorQue($lista);
+    }
+
+    private function primerPlan(): ?PlanDePago
+    {
+        return $this->planesVigentes()[0] ?? null;
+    }
+
+    private function planDelPlazo(int $meses): ?PlanDePago
+    {
+        foreach ($this->planesVigentes() as $plan) {
+            if ((int) $plan->getAttribute('meses') === $meses) {
+                return $plan;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return list<PlanDePago>
+     */
+    private function planesVigentes(): array
+    {
+        /** @var list<PlanDePago> $planes */
+        $planes = PlanDePago::query()
+            ->where('proyecto_id', $this->getRecord()->getKey())
+            ->activos()
+            ->orderBy('meses')
+            ->get()
+            ->all();
+
+        return $planes;
+    }
+
+    /**
+     * Los 31 dias, como etiquetas de texto: Select::options() declara
+     * array<array<string>|string> y un array de enteros no lo satisface.
+     *
+     * @return array<int, string>
+     */
+    private function diasDelMes(): array
+    {
+        $dias = [];
+
+        for ($dia = 1; $dia <= 31; $dia++) {
+            $dias[$dia] = (string) $dia;
+        }
+
+        return $dias;
+    }
+
+    /**
+     * Un monto a medio tipear no es un error: es alguien escribiendo.
+     */
+    private function monto(mixed $valor): Monto
+    {
+        if (! is_string($valor) && ! is_int($valor)) {
+            return Monto::cero();
+        }
+
+        try {
+            return new Monto($valor);
+        } catch (GrupoOlympoException) {
+            return Monto::cero();
+        }
+    }
+
+    private function fechaDe(mixed $valor): CarbonImmutable
+    {
+        if (is_string($valor) && $valor !== '') {
+            try {
+                return CarbonImmutable::parse($valor);
+            } catch (Throwable) {
+                // Fecha a medio escribir: para la vista previa vale hoy.
+            }
+        }
+
+        return CarbonImmutable::parse(today()->toDateString());
+    }
+
+    private function configEntero(string $clave, int $porDefecto): int
+    {
+        $valor = config($clave, $porDefecto);
+
+        return is_int($valor) ? $valor : $porDefecto;
+    }
+
+    private function configTexto(string $clave, string $porDefecto): string
+    {
+        $valor = config($clave, $porDefecto);
+
+        return is_string($valor) ? $valor : $porDefecto;
+    }
+
     /**
      * Corre un movimiento sobre el lote de los argumentos y avisa.
      *
@@ -297,7 +701,7 @@ class VerPlano extends Page
 
         try {
             $mensaje = $movimiento($lote);
-        } catch (CompromisoInvalidoException $error) {
+        } catch (GrupoOlympoException $error) {
             Notification::make()
                 ->title('No se pudo hacer ese movimiento')
                 ->body($error->getMessage())

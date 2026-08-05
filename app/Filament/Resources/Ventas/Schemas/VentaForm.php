@@ -7,10 +7,12 @@ namespace App\Filament\Resources\Ventas\Schemas;
 use App\Domain\Enums\EstadoLote;
 use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\ValueObjects\Monto;
+use App\Domain\Ventas\ListaDePrecios;
 use App\Domain\Ventas\PlanDeCuotas;
 use App\Filament\Schemas\Components\MontoField;
 use App\Models\Cliente;
 use App\Models\Lote;
+use App\Models\Proyecto;
 use Carbon\CarbonImmutable;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
@@ -107,8 +109,8 @@ class VentaForm
                                             ->columnSpan(5)
                                             // Al elegir el lote se trae su precio de lista. De
                                             // ahi en adelante el campo es del usuario.
-                                            ->afterStateUpdated(function (Set $set, mixed $state): void {
-                                                $set('precio_vara', self::precioDeLista($state));
+                                            ->afterStateUpdated(function (Get $get, Set $set, mixed $state): void {
+                                                $set('precio_vara', self::precioDeLista($state, $get));
                                                 $set('motivo_descuento', null);
                                             }),
 
@@ -363,13 +365,33 @@ class VentaForm
      * MontoField: si acá entrara un float, el §8.3.1 se rompe en el primer
      * lote cuyo precio no sea representable en binario.
      */
-    private static function precioDeLista(mixed $loteId): string
+    private static function precioDeLista(mixed $loteId, Get $get): string
     {
         $lote = self::lote($loteId);
 
-        return $lote instanceof Lote
-            ? new Monto((string) $lote->getAttribute('precio_vara'))->redondeado()
-            : '';
+        return $lote instanceof Lote ? self::lista($lote, $get)->redondeado() : '';
+    }
+
+    /**
+     * El precio de lista PARA EL PLAZO ELEGIDO.
+     *
+     * No es el de la ficha del lote: desde que existe la lista por plazo,
+     * el precio contra el que se mide un descuento es el del plan que se
+     * eligió. Si no, vender de contado al precio de contado de la lista
+     * contaría como descuento y pediría motivo (R4) sin haberlo.
+     *
+     * `../../plazo_meses` porque esto corre dentro de una fila del
+     * repetidor: dos saltos suben al formulario.
+     */
+    private static function lista(Lote $lote, Get $get): Monto
+    {
+        $proyecto = $lote->getRelationValue('proyecto');
+
+        if (! $proyecto instanceof Proyecto) {
+            return new Monto((string) $lote->getAttribute('precio_vara'));
+        }
+
+        return app(ListaDePrecios::class)->deListaPara($proyecto, $lote, (int) $get('../../plazo_meses'));
     }
 
     /**
@@ -388,7 +410,7 @@ class VentaForm
         }
 
         $area = (string) $lote->getAttribute('area_varas');
-        $lista = new Monto((string) $lote->getAttribute('precio_vara'));
+        $lista = self::lista($lote, $get);
         $precio = self::monto($get('precio_vara'));
         $valor = new Monto($precio->multiplicarPor($area)->redondeado());
 
@@ -416,8 +438,7 @@ class VentaForm
             return false;
         }
 
-        return self::monto($get('precio_vara'))
-            ->menorQue(new Monto((string) $lote->getAttribute('precio_vara')));
+        return self::monto($get('precio_vara'))->menorQue(self::lista($lote, $get));
     }
 
     /**
