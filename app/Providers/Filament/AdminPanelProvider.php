@@ -47,6 +47,23 @@ class AdminPanelProvider extends PanelProvider
                 'primary' => $this->primaryColorPalette(),
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
+
+            /*
+             * Los relation managers de una pagina de VISTA vienen de solo
+             * lectura en Filament: se muestran, pero sin crear, editar ni
+             * borrar. Es un default razonable para un panel donde "ver" y
+             * "editar" son dos pantallas distintas.
+             *
+             * Aca no lo son. Bloques, Lotes y Planes de pago se administran
+             * DENTRO de la ficha del proyecto (5-ago-2026) y no existe otra
+             * pantalla donde hacerlo, asi que con el default puesto la
+             * pestana se abria sin un solo boton: ni "Nuevo bloque", ni
+             * "Nuevo plan", nada. Se veia bien y no dejaba hacer nada.
+             *
+             * Los permisos siguen mandando: esto solo devuelve las acciones,
+             * cada una sigue pasando por su policy.
+             */
+            ->readOnlyRelationManagersOnResourceViewPagesByDefault(false)
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
             ->pages([
                 Dashboard::class,

@@ -47,9 +47,21 @@ class RoleSeeder extends Seeder
      * Los Resources del negocio. `User`, `Role` y `Activity` no están:
      * los dos primeros son de super_admin y la bitácora se reparte aparte.
      *
+     * `PlanDePago` NO es un Resource —se administra como pestaña del
+     * proyecto—, así que `shield:generate` no lo ve y sus permisos nacen
+     * acá. Sin esto, el precio de lista de todo el proyecto queda editable
+     * por cualquiera: Filament permite lo que no tiene política.
+     *
+     * Es PUBLICA a proposito: `tests/Pest.php` la lee para sembrar los
+     * mismos permisos. Tenerla copiada alla fue exactamente el error que
+     * dejo el boton "Nuevo plan" invisible en los tests — la copia no se
+     * entero de que existia PlanDePago.
+     *
      * @var list<string>
      */
-    private const array RECURSOS = ['Proyecto', 'Bloque', 'Calle', 'Lote', 'Cliente', 'Compromiso', 'Venta'];
+    public const array RECURSOS = [
+        'Proyecto', 'Bloque', 'Calle', 'Lote', 'Cliente', 'Compromiso', 'Venta', 'PlanDePago',
+    ];
 
     /**
      * Todo salvo el borrado definitivo: `ForceDelete` destruye la fila y no

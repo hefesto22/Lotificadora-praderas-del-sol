@@ -4,6 +4,7 @@ declare(strict_types=1);
 use App\Domain\ValueObjects\Monto;
 use App\Models\User;
 use BezhanSalleh\FilamentShield\Support\Utils as Shield;
+use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Pest\Expectation;
 use Spatie\Permission\Models\Permission;
@@ -96,7 +97,18 @@ function sembrarPermisosDeShield(): void
         'Replicate', 'Reorder',
     ];
 
-    foreach (['User', 'Role', 'Activity', 'Proyecto', 'Bloque', 'Lote', 'Cliente', 'Calle', 'Compromiso', 'Venta'] as $recurso) {
+    /*
+     * La lista NO se copia: sale del RoleSeeder, que es la matriz de verdad
+     * del §9.E7. Cuando estaban duplicadas, agregar PlanDePago alla y no aca
+     * dejo al super_admin sin el permiso en los tests — y el boton "Nuevo
+     * plan" invisible, con la pantalla funcionando perfecto.
+     *
+     * User, Role y Activity se suman aparte: son del panel, no del negocio,
+     * y por eso el seeder no los reparte.
+     */
+    $recursos = [...RoleSeeder::RECURSOS, 'User', 'Role', 'Activity'];
+
+    foreach ($recursos as $recurso) {
         foreach ($acciones as $accion) {
             Permission::query()->firstOrCreate(['name' => "{$accion}:{$recurso}"], ['guard_name' => 'web']);
         }
