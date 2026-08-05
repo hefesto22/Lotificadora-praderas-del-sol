@@ -142,10 +142,13 @@ class CreateVenta extends CreateRecord
         $filas = [];
 
         foreach ($detalle as $fila) {
-            if (! is_array($fila) || ! is_numeric($fila['lote_id'] ?? null)) {
+            if (! is_array($fila)) {
                 continue;
             }
 
+            if (! is_numeric($fila['lote_id'] ?? null)) {
+                continue;
+            }
             $precio = $fila['precio_vara'] ?? null;
             $motivo = $fila['motivo_descuento'] ?? null;
 
