@@ -146,12 +146,21 @@ class VentaForm
                                     ->searchable()
                                     ->preload()
                                     ->required()
+                                    // live: el selector de abajo lo saca de su
+                                    // lista, y tiene que enterarse al toque.
+                                    ->live()
                                     ->helperText('A su nombre sale el estado de cuenta.'),
 
+                                /*
+                                 * El titular NO aparece acá. El índice único
+                                 * (venta_id, cliente_id) del pivot lo rechazaría
+                                 * igual, y ofrecer algo que se va a rechazar es
+                                 * una trampa para quien atiende.
+                                 */
                                 Select::make('copropietarios')
                                     ->label('Copropietarios')
                                     ->multiple()
-                                    ->options(fn (): array => self::clientes())
+                                    ->options(fn (Get $get): array => self::clientesMenosElTitular($get))
                                     ->searchable()
                                     ->helperText('Opcional: marido y mujer o socios, los dos en el contrato.'),
                             ]),
@@ -325,6 +334,43 @@ class VentaForm
      *
      * @return array<int, string>
      */
+    /**
+     * Los clientes, menos quien ya es titular.
+     *
+     * @return array<int, string>
+     */
+    private static function clientesMenosElTitular(Get $get): array
+    {
+        $crudo = $get('titular_id');
+        $titular = is_numeric($crudo) ? (int) $crudo : 0;
+
+        $elegidos = [];
+
+        if (is_array($get('copropietarios'))) {
+            foreach ($get('copropietarios') as $id) {
+                if (is_numeric($id)) {
+                    $elegidos[] = (int) $id;
+                }
+            }
+        }
+
+        $opciones = [];
+
+        foreach (self::clientes() as $id => $nombre) {
+            /*
+             * El titular no se OFRECE, pero si YA estaba elegido se sigue
+             * listando: sacarlo con el estado apuntándolo tumba el formulario
+             * entero por la regla `in`, con un mensaje que no nombra a nadie.
+             * El Service lo filtra igual al guardar.
+             */
+            if ($id !== $titular || in_array($id, $elegidos, true)) {
+                $opciones[$id] = $nombre;
+            }
+        }
+
+        return $opciones;
+    }
+
     private static function lotesDisponibles(Get $get): array
     {
         $proyecto = $get('../../proyecto_id');

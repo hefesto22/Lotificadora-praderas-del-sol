@@ -38,6 +38,20 @@ final readonly class PrecioPactado
         public int $loteId,
         public Monto $precioVara,
         public ?string $motivo = null,
+        /*
+         * ═══ EL PLAZO Y LA PRIMA SON DE ESTE LOTE ═══
+         *
+         * Desde el 5-ago-2026 un contrato puede llevar el primer lote a 12
+         * meses, el segundo a 24 y el tercero a 48. Null significa «el del
+         * contrato»: es el caso normal y el que existia antes.
+         *
+         * La prima null NO es cero. Es «repartime la del contrato»: el
+         * Service le da a este lote la parte que le toca segun su valor,
+         * porque una cuota no se puede calcular sin saber cuanto se adelanto
+         * por ESE lote.
+         */
+        public ?int $plazoMeses = null,
+        public ?Monto $prima = null,
     ) {}
 
     /**
