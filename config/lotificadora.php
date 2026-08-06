@@ -38,6 +38,34 @@ return [
     | float acá reintroduciría el error que Monto existe para evitar.
     |
     */
+    /*
+    |--------------------------------------------------------------------------
+    | Quién emite los recibos
+    |--------------------------------------------------------------------------
+    |
+    | El recibo lo entrega LA LOTIFICADORA al cliente, no Olympo: Olympo es el
+    | prestador del software y no aparece en ningún documento del negocio. Los
+    | datos salen del contrato firmado el 29-jul-2026.
+    |
+    | Viven acá y no en una tabla porque son uno solo y no cambian: una tabla
+    | de un renglón es una pantalla de administración que alguien tiene que
+    | mantener para un dato que se toca una vez cada varios años. El día que la
+    | contratante cambie de dirección o de teléfono, se cambia acá y se
+    | despliega — que es exactamente lo que pasaría con una migración.
+    |
+    | R10: NO hay CAI. Estos recibos son de uso interno y no llevan pie de
+    | imprenta, rango autorizado ni fecha límite de emisión.
+    |
+    */
+
+    'emisor' => [
+        'nombre'      => env('EMISOR_NOMBRE', 'Rosa Elena España Portillo'),
+        'rtn'         => env('EMISOR_RTN', '14121983000249'),
+        'residencial' => env('EMISOR_RESIDENCIAL', 'Residencial Praderas del Sol'),
+        'direccion'   => env('EMISOR_DIRECCION', 'Cucuyagua, Copán'),
+        'telefono'    => env('EMISOR_TELEFONO'),
+    ],
+
     'area' => [
         'unidad'         => 'vara²',
         'unidad_plural'  => 'varas²',
