@@ -116,6 +116,33 @@ class Recibo extends Model
     }
 
     /**
+     * Cada vez que este recibo salió impreso, de la más vieja a la más nueva.
+     *
+     * La primera es el original; de la segunda en adelante el papel lleva la
+     * marca COPIA. Dos papeles con el mismo número no pueden hacerse pasar por
+     * dos cobros distintos, que es lo que un correlativo viene a evitar.
+     *
+     * @return HasMany<ImpresionDeRecibo, $this>
+     */
+    public function impresiones(): HasMany
+    {
+        return $this->hasMany(ImpresionDeRecibo::class)->oldest();
+    }
+
+    /**
+     * ¿Ya salió impreso alguna vez?
+     */
+    public function yaSeImprimio(): bool
+    {
+        return $this->impresiones()->exists();
+    }
+
+    public function vecesImpreso(): int
+    {
+        return $this->impresiones()->count();
+    }
+
+    /**
      * La reprogramación que este abono provocó (R21).
      *
      * Nula en la enorme mayoría de los recibos: solo un abono a capital
@@ -136,6 +163,34 @@ class Recibo extends Model
         $monto = $this->getAttribute('monto');
 
         return new Monto(is_string($monto) || is_int($monto) ? $monto : '0');
+    }
+
+    /**
+     * Lo que este recibo aplicó a cuotas.
+     */
+    public function montoAplicadoACuotas(): Monto
+    {
+        $total = Monto::cero();
+
+        foreach ($this->aplicaciones as $aplicacion) {
+            $total = $total->sumar($aplicacion->montoAplicado());
+        }
+
+        return $total;
+    }
+
+    /**
+     * Lo que este recibo bajó del capital, sin pasar por ninguna cuota (R21).
+     *
+     * En un cobro normal es cero: todo el dinero se repartió entre cuotas. En
+     * un abono a capital es la diferencia, porque el mismo papel puede haber
+     * puesto al día lo vencido y bajado el saldo con el sobrante. Los dos
+     * renglones tienen que verse impresos, o el cliente no entiende por qué
+     * pagó L 100,000.00 y sus cuotas solo bajaron L 50,000.00.
+     */
+    public function montoACapital(): Monto
+    {
+        return $this->montoTotal()->restar($this->montoAplicadoACuotas());
     }
 
     /**
