@@ -73,6 +73,25 @@ vencimiento. El estado de cuenta **muestra los días de atraso y las cuotas venc
 información que la administración necesita— pero **no genera ningún cargo**. No hay columna
 de mora, ni tarea programada que la calcule cada noche, ni acumulación silenciosa.
 
+**El estado de cuenta se construyó el 6-ago-2026.** Lo que se decidió al escribirlo:
+
+| Qué | Cómo quedó |
+|---|---|
+| Alcance | **Uno por contrato, con una sección por lote.** El cliente firmó un expediente, no tres; y como desde el 5-ago cada lote lleva su propio plazo, cada uno necesita su escalera. Con un solo lote se lee igual que siempre |
+| Detalle | El plan **cuota por cuota**: vencimiento, monto, cuánto lleva pagado y cuánto falta, con las vencidas marcadas y sus días de atraso. Es lo que contesta «¿en qué voy?» |
+| Impresión | Mismo HTML imprimible que el recibo, pero **sin registrar la salida**: un estado de cuenta no lleva correlativo y no acredita un pago, así que dos copias no crean el riesgo que sí crea un recibo duplicado |
+| Fecha de corte | Va bien visible en el encabezado. El mismo expediente impreso mañana dice otra cosa, y sin la fecha al lado parecería que el documento cambió solo |
+| Quién | `View:Venta` — el mismo permiso con que se abre el expediente. El receptor lo tiene: el cliente lo pide en el mostrador |
+
+**La prima entra en «total pagado».** Se pagó al firmar (R5) y para el cliente es plata que
+puso; dejarla afuera haría que el papel diga que pagó menos de lo que pagó. Va con su nota al
+pie explicando que ya está descontada del saldo que generó las cuotas, para que nadie la
+busque como una cuota más.
+
+**El papel dice con todas las letras que el atraso no cuesta.** No alcanza con no cobrarlo: un
+cliente que ve «3 cuotas vencidas» asume que le van a cobrar algo, y la frase se lo saca de la
+cabeza antes de que llegue a preguntar.
+
 **R3 · El abono extraordinario acorta el plazo…** El monto de la cuota pactada **nunca
 cambia**. Al aplicar un abono a capital se recalculan las cuotas pendientes con el mismo monto
 de siempre, y la última queda por el residuo. El cliente sigue pagando lo mismo cada mes y

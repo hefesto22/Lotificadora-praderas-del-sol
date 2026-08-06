@@ -4,11 +4,33 @@ Traspaso entre sesiones. Lo que hay que saber para seguir sin releer todo.
 
 ---
 
-## Lo último: el recibo impreso (módulo h del contrato)
+## Lo último: el estado de cuenta (Cláusula Segunda)
 
 **Terminado y verificado el 6-ago-2026.** `bash storage/app/verificar-pagos.sh`
-en verde: Pint 656 archivos, PHPStan nivel 7 258/258 sin errores, Rector sin
-cambios pendientes, **573 tests / 3,185 assertions**.
+en verde a la primera: **595 tests / 3,296 assertions**.
+
+Uno por contrato con una sección por lote, el plan cuota por cuota, y el mismo
+HTML imprimible del recibo pero **sin registrar la salida** — no lleva
+correlativo y no acredita un pago, así que dos copias no crean riesgo. La razón
+de cada decisión está en `docs/dominio.md`, bajo R2.
+
+Los totales viven en `EstadoDeCuenta` y `CuentaDelLote`, dos objetos de dominio
+sin base de datos: es la parte que un cliente revisa con una calculadora en la
+mano, y así se puede probar que cierra sin renderizar una línea de HTML. Hay un
+test que verifica el invariante del documento — lo de arriba es la suma de lo
+de abajo, y coincide con `Venta::saldoPendiente()`.
+
+**De paso salió un middleware.** `UsuarioActivoDelPanel` reemplaza los `if` que
+el controlador del recibo tenía copiados: sesión vencida al panel, cuenta dada
+de baja 403. El día que aparezca el tercer documento no hay que acordarse de
+copiarlos.
+
+---
+
+## Lo anterior: el recibo impreso (módulo h del contrato)
+
+**Terminado y verificado el 6-ago-2026**, commiteado y pusheado en `a08c997`.
+573 tests / 3,185 assertions.
 
 Hasta hoy el sistema emitía recibos con número y **no había una sola pantalla
 que los mostrara**: se cobraba, se quemaba un correlativo y no había papel que
@@ -42,9 +64,59 @@ El 11-sep es la fecha dura. Contra el contrato, esto es lo que queda:
 |---|---|
 | a) Clientes · b) Lotes · c) Ventas · d) Contratos | ✅ |
 | e) Promesa de venta | ✅ |
-| h) Documentos de cobro | ✅ |
-| **Estado de cuenta** | ⬜ **no existe ni una línea — lo próximo** |
-| **Apartados: prórroga y devolución** | ⬜ el dominio aparta y libera; falta la prórroga única con autorización y la devolución con su documento de salida (R14) |
+| h) Documentos de cobro | 🟡 **incompleto** — ver abajo |
+| **Estado de cuenta** | ✅ |
+| **Apartados** | ⬜ **lo próximo del contrato** — ver abajo |
+
+---
+
+## ⚠️ Lo que falta de verdad: el dinero que no emite papel
+
+Hallazgo del 6-ago-2026, revisando apartados. El módulo h) se dio por completo
+cuando se construyó el recibo, **y no lo está**: cubre las cuotas y el abono a
+capital, no el dinero de la firma.
+
+| Hueco | Qué pasa hoy |
+|---|---|
+| **La prima no emite recibo** | El cliente entrega L 50,000.00 al firmar —el pago más grande del contrato— y se va sin papel. `ConceptoDeRecibo::Prima` existe en el enum y **no lo usa nadie** |
+| **La seña tampoco** | Igual con `::Senia`. Se aparta, se anota `monto_senia` en el compromiso, y no hay recibo |
+| **La seña no cuenta en la prima** | R14 dice que al convertirse en venta cuenta como parte de la prima. **No cuenta**: `monto_senia` no se lee en ningún lado, así que al firmar se cobra la prima completa otra vez |
+| **No hay prórroga** | R14 la pide, única y con quién la autorizó. `config/lotificadora.php` ya tiene `prorrogas_maximas = 1` y no hay código que lo use |
+| **No existe el dinero que SALE** | La devolución del apartado vencido (R14) y la liquidación de una rescisión (R6/R22) no tienen dónde registrarse |
+
+Lo que sí está bien: `vender()` cierra el apartado vigente como `Convertido`,
+así que el vínculo entre el apartado y la venta ya existe en la historia del
+lote. No hay que inventarlo.
+
+### Las tres decisiones ya tomadas (6-ago-2026)
+
+1. **El dinero que sale va en una tabla `egresos` propia**, con su correlativo,
+   su motivo, quién autorizó y su comprobante imprimible —la misma maquinaria
+   del recibo, que ya está construida—. No se reusa `recibos` con un concepto
+   `devolucion`: hoy «recibo» significa dinero que entró en todo el sistema (el
+   estado de cuenta, `montoAplicadoACuotas()`, el arqueo), y meterle egresos
+   obliga a revisar cada lugar que suma recibos. R22 va a necesitar esta misma
+   tabla para la liquidación, así que se paga una vez y sirve dos veces.
+2. **La seña se descuenta de lo que se COBRA, no de la prima del contrato.** El
+   contrato sigue diciendo prima L 50,000.00 (R5 no cambia) y al firmar se
+   muestra «prima L 50,000.00, seña aplicada L 5,000.00, a cobrar L 45,000.00».
+   El expediente conserva los dos renglones para poder explicar después por qué
+   entró menos dinero del que dice la prima.
+3. **Prorrogar lo puede el receptor; devolver, solo la administradora.**
+   Prorrogar no mueve dinero y es lo que pasa en ventanilla. Sacar plata de la
+   caja lleva autorización explícita: «el dinero no debería salir de la caja
+   por un vencimiento de calendario».
+
+### Cómo conviene partirlo
+
+- **Primero el dinero que entra**: recibo de seña al apartar, recibo de prima
+  al firmar con la seña ya descontada. Es donde hoy se pierde plata de vista, y
+  es el prerrequisito de la devolución —para devolver hay que saber cuánto
+  entró—.
+- **Después R14 completo**: prórroga, vencimiento y la tabla `egresos` con su
+  comprobante.
+
+---
 
 **Fuera del contrato, pedido por la contratante el 6-ago:** R22 (rescindir un
 lote) y R20 (condonar una cuota, diferido a después del 11-sep). R22 reusa
@@ -65,7 +137,7 @@ de ninguna sesión.
 - **La puerta de verificación** es `bash storage/app/verificar-pagos.sh`:
   migra, revisa el blade del plano, Pint, PHPStan nivel 7, Rector en dry-run,
   los tests del área y la suite entera. **Nada se da por bueno sin eso en
-  verde.** Hoy: 573 tests.
+  verde.** Hoy: 595 tests.
 
   ⚠️ Pint corre ANTES que Rector en el script, y Rector deja código que Pint
   quiere reformatear. Si Rector pide algo, el orden que evita la ida y vuelta
