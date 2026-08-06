@@ -113,6 +113,20 @@ function sembrarPermisosDeShield(): void
             Permission::query()->firstOrCreate(['name' => "{$accion}:{$recurso}"], ['guard_name' => 'web']);
         }
     }
+
+    /*
+     * Los permisos que NO salen del cruce acciones x recursos, uno por uno
+     * (§9.E3). Van aparte a proposito: meter 'Reprogramar' en $acciones
+     * inventaria un `Reprogramar:Cliente` y un `Reprogramar:Lote` que no
+     * existen en ninguna politica, y meter 'Reprogramacion' en $recursos le
+     * daria al super_admin un `Delete:Reprogramacion` que la politica niega.
+     *
+     * `Reprogramar:Venta` es el del abono a capital (R21) y los dos de
+     * `Reprogramacion` son la pestaña que explica por que el plan cambio.
+     */
+    foreach (['Reprogramar:Venta', 'ViewAny:Reprogramacion', 'View:Reprogramacion'] as $permiso) {
+        Permission::query()->firstOrCreate(['name' => $permiso], ['guard_name' => 'web']);
+    }
 }
 
 /**

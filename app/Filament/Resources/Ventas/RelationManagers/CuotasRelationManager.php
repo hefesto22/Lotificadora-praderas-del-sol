@@ -66,12 +66,22 @@ class CuotasRelationManager extends RelationManager
                     ->sortable()
                     ->placeholder('—'),
 
+                /*
+                 * El «de M» sale de contar las cuotas que HAY, no de
+                 * `compromisos.plazo_meses`. Desde R21 los dos numeros pueden
+                 * diferir: un abono a capital que acorta el plazo deja nueve
+                 * cuotas en un renglon que se firmo a doce, y la pantalla
+                 * decia «Cuota 9 de 12» con nueve cuotas en la tabla.
+                 *
+                 * El plazo del compromiso sigue siendo el que se firmo, y esta
+                 * bien que asi sea: lo que cambia es el plan, no el contrato.
+                 */
                 TextColumn::make('numero')
                     ->label('Cuota')
-                    ->formatStateUsing(static fn (Cuota $record): string => sprintf(
+                    ->formatStateUsing(fn (Cuota $record): string => sprintf(
                         '%d de %d',
                         (int) $record->getAttribute('numero'),
-                        (int) ($record->compromiso?->getAttribute('plazo_meses') ?? 0),
+                        $this->cuantasCuotasTieneElLote($record),
                     ))
                     ->sortable(),
 
@@ -146,5 +156,44 @@ class CuotasRelationManager extends RelationManager
     public function isReadOnly(): bool
     {
         return false;
+    }
+
+    /**
+     * Cuántas cuotas tiene cada lote del expediente, contadas una sola vez.
+     *
+     * @var array<int, int>|null
+     */
+    private ?array $cuotasPorLote = null;
+
+    /**
+     * Cuántas cuotas tiene HOY el plan de ese lote.
+     *
+     * Una sola consulta por render, no una por fila: se cuentan todos los
+     * lotes del expediente de golpe y se guarda el resultado. Con 48 cuotas en
+     * pantalla, hacerlo fila por fila serían 48 consultas por un número que no
+     * cambia mientras se mira la tabla.
+     */
+    private function cuantasCuotasTieneElLote(Cuota $cuota): int
+    {
+        if ($this->cuotasPorLote === null) {
+            $conteo = [];
+
+            $filas = Cuota::query()
+                ->where('venta_id', $cuota->getAttribute('venta_id'))
+                ->whereNotNull('compromiso_id')
+                ->selectRaw('compromiso_id, COUNT(*) AS cuantas')
+                ->groupBy('compromiso_id')
+                ->pluck('cuantas', 'compromiso_id');
+
+            foreach ($filas as $lote => $cuantas) {
+                if ((is_int($lote) || is_string($lote)) && (is_int($cuantas) || is_string($cuantas))) {
+                    $conteo[(int) $lote] = (int) $cuantas;
+                }
+            }
+
+            $this->cuotasPorLote = $conteo;
+        }
+
+        return $this->cuotasPorLote[(int) $cuota->getAttribute('compromiso_id')] ?? 0;
     }
 }

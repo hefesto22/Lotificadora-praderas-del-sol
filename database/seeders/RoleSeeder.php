@@ -37,9 +37,11 @@ use Spatie\Permission\PermissionRegistrar;
  * firma ventas: consumir un correlativo y congelar un plan de cuotas es de
  * la administradora.
  *
- * Cuando exista el módulo de pagos, el receptor suma ahí `Create:Pago` y
- * `Create:Recibo` — que es su trabajo real. Hoy no puede crear nada porque
- * todavía no hay nada que cobrar en el sistema.
+ * El receptor ya tiene `Create:Recibo`, que es su trabajo real. Lo que NO
+ * tiene es `Reprogramar:Venta`: un abono a capital emite un recibo igual que
+ * un cobro, pero además reescribe el plan de cuotas del lote (R21). Cobrar y
+ * reescribir un contrato firmado son dos cosas distintas, y por eso son dos
+ * permisos distintos.
  */
 class RoleSeeder extends Seeder
 {
@@ -107,6 +109,16 @@ class RoleSeeder extends Seeder
         // La bitácora, solo de lectura: quién tocó qué, sin poder borrarlo.
         $permisos = [...$permisos, ...$this->permisos(['ViewAny', 'View'], ['Activity'])];
 
+        /*
+         * Reescribir el plan de un lote por un abono a capital (R21). Se nombra
+         * solo, y NO se agrega a RECURSOS, porque `ACCIONES_ADMINISTRADORA` le
+         * daría también Create, Update y Delete sobre las constancias — y una
+         * constancia de reprogramación no se crea a mano ni se corrige: si una
+         * se hizo mal, la corrección es otra reprogramación con su motivo.
+         */
+        $permisos = [...$permisos, ...$this->permisos(['Reprogramar'], ['Venta'])];
+        $permisos = [...$permisos, ...$this->permisos(['ViewAny', 'View'], ['Reprogramacion'])];
+
         $this->rol(Roles::ADMINISTRADORA)->syncPermissions($permisos);
     }
 
@@ -126,6 +138,13 @@ class RoleSeeder extends Seeder
          * anula y se emite otro, y eso será su propia acción con motivo.
          */
         $permisos = [...$permisos, ...$this->permisos(['Create'], ['Recibo'])];
+
+        /*
+         * Y ve por qué el plan cambió, sin poder cambiarlo. Es exactamente el
+         * caso que tiene enfrente: el cliente llega a pagar, la cuota no es la
+         * del mes pasado, y quien atiende necesita poder explicarlo.
+         */
+        $permisos = [...$permisos, ...$this->permisos(['ViewAny', 'View'], ['Reprogramacion'])];
 
         $this->rol(Roles::RECEPTOR)->syncPermissions($permisos);
     }
