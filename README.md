@@ -1,25 +1,36 @@
-# Plantilla Grupo Olympo — Laravel 12 + Filament v4
+# Residencial Praderas del Sol — Sistema de Gestión Inmobiliaria
 
-Plantilla base para los proyectos de Grupo Olympo / Inversiones Olympo. Diseñada para arrancar sistemas de gestión empresariales en Honduras con stack listo para producción y reglas fiscales del país preconfiguradas.
+[![CI](https://github.com/hefesto22/LOT-PRADERAS-DEL-SOL/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hefesto22/LOT-PRADERAS-DEL-SOL/actions/workflows/ci.yml)
+
+Sistema de gestión inmobiliaria y control de lotificaciones para **Residencial
+Praderas del Sol** (Cucuyagua, Copán), desarrollado por Inversiones Olympo.
+
+Nació de la plantilla Grupo Olympo y se actualizó al stack de abajo antes de
+escribir la primera migración del dominio.
+
+- **Reglas del negocio:** `docs/dominio.md` — R1 a R22, contestadas por la
+  contratante y ampliadas en reunión. Es la fuente de verdad del comportamiento.
+- **Dónde vamos:** `docs/continuar-aqui.md` — el traspaso entre sesiones.
+- **Documento rector:** `docs/INSTRUCCIONES.md`.
 
 ## Stack
 
 | Capa | Tecnología | Versión |
 |---|---|---|
-| Lenguaje | PHP | 8.4+ |
-| Framework | Laravel | 12 |
-| Panel admin | Filament | v4 (Schemas) |
-| Base de datos | PostgreSQL | 16 |
+| Lenguaje | PHP | 8.5 |
+| Framework | Laravel | 13 |
+| Panel admin | Filament | v5 (Schemas + Livewire 4) |
+| Base de datos | PostgreSQL | 18 |
 | Cache / Sesión / Queue | Redis | 7 |
 | Procesamiento de colas | Laravel Horizon | última estable |
-| PDFs | spatie/browsershot (Chromium headless) | 5.x |
+| Documentos impresos | HTML con hoja de estilo de impresión | — |
 | Excel | maatwebsite/excel | 3.1 |
 | Permisos | bezhansalleh/filament-shield + spatie/laravel-permission | — |
-| Auditoría | spatie/laravel-activitylog | 4.11 |
+| Auditoría | spatie/laravel-activitylog | 5.x |
 | Backups | spatie/laravel-backup | 9.3 |
 | Health checks | spatie/laravel-health | 1.34 |
 | Observabilidad | sentry/sentry-laravel | 4.13 |
-| Tests | Pest 3 | — |
+| Tests | Pest | 4 |
 | Análisis estático | Larastan (PHPStan + Laravel) | nivel 7 |
 | Code style | Laravel Pint | 1.24 |
 | Modernización | Rector | 2.0 |
