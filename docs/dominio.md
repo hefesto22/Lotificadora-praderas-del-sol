@@ -196,6 +196,24 @@ alertas de talonario por agotarse.
 Lo que sí se construye: **recibo interno**, con su numeración correlativa (R12), su detalle de
 aplicación y su reimpresión.
 
+**Construido el 6-ago-2026.** Lo que se decidió al escribirlo:
+
+| Qué | Cómo quedó |
+|---|---|
+| El papel | **HTML con hoja de estilo de impresión**, no PDF. Sin CAI no hay requisito de formato ni de archivo, así que lo único que tiene que pasar es que salga por la impresora. Cero dependencias nuevas y funciona desde el teléfono, que importa porque los receptores cobran desde el celular. `spatie/browsershot` queda en `composer.json` sin usarse: exige Chrome headless en el VPS y falla en producción con mensajes ilegibles |
+| Dónde se ven | Lista propia en el menú —se busca **por número**, que es lo único que trae quien llega con el papel— y pestaña en el expediente para «¿qué ha pagado este cliente?» |
+| Reimpresión | Libre, pero **queda registrada**: el original sale limpio y de la segunda vez en adelante el papel dice COPIA, con quién la imprimió y cuándo. Dos papeles con el mismo número no pueden hacerse pasar por dos cobros |
+| Cantidad en letras | Va impresa. A un número se le agrega un cero con un trazo; a la cantidad escrita, no. Es la única protección real de un documento que se entrega |
+| Quién emite | La lotificadora, no Olympo. Los datos salen del contrato y viven en `config/lotificadora.php` bajo `emisor` |
+
+**Abrir la vista imprimible ES imprimir**, y por eso la ficha del recibo en el panel es otra
+pantalla: ahí se consulta a qué cuotas fue el dinero sin que la consulta cuente como una salida
+de papel.
+
+**El recibo de un abono imprime dos renglones** (R21): lo que puso al día y lo que bajó el
+capital. Sin eso el cliente no entiende por qué pagó L 100,000.00 y sus cuotas bajaron
+L 50,000.00.
+
 Se deja la puerta abierta sin construir nada: el documento de cobro lleva una columna de
 **tipo de documento**, de modo que el día que aparezca un talonario con CAI se agregue el tipo
 sin tocar la tabla ni migrar los recibos ya emitidos. La clase `App\Domain\ValueObjects\CAI`
