@@ -55,7 +55,31 @@ class ViewVenta extends ViewRecord
     #[Override]
     protected function getHeaderActions(): array
     {
-        return [$this->cobrarAction(), $this->abonarACapitalAction()];
+        return [
+            $this->estadoDeCuentaAction(),
+            $this->cobrarAction(),
+            $this->abonarACapitalAction(),
+        ];
+    }
+
+    /**
+     * El estado de cuenta del expediente, listo para el papel.
+     *
+     * Sin `visible()`: quien está parado en esta página ya tiene `View:Venta`,
+     * que es exactamente el permiso que pide el documento. Repetir la
+     * comprobación acá sería una condición más que mantener sincronizada con
+     * el controlador, para la misma decisión.
+     *
+     * Pestaña nueva, como el recibo: quien atiende no pierde el expediente.
+     */
+    private function estadoDeCuentaAction(): Action
+    {
+        return Action::make('estado_de_cuenta')
+            ->label('Estado de cuenta')
+            ->icon(Heroicon::OutlinedDocumentChartBar)
+            ->color('gray')
+            ->url(fn (): string => route('documentos.estado-de-cuenta', $this->venta()))
+            ->openUrlInNewTab();
     }
 
     /**
