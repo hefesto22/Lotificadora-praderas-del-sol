@@ -259,6 +259,19 @@ cuotas de golpe y le movería números que no pidió tocar.
 Recalcular **reescribe el plan de ese lote**: las cuotas ya pagadas no se tocan, las pendientes
 se reemplazan. Queda registrado que hubo una reprogramación, con su motivo.
 
+**Dos detalles que decidió Mauricio el 6-ago-2026, porque cambian el número:**
+
+- **Con cuotas vencidas, el abono primero pone al día.** Cubre lo vencido en FIFO y solo el
+  sobrante va a capital. Si no, quedaría alguien «con capital abonado» y moroso al mismo
+  tiempo — dos verdades sobre el mismo contrato. Si el abono no alcanza ni para lo vencido, es
+  un pago normal y no hay reprogramación: no se reescribe un plan por algo que no bajó el
+  capital.
+- **La cuota pagada a medias se respeta.** Si la 5 tiene L 12,500.00 de L 25,000.00, esa cuota
+  queda tal cual y el plan nuevo empieza en la 6. Es lo que ya decía R21 —lo pagado no se
+  toca— y además mantiene el recibo viejo apuntando a una cuota que sigue existiendo. La
+  alternativa (absorber el parcial y recalcular todo) deja aplicaciones de pago colgando de
+  cuotas borradas, y ahí «¿por qué la 5 aparece a medias?» deja de tener respuesta.
+
 **R22 · La rescisión es POR LOTE, no por contrato.** *(reunión del 6-ago-2026)* «Dio la prima,
 pagó dos meses y ya no quiere el lote». Si el contrato lleva tres lotes y devuelve uno, se
 rescinde **ese lote**: sus cuotas pendientes se cancelan, vuelve a estar disponible en el plano
