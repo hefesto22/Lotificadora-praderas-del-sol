@@ -9,9 +9,7 @@ use App\Domain\ValueObjects\Monto;
 use App\Domain\ValueObjects\MontoEnLetras;
 use App\Models\BrandingSetting;
 use App\Models\Recibo;
-use App\Models\User;
 use Illuminate\Contracts\View\View;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
@@ -44,42 +42,19 @@ use Illuminate\Support\Facades\Storage;
  * con el mismo número. Para solo mirar está la ficha del recibo en el panel,
  * que no imprime nada.
  *
- * ═══ POR QUE LA AUTORIZACION ESTA ESCRITA ACA ═══
+ * ═══ QUIEN PUEDE ═══
  *
- * Esta ruta vive fuera del panel, así que no hereda el `Authenticate` de
- * Filament que verifica `canAccessPanel()`. Las tres situaciones se resuelven
- * a mano, y cada una distinto:
- *
- *  - **Invitado** → al panel, que sabe pedir el login. Pasa de verdad: la
- *    sesión se vence mientras alguien cobra, y mandarlo a una pared de 403
- *    con un cliente enfrente no ayuda a nadie.
- *  - **Cuenta dada de baja** → 403. Volver a entrar no lo va a arreglar.
- *  - **Sin `View:Recibo`** → 403, por el Gate.
- *
- * Tampoco lleva el middleware `auth`: en esta aplicación no existe una ruta
- * llamada `login` —Filament usa las suyas— y ese middleware intenta redirigir
- * ahí, no la encuentra y termina en una pantalla de error que muestra la
- * consulta con el nombre del cliente adentro.
+ * La sesión y la cuenta activa las verifica `UsuarioActivoDelPanel`, que es el
+ * middleware de todos los documentos; acá solo queda el permiso concreto,
+ * `View:Recibo`, que es lo único que cambia de un documento a otro.
  */
 final readonly class ImprimirReciboController
 {
     public function __construct(private RegistroDeImpresiones $impresiones) {}
 
-    public function __invoke(Request $request, Recibo $recibo): View|RedirectResponse
+    public function __invoke(Request $request, Recibo $recibo): View
     {
-        $usuario = $request->user();
-
-        // Sesión vencida: al panel, que es quien sabe pedir el login. No se
-        // usa el nombre de la ruta de Filament para no atarse a su id.
-        if (! $usuario instanceof User) {
-            return redirect()->guest('/');
-        }
-
-        if ($usuario->getAttribute('is_active') !== true) {
-            abort(403, 'Tu cuenta no está activa.');
-        }
-
-        Gate::forUser($usuario)->authorize('view', $recibo);
+        Gate::authorize('view', $recibo);
 
         $recibo->load(['cliente', 'venta', 'compromiso.lote', 'aplicaciones.cuota']);
 
