@@ -61,6 +61,7 @@ class RoleSeeder extends Seeder
      */
     public const array RECURSOS = [
         'Proyecto', 'Bloque', 'Calle', 'Lote', 'Cliente', 'Compromiso', 'Venta', 'PlanDePago',
+        'Recibo', 'Documento',
     ];
 
     /**
@@ -111,9 +112,22 @@ class RoleSeeder extends Seeder
 
     private function receptor(): void
     {
-        $this->rol(Roles::RECEPTOR)->syncPermissions(
-            $this->permisos(self::ACCIONES_RECEPTOR, self::RECURSOS)
-        );
+        $permisos = $this->permisos(self::ACCIONES_RECEPTOR, self::RECURSOS);
+
+        /*
+         * ═══ EL RECEPTOR COBRA. ES SU TRABAJO ═══
+         *
+         * Es la única escritura que tiene, y se nombra sola —no se agrega a
+         * ACCIONES_RECEPTOR— porque eso le daría `Create` sobre TODOS los
+         * recursos: podría crear proyectos, lotes y ventas. §9.E3: uno por
+         * uno, nunca por patrón.
+         *
+         * Crear, y nada más. Un recibo entregado no se edita ni se borra: se
+         * anula y se emite otro, y eso será su propia acción con motivo.
+         */
+        $permisos = [...$permisos, ...$this->permisos(['Create'], ['Recibo'])];
+
+        $this->rol(Roles::RECEPTOR)->syncPermissions($permisos);
     }
 
     private function rol(string $nombre): Role
