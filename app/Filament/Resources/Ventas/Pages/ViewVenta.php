@@ -13,6 +13,7 @@ use App\Domain\Pagos\RegistroDePagos;
 use App\Domain\ValueObjects\Monto;
 use App\Filament\Resources\Ventas\VentaResource;
 use App\Filament\Schemas\Components\MontoField;
+use App\Filament\Support\ImprimirRecibo;
 use App\Models\Compromiso;
 use App\Models\Cuota;
 use App\Models\Recibo;
@@ -157,6 +158,15 @@ class ViewVenta extends ViewRecord
                     return;
                 }
 
+                /*
+                 * El botón de imprimir va acá y no solo en la lista: el flujo
+                 * de ventanilla es cobrar y entregar el papel, y hacer que
+                 * quien atiende vaya a buscarlo a otra pantalla es la forma
+                 * más segura de que el cliente se vaya sin recibo.
+                 *
+                 * Persistente por lo mismo: una notificación que se desvanece
+                 * a los cinco segundos se lleva el botón con ella.
+                 */
                 Notification::make()
                     ->title("Recibo {$recibo->folio()}")
                     ->body(sprintf(
@@ -166,6 +176,8 @@ class ViewVenta extends ViewRecord
                         $recibo->aplicaciones()->count() === 1 ? 'cuota' : 'cuotas',
                     ))
                     ->success()
+                    ->persistent()
+                    ->actions([ImprimirRecibo::enNotificacion($recibo)])
                     ->send();
             });
     }
@@ -667,6 +679,7 @@ class ViewVenta extends ViewRecord
                 ))
                 ->warning()
                 ->persistent()
+                ->actions([ImprimirRecibo::enNotificacion($recibo)])
                 ->send();
 
             return;
@@ -678,6 +691,7 @@ class ViewVenta extends ViewRecord
                 ->body('El lote quedó sin cuotas pendientes.')
                 ->success()
                 ->persistent()
+                ->actions([ImprimirRecibo::enNotificacion($recibo)])
                 ->send();
 
             return;
@@ -703,6 +717,7 @@ class ViewVenta extends ViewRecord
                 ))
             ->success()
             ->persistent()
+            ->actions([ImprimirRecibo::enNotificacion($recibo)])
             ->send();
     }
 }

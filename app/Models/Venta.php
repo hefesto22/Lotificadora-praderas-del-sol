@@ -211,6 +211,16 @@ class Venta extends Model
     }
 
     /**
+     * Lo que este expediente ha pagado, del más reciente al más viejo.
+     *
+     * @return HasMany<Recibo, $this>
+     */
+    public function recibos(): HasMany
+    {
+        return $this->hasMany(Recibo::class)->latest('numero');
+    }
+
+    /**
      * Las veces que se reescribió el plan de alguno de sus lotes (R21).
      *
      * De la más reciente a la más vieja: la pregunta que se hace en ventanilla

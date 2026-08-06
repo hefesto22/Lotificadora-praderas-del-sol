@@ -9,6 +9,7 @@ use App\Filament\Resources\Ventas\Pages\ListVentas;
 use App\Filament\Resources\Ventas\Pages\ViewVenta;
 use App\Filament\Resources\Ventas\RelationManagers\CuotasRelationManager;
 use App\Filament\Resources\Ventas\RelationManagers\DocumentosRelationManager;
+use App\Filament\Resources\Ventas\RelationManagers\RecibosRelationManager;
 use App\Filament\Resources\Ventas\RelationManagers\ReprogramacionesRelationManager;
 use App\Filament\Resources\Ventas\Schemas\VentaForm;
 use App\Filament\Resources\Ventas\Schemas\VentaInfolist;
@@ -122,6 +123,7 @@ class VentaResource extends Resource
     {
         return [
             CuotasRelationManager::class,
+            RecibosRelationManager::class,
             ReprogramacionesRelationManager::class,
             DocumentosRelationManager::class,
         ];
