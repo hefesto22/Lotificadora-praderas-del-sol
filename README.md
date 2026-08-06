@@ -1,6 +1,6 @@
 # Residencial Praderas del Sol — Sistema de Gestión Inmobiliaria
 
-[![CI](https://github.com/hefesto22/LOT-PRADERAS-DEL-SOL/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hefesto22/LOT-PRADERAS-DEL-SOL/actions/workflows/ci.yml)
+[![CI](https://github.com/hefesto22/Lotificadora-praderas-del-sol/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/hefesto22/Lotificadora-praderas-del-sol/actions/workflows/ci.yml)
 
 Sistema de gestión inmobiliaria y control de lotificaciones para **Residencial
 Praderas del Sol** (Cucuyagua, Copán), desarrollado por Inversiones Olympo.
