@@ -201,20 +201,15 @@ class Venta extends Model
     }
 
     /**
-     * Lo que el cliente todavia debe, derivado de las cuotas.
+     * Los papeles del expediente: la promesa firmada, el DNI, los comprobantes.
      *
-     * Se calcula, no se guarda: una columna `saldo_actual` que se
-     * desincroniza es la forma mas cara de mentirle a un cliente. Si algun
-     * dia el rendimiento lo exige, el §8.3.4 permite cachearla —pero
-     * actualizada dentro de la misma transaccion y con un test que la
-     * reconstruya desde cero.
-     *
-     * El `reorder()` no es decorativo: la relacion `cuotas()` viene con
-     * `orderBy('numero')`, y ese ORDER BY sobrevive al agregado. Postgres
-     * entonces exige que `numero` este en el GROUP BY o dentro de una
-     * funcion de agregacion, y tira un error 42803. MySQL lo dejaria pasar
-     * en silencio; Postgres tiene razon y avisa.
+     * @return HasMany<Documento, $this>
      */
+    public function documentos(): HasMany
+    {
+        return $this->hasMany(Documento::class)->latest();
+    }
+
     /**
      * Lo que el cliente paga cada mes, agrupado en tramos.
      *
@@ -271,6 +266,21 @@ class Venta extends Model
         return $tramos;
     }
 
+    /**
+     * Lo que el cliente todavia debe, derivado de las cuotas.
+     *
+     * Se calcula, no se guarda: una columna `saldo_actual` que se
+     * desincroniza es la forma mas cara de mentirle a un cliente. Si algun
+     * dia el rendimiento lo exige, el §8.3.4 permite cachearla —pero
+     * actualizada dentro de la misma transaccion y con un test que la
+     * reconstruya desde cero.
+     *
+     * El `reorder()` no es decorativo: la relacion `cuotas()` viene con
+     * `orderBy('numero')`, y ese ORDER BY sobrevive al agregado. Postgres
+     * entonces exige que `numero` este en el GROUP BY o dentro de una
+     * funcion de agregacion, y tira un error 42803. MySQL lo dejaria pasar
+     * en silencio; Postgres tiene razon y avisa.
+     */
     public function saldoPendiente(): Monto
     {
         /** @var string|int|null $suma */
