@@ -40,6 +40,7 @@ use Override;
  */
 #[Fillable([
     'venta_id',
+    'compromiso_id',
     'numero',
     'fecha_vencimiento',
     'monto',
@@ -80,6 +81,23 @@ class Cuota extends Model
     public function venta(): BelongsTo
     {
         return $this->belongsTo(Venta::class);
+    }
+
+    /**
+     * De que lote es esta cuota.
+     *
+     * Con plazos distintos por lote el plan dejo de ser del contrato: el
+     * lote a 12 meses termina de pagarse mientras el de 48 sigue vivo, y lo
+     * que el cliente paga cada mes es la suma de las cuotas vivas.
+     *
+     * Null es el plan viejo, de un contrato entero. No hay ninguno todavia,
+     * pero una venta historica cargada en papel (R15) va a tenerlo.
+     *
+     * @return BelongsTo<Compromiso, $this>
+     */
+    public function compromiso(): BelongsTo
+    {
+        return $this->belongsTo(Compromiso::class);
     }
 
     // ─── Dinero ───────────────────────────────────────────────────────

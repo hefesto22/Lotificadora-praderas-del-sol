@@ -7,6 +7,7 @@ namespace App\Domain\Ventas;
 use App\Domain\Correlativos\ConsumoDeCorrelativos;
 use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\EstadoVenta;
+use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\Exceptions\VentaInvalidaException;
 use App\Domain\ValueObjects\Monto;
 use App\Models\Cliente;
@@ -121,17 +122,34 @@ final readonly class RegistroDeVentas
 
             $saldo = $valorTotal->restar($prima);
 
-            // 3. El plan, verificado ANTES de tocar la base.
-            $plan = PlanDeCuotas::nuevo($valorTotal, $prima, $plazoMeses, $diaPago, $fecha);
+            /*
+             * 3. La prima del contrato, repartida entre los lotes.
+             *
+             * Una cuota no se puede calcular sin saber cuanto se adelanto por
+             * ESE lote. Si la pantalla no lo dice, se reparte en proporcion
+             * al valor de cada uno.
+             */
+            $renglones = $this->repartirPrima($renglones, $pactados, $prima);
 
-            if (! $plan->cierraExacto()) {
-                throw VentaInvalidaException::porPlanQueNoCierra($plan->total(), $saldo);
+            /*
+             * 4. UN PLAN POR LOTE, verificados ANTES de tocar la base.
+             *
+             * Desde el 5-ago-2026 el plan ya no es del expediente: el primer
+             * lote puede ir a 12 meses y el tercero a 48. Lo que el cliente
+             * paga por mes es la suma de las cuotas vivas, y baja cada vez
+             * que un lote se termina de pagar.
+             */
+            $renglones = $this->planificar($renglones, $diaPago, $fecha);
+            $contrato = $this->planDelContrato($renglones);
+
+            if (! $contrato->total()->igualA($saldo)) {
+                throw VentaInvalidaException::porPlanQueNoCierra($contrato->total(), $saldo);
             }
 
-            // 4. Recien ahora se quema un numero.
+            // 5. Recien ahora se quema un numero.
             $secuencial = $this->correlativos->siguienteDeContrato($proyecto);
 
-            // 5. La venta.
+            // 6. La venta.
             $venta = Venta::query()->create([
                 'proyecto_id'       => $proyecto->getKey(),
                 'numero_expediente' => $secuencial,
@@ -142,28 +160,40 @@ final readonly class RegistroDeVentas
                 'valor_total'       => $valorTotal->redondeado(),
                 'prima'             => $prima->redondeado(),
                 'saldo_financiar'   => $saldo->redondeado(),
-                'cuota_mensual'     => $plan->cuotaMensual()?->redondeado(),
-                'plazo_meses'       => $plazoMeses,
-                'dia_pago'          => $diaPago,
-                'observaciones'     => $observaciones,
+                /*
+                 * Con plazos mezclados estos dos cambian de significado y no
+                 * de tipo: `plazo_meses` es el HORIZONTE del contrato —el
+                 * plazo mas largo— y `cuota_mensual` es lo que se paga el
+                 * PRIMER mes, que es el numero mas alto. Con todos los lotes
+                 * al mismo plazo dan exactamente lo que daban antes.
+                 *
+                 * El detalle mes a mes vive en `cuotas`, que es el contrato;
+                 * estos dos son el resumen que se lee en una tabla.
+                 */
+                'cuota_mensual' => $contrato->primeraCuota()?->redondeado(),
+                'plazo_meses'   => $contrato->plazoMaximo(),
+                'dia_pago'      => $diaPago,
+                'observaciones' => $observaciones,
             ]);
 
-            // 6. Los duenos, y los lotes ligados a su venta.
+            // 7. Los duenos, y los lotes ligados a su venta con SU plan.
             $this->asentarClientes($venta, $clientes);
 
             foreach ($renglones as $renglon) {
-                $this->compromisos->vender(
+                $compromiso = $this->compromisos->vender(
                     $renglon['lote'],
                     $titular,
                     venta: $venta,
                     precioVara: $renglon['precio'],
                     motivoDescuento: $renglon['motivo'],
                     precioVaraLista: $renglon['lista'],
+                    plazoMeses: $renglon['plazo'],
+                    prima: $renglon['prima'],
                 );
-            }
 
-            // 7. El plan congelado (§9.D6).
-            $this->asentarCuotas($venta, $plan);
+                // 8. El plan congelado (§9.D6), el de ESTE lote.
+                $this->asentarCuotas($venta, $compromiso, $renglon['plan']);
+            }
 
             return $venta;
         });
@@ -273,7 +303,7 @@ final readonly class RegistroDeVentas
      * @param list<Lote> $lotes
      * @param array<int, PrecioPactado> $pactados por id de lote
      *
-     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, valor: Monto}>
+     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto}>
      *
      * @throws VentaInvalidaException
      */
@@ -309,6 +339,9 @@ final readonly class RegistroDeVentas
                 'lista'  => $lista,
                 'precio' => $precio,
                 'motivo' => $motivo,
+                // El plazo de ESTE lote. Sin acuerdo propio, el del contrato:
+                // es el caso normal y el unico que existia antes.
+                'plazo' => $acuerdo->plazoMeses ?? $plazoMeses,
                 // La MISMA expresion que usa RegistroDeCompromisos::valorDe()
                 // y que exige el CHECK de la base. Si los tres no dan el
                 // mismo numero, la venta no se graba — y asi tiene que ser.
@@ -317,6 +350,186 @@ final readonly class RegistroDeVentas
         }
 
         return $renglones;
+    }
+
+    /**
+     * La prima del contrato, repartida entre los lotes.
+     *
+     * ═══ POR QUE HAY QUE REPARTIRLA ═══
+     *
+     * La cuota de un lote es (su valor − su prima) ÷ sus meses. Con un solo
+     * plazo eso se podia hacer una vez para todo el contrato; con plazos
+     * distintos hace falta saber cuanto se adelanto POR CADA LOTE, o no hay
+     * cuota que calcular.
+     *
+     * Si la pantalla manda la prima de cada lote, manda eso y la suma tiene
+     * que dar la del contrato: dos numeros que dicen ser el mismo y no lo
+     * son dejarian un expediente que no cuadra. Si no la manda, se reparte en
+     * proporcion al valor de cada lote — que es la unica regla que no le
+     * cobra a un lote la prima de otro.
+     *
+     * ═══ EN CENTAVOS ENTEROS, Y EL ULTIMO SE LLEVA EL RESIDUO ═══
+     *
+     * `intdiv` trunca, asi que la suma de las partes NUNCA se pasa y el
+     * ultimo se lleva exactamente lo que falta. Repartir con redondeo
+     * dejaria, con muchos lotes y una prima chica, una ultima parte negativa
+     * — y Monto rechaza negativos, con razon.
+     *
+     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto}> $renglones
+     * @param array<int, PrecioPactado> $pactados
+     *
+     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, prima: Monto}>
+     *
+     * @throws VentaInvalidaException
+     */
+    private function repartirPrima(array $renglones, array $pactados, Monto $prima): array
+    {
+        /*
+         * Las primas se resuelven en un mapa aparte y la lista se arma DE UNA
+         * SOLA PIEZA al final.
+         *
+         * No es estilo: escribir `$lista[$i]['prima'] = ...` sobre una
+         * `list<array{...}>` le ensancha el tipo a una union —PHPStan no puede
+         * probar que ese indice exista, asi que contempla que la asignacion
+         * cree un `array{prima: Monto}` suelto— y a partir de ahi 'valor'
+         * "podria no existir". El mapa es un array<int, Monto|null> y no tiene
+         * forma que romper.
+         */
+        $propias = Monto::cero();
+        $suyas = [];
+        $sinPropia = [];
+
+        foreach ($renglones as $indice => $renglon) {
+            $suya = $pactados[(int) $renglon['lote']->getKey()]->prima ?? null;
+            $suyas[$indice] = $suya;
+
+            if ($suya instanceof Monto) {
+                $propias = $propias->sumar($suya);
+
+                continue;
+            }
+
+            $sinPropia[] = $indice;
+        }
+
+        if ($propias->mayorQue($prima)) {
+            throw VentaInvalidaException::porPrimasQueNoSuman($propias, $prima);
+        }
+
+        $resto = $prima->restar($propias);
+
+        if ($sinPropia === []) {
+            if (! $resto->esCero()) {
+                throw VentaInvalidaException::porPrimasQueNoSuman($propias, $prima);
+            }
+        } else {
+            $repartible = Monto::cero();
+
+            foreach ($sinPropia as $indice) {
+                $repartible = $repartible->sumar($renglones[$indice]['valor']);
+            }
+
+            $restoCentavos = $resto->enCentavos();
+            $repartibleCentavos = $repartible->enCentavos();
+            $asignado = 0;
+            $ultimo = count($sinPropia) - 1;
+
+            foreach ($sinPropia as $puesto => $indice) {
+                if ($puesto === $ultimo) {
+                    $suyas[$indice] = Monto::deCentavos($restoCentavos - $asignado);
+
+                    break;
+                }
+
+                $parte = $repartibleCentavos === 0
+                    ? 0
+                    : intdiv($restoCentavos * $renglones[$indice]['valor']->enCentavos(), $repartibleCentavos);
+
+                $asignado += $parte;
+                $suyas[$indice] = Monto::deCentavos($parte);
+            }
+        }
+
+        $conPrima = [];
+
+        foreach ($renglones as $indice => $renglon) {
+            $conPrima[] = [
+                'lote'   => $renglon['lote'],
+                'lista'  => $renglon['lista'],
+                'precio' => $renglon['precio'],
+                'motivo' => $renglon['motivo'],
+                'plazo'  => $renglon['plazo'],
+                'valor'  => $renglon['valor'],
+                'prima'  => $suyas[$indice] ?? Monto::cero(),
+            ];
+        }
+
+        return $conPrima;
+    }
+
+    /**
+     * El plan de cuotas de cada lote, verificado antes de escribir nada.
+     *
+     * El mensaje del dominio se conserva pero se le antepone el codigo del
+     * lote: con tres plazos distintos, «el saldo es demasiado chico para 60
+     * meses» obliga a adivinar cual de los tres es.
+     *
+     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, prima: Monto}> $renglones
+     *
+     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, prima: Monto, plan: PlanDeCuotas}>
+     *
+     * @throws VentaInvalidaException
+     */
+    private function planificar(array $renglones, int $diaPago, CarbonImmutable $fecha): array
+    {
+        $conPlan = [];
+
+        foreach ($renglones as $renglon) {
+            try {
+                $plan = PlanDeCuotas::nuevo(
+                    $renglon['valor'],
+                    $renglon['prima'],
+                    $renglon['plazo'],
+                    $diaPago,
+                    $fecha,
+                );
+            } catch (GrupoOlympoException $error) {
+                throw VentaInvalidaException::porElLote($this->codigo($renglon['lote']), $error->getMessage());
+            }
+
+            if (! $plan->cierraExacto()) {
+                throw VentaInvalidaException::porPlanQueNoCierra($plan->total(), $plan->saldoFinanciado);
+            }
+
+            $conPlan[] = [
+                'lote'   => $renglon['lote'],
+                'lista'  => $renglon['lista'],
+                'precio' => $renglon['precio'],
+                'motivo' => $renglon['motivo'],
+                'plazo'  => $renglon['plazo'],
+                'valor'  => $renglon['valor'],
+                'prima'  => $renglon['prima'],
+                'plan'   => $plan,
+            ];
+        }
+
+        return $conPlan;
+    }
+
+    /**
+     * Los planes de todos los lotes, vistos como un solo contrato.
+     *
+     * @param list<array{lote: Lote, plan: PlanDeCuotas, ...}> $renglones
+     */
+    private function planDelContrato(array $renglones): PlanDelContrato
+    {
+        return new PlanDelContrato(array_map(
+            fn (array $renglon): array => [
+                'etiqueta' => $this->codigo($renglon['lote']),
+                'plan'     => $renglon['plan'],
+            ],
+            $renglones,
+        ));
     }
 
     /**
@@ -376,7 +589,7 @@ final readonly class RegistroDeVentas
      * hay nada que un evento de modelo tenga que hacer con ellas. El plan
      * es un snapshot: nace completo y no se toca mas (§9.D6).
      */
-    private function asentarCuotas(Venta $venta, PlanDeCuotas $plan): void
+    private function asentarCuotas(Venta $venta, Compromiso $compromiso, PlanDeCuotas $plan): void
     {
         if ($plan->cuotas === []) {
             return;
@@ -388,6 +601,7 @@ final readonly class RegistroDeVentas
         foreach ($plan->cuotas as $cuota) {
             $filas[] = [
                 'venta_id'          => $venta->getKey(),
+                'compromiso_id'     => $compromiso->getKey(),
                 'numero'            => $cuota->numero,
                 'fecha_vencimiento' => $cuota->vencimientoParaBase(),
                 'monto'             => $cuota->montoParaBase(),

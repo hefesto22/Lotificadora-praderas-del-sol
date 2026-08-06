@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Override;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
@@ -47,6 +48,8 @@ use Spatie\Activitylog\Support\LogOptions;
     'precio_vara',
     'precio_vara_lista',
     'valor',
+    'plazo_meses',
+    'prima',
     'motivo_descuento',
     'monto_senia',
     'fecha',
@@ -135,6 +138,19 @@ class Compromiso extends Model
     }
 
     // ─── Dinero ───────────────────────────────────────────────────────
+
+    /**
+     * El plan de cuotas DE ESTE LOTE, en orden.
+     *
+     * Vacio en un apartado y en una venta de contado. Ordenado por numero
+     * porque asi se lee un estado de cuenta y asi se aplica un pago.
+     *
+     * @return HasMany<Cuota, $this>
+     */
+    public function cuotas(): HasMany
+    {
+        return $this->hasMany(Cuota::class)->orderBy('numero');
+    }
 
     public function montoValor(): Monto
     {

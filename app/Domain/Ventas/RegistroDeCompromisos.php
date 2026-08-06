@@ -68,6 +68,62 @@ final readonly class RegistroDeCompromisos
     }
 
     /**
+     * Aparta VARIOS lotes de una sola vez, al mismo cliente.
+     *
+     * ═══ POR QUE NO ES UN FOREACH EN LA PANTALLA ═══
+     *
+     * Cada lote sigue teniendo SU compromiso —su seña, su vencimiento, su
+     * historial— porque un apartado es de un lote y no de un grupo. Pero el
+     * gesto es uno solo: la persona aparta los tres o no aparta ninguno. Si
+     * el segundo se lo llevaron mientras se armaba la pantalla, dejar el
+     * primero apartado y el tercero libre es dejar a medias algo que nadie
+     * pidio a medias.
+     *
+     * Por eso la transaccion vive ACA y no en el llamador, y los lotes se
+     * releen con FOR UPDATE adentro: lo que decia la pantalla no vale.
+     * Es la misma decision que toma RegistroDeVentas::activar().
+     *
+     * OJO con la seña: es POR LOTE. Apartar tres lotes con la seña de R14
+     * son tres compromisos de L 5,000.00, no L 5,000.00 repartidos. Al
+     * firmar, los tres cuentan como parte de la prima.
+     *
+     * @param list<Lote> $lotes
+     *
+     * @return list<Compromiso>
+     *
+     * @throws CompromisoInvalidoException
+     */
+    public function apartarVarios(
+        array $lotes,
+        Cliente $cliente,
+        ?string $montoSenia = null,
+        ?string $venceEl = null,
+        ?string $observaciones = null,
+    ): array {
+        if ($lotes === []) {
+            return [];
+        }
+
+        $ids = array_map(static fn (Lote $lote): int => (int) $lote->getKey(), $lotes);
+
+        return DB::transaction(function () use ($ids, $cliente, $montoSenia, $venceEl, $observaciones): array {
+            $frescos = Lote::query()
+                ->whereIn('id', $ids)
+                ->lockForUpdate()
+                ->orderBy('codigo')
+                ->get();
+
+            $compromisos = [];
+
+            foreach ($frescos as $lote) {
+                $compromisos[] = $this->apartar($lote, $cliente, $montoSenia, $venceEl, $observaciones);
+            }
+
+            return $compromisos;
+        });
+    }
+
+    /**
      * Vende un lote, venga de estar disponible o de estar apartado.
      *
      * Si venia apartado, el apartado se cierra como CONVERTIDO y tiene que
@@ -96,6 +152,13 @@ final readonly class RegistroDeCompromisos
      * El `valor` se recalcula: es area × precio pactado, no el valor que
      * traia el lote. Si no, el descuento quedaria en el precio pero no en
      * el total, que es el numero que va al contrato.
+     *
+     * ═══ EL PLAZO Y LA PRIMA TAMBIEN SON DEL RENGLON ═══
+     *
+     * Desde el 5-ago-2026 cada lote de un contrato puede ir a su propio
+     * plazo. Los dos llegan de `RegistroDeVentas`, que es quien reparte la
+     * prima del contrato entre los lotes y arma un plan de cuotas por cada
+     * uno. Vendiendo un lote suelto van en null: no hay plan que armar.
      */
     public function vender(
         Lote $lote,
@@ -105,6 +168,8 @@ final readonly class RegistroDeCompromisos
         ?Monto $precioVara = null,
         ?string $motivoDescuento = null,
         ?Monto $precioVaraLista = null,
+        ?int $plazoMeses = null,
+        ?Monto $prima = null,
     ): Compromiso {
         $estado = $this->estadoDe($lote);
         $codigo = $this->codigoDe($lote);
@@ -157,7 +222,9 @@ final readonly class RegistroDeCompromisos
             $venta,
             $lista,
             $pactado,
-            $motivo
+            $motivo,
+            $plazoMeses,
+            $prima
         ): Compromiso {
             /*
              * El apartado se cierra ANTES de crear la venta. El indice
@@ -176,7 +243,17 @@ final readonly class RegistroDeCompromisos
                 'precio_vara_lista' => $lista->redondeado(),
                 'precio_vara'       => $pactado->redondeado(),
                 'valor'             => $this->valorDe($lote, $pactado),
-                'motivo_descuento'  => $motivo === '' ? null : $motivo,
+                /*
+                 * El plazo y la prima DE ESTE LOTE. Un contrato puede llevar
+                 * el primero a 12 meses y el tercero a 48, asi que el plan de
+                 * cuotas ya no es del expediente sino del renglon.
+                 *
+                 * Null en un lote suelto —sin expediente— y en los apartados:
+                 * ahi no hay plazo del que hablar todavia.
+                 */
+                'plazo_meses'      => $plazoMeses,
+                'prima'            => $prima?->redondeado(),
+                'motivo_descuento' => $motivo === '' ? null : $motivo,
             ]);
 
             $lote->update(['estado' => EstadoLote::Vendido]);

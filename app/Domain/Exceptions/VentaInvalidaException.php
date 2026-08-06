@@ -99,6 +99,36 @@ final class VentaInvalidaException extends GrupoOlympoException
      * Un plan que no cierra produce un estado de cuenta que nunca llega a
      * cero, y eso se descubre meses despues con dinero de por medio.
      */
+    /**
+     * Las primas por lote no dan la prima del contrato.
+     *
+     * Pasa cuando la pantalla manda una prima para cada lote y su suma no
+     * coincide con la que dice el contrato. No es un error de calculo: es
+     * que dos numeros que tienen que ser el mismo no lo son, y grabar
+     * cualquiera de los dos dejaria un expediente que no cuadra.
+     */
+    public static function porPrimasQueNoSuman(Monto $porLote, Monto $delContrato): self
+    {
+        return new self(
+            "Las primas de los lotes suman {$porLote->formateado()} pero el contrato dice "
+            ."{$delContrato->formateado()}. Revisa la prima de cada lote: los dos numeros "
+            .'tienen que ser el mismo.'
+        );
+    }
+
+    /**
+     * Algo del plan de UN lote no cierra.
+     *
+     * Con plazos distintos por lote, un mensaje sin nombre —«el saldo es
+     * demasiado chico para 60 meses»— obliga a adivinar cual de los tres es.
+     * Se antepone el codigo y se conserva el mensaje del dominio, que ya
+     * esta escrito para quien atiende.
+     */
+    public static function porElLote(string $codigo, string $mensaje): self
+    {
+        return new self("En el lote {$codigo}: {$mensaje}");
+    }
+
     public static function porPlanQueNoCierra(Monto $sumaDeCuotas, Monto $saldo): self
     {
         return new self(
