@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Override;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
@@ -112,6 +113,20 @@ class Recibo extends Model
     public function aplicaciones(): HasMany
     {
         return $this->hasMany(AplicacionDePago::class);
+    }
+
+    /**
+     * La reprogramación que este abono provocó (R21).
+     *
+     * Nula en la enorme mayoría de los recibos: solo un abono a capital
+     * reescribe un plan. Cuando existe, es lo que contesta «¿por qué después
+     * de este pago mi cuota cambió?».
+     *
+     * @return HasOne<Reprogramacion, $this>
+     */
+    public function reprogramacion(): HasOne
+    {
+        return $this->hasOne(Reprogramacion::class);
     }
 
     // ─── Dinero ───────────────────────────────────────────────────────

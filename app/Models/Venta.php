@@ -211,6 +211,19 @@ class Venta extends Model
     }
 
     /**
+     * Las veces que se reescribió el plan de alguno de sus lotes (R21).
+     *
+     * De la más reciente a la más vieja: la pregunta que se hace en ventanilla
+     * es siempre «¿y esta última qué cambió?».
+     *
+     * @return HasMany<Reprogramacion, $this>
+     */
+    public function reprogramaciones(): HasMany
+    {
+        return $this->hasMany(Reprogramacion::class)->latest();
+    }
+
+    /**
      * Lo que el cliente paga cada mes, agrupado en tramos.
      *
      * ═══ SALE DE LAS CUOTAS GUARDADAS, NO DE UN RECALCULO ═══

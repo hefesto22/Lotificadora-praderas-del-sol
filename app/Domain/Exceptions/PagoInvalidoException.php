@@ -58,4 +58,64 @@ final class PagoInvalidoException extends GrupoOlympoException
             "No se puede cobrar sobre un expediente {$estado}. Solo una venta vigente recibe pagos."
         );
     }
+
+    // ─── Abono a capital (R21) ────────────────────────────────────────
+
+    /**
+     * R21 pide que la reprogramación quede registrada CON SU MOTIVO. La base
+     * lo exige con un CHECK; esto es para que el mensaje lo escriba alguien.
+     */
+    public static function porFaltarElMotivoDelAbono(): self
+    {
+        return new self(
+            'Un abono a capital reescribe el plan de cuotas del lote, así que hace falta escribir '.
+            'por qué (R21). Alcanza con una línea: el mes que viene alguien va a preguntar por qué '.
+            'cambió el número.'
+        );
+    }
+
+    /**
+     * El abono se pasa de lo que se puede reprogramar.
+     *
+     * Pasa cuando el lote tiene una cuota pagada a medias: esa cuota se
+     * respeta —no se toca ni para cobrarla de paso— así que lo que le falta
+     * queda fuera del alcance del abono. Cancelar el lote entero es otro
+     * trámite, y por eso el mensaje dice los dos números.
+     */
+    public static function porAbonoQueNoSePuedeReprogramar(
+        Monto $abono,
+        Monto $tope,
+        Monto $saldo,
+        string $codigo,
+    ): self {
+        return new self(
+            "Sobre el lote {$codigo} se puede abonar hasta {$tope->formateado()}, y este abono es de ".
+            "{$abono->formateado()}. La diferencia es lo que le falta a una cuota que ya está pagada a ".
+            'medias, y esa cuota no se toca. Si el cliente quiere cancelar el lote son '.
+            "{$saldo->formateado()} por «Registrar un pago»."
+        );
+    }
+
+    /**
+     * El plan nuevo no se puede armar. El mensaje del motor de cuotas ya está
+     * escrito para quien atiende, así que se conserva entero y se le antepone
+     * el lote — igual que hace RegistroDeVentas con los suyos.
+     */
+    public static function porPlanQueNoSePudoArmar(string $razon, string $codigo): self
+    {
+        return new self("No se pudo reprogramar el lote {$codigo}. {$razon}");
+    }
+
+    /**
+     * §8.3.4: un plan que no cierra al céntimo no llega nunca a la base. Si
+     * esto salta, hay un error de aritmética y lo que NO se puede hacer es
+     * guardar un estado de cuenta que no cierra en cero el último mes.
+     */
+    public static function porPlanQueNoCierra(Monto $suma, Monto $saldo): self
+    {
+        return new self(
+            "El plan nuevo suma {$suma->formateado()} y el saldo a reprogramar es {$saldo->formateado()}. ".
+            'No se registró nada. Avisá a soporte: es un error de cálculo, no de digitación.'
+        );
+    }
 }

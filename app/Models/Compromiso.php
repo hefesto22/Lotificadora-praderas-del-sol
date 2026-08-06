@@ -152,6 +152,20 @@ class Compromiso extends Model
         return $this->hasMany(Cuota::class)->orderBy('numero');
     }
 
+    /**
+     * Las reprogramaciones de ESTE lote (R21).
+     *
+     * El plan de `cuotas()` es el de hoy; esto es por qué es ese y no el que
+     * se firmó. Un abono a capital borra las cuotas pendientes y escribe
+     * otras, así que sin esta relación el cambio no tendría explicación.
+     *
+     * @return HasMany<Reprogramacion, $this>
+     */
+    public function reprogramaciones(): HasMany
+    {
+        return $this->hasMany(Reprogramacion::class)->latest();
+    }
+
     public function montoValor(): Monto
     {
         $valor = $this->getAttribute('valor');
