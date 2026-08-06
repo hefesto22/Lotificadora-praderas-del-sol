@@ -14,6 +14,7 @@ use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\View\PanelsRenderHook;
 use Filament\Widgets\AccountWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
@@ -64,6 +65,17 @@ class AdminPanelProvider extends PanelProvider
              * cada una sigue pasando por su policy.
              */
             ->readOnlyRelationManagersOnResourceViewPagesByDefault(false)
+            /*
+             * Los estilos de los cuadros que arma PHP —la tabla de lotes, la
+             * escalera de cuotas—. Van acá y no en cada Blade porque las mismas
+             * dos piezas se ven en el modal del plano y en la ficha del
+             * expediente: teniéndolas en una sola pantalla, la otra las mostraba
+             * sin un solo margen. Tailwind no las genera, ver el partial.
+             */
+            ->renderHook(
+                PanelsRenderHook::HEAD_END,
+                static fn (): string => view('filament.estilos-olympo')->render(),
+            )
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
             ->pages([
                 Dashboard::class,

@@ -302,6 +302,54 @@
         }
         .plano-precio.tocado { border-color: #d97706; color: #b45309; font-weight: 600; }
         .dark .plano-precio { border-color: rgba(255, 255, 255, .15); background: rgba(255, 255, 255, .05); color: #fff; }
+
+        /* La barra del contrato en armado. Flota abajo a la derecha del
+           lienzo: no tapa el centro —que es donde estan los lotes— y se lee
+           sin sacar la vista del mapa. */
+        .plano-carrito {
+            position: absolute; right: .75rem; bottom: .75rem; z-index: 5;
+            display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+            max-width: min(40rem, calc(100% - 1.5rem));
+            border: 1px solid #f59e0b; border-radius: .75rem;
+            background: rgba(255, 255, 255, .96); backdrop-filter: blur(6px);
+            padding: .75rem .875rem; box-shadow: 0 10px 30px rgba(9, 9, 11, .18);
+        }
+        .dark .plano-carrito { border-color: rgba(245, 158, 11, .55); background: rgba(24, 24, 27, .94); }
+        .plano-carrito-titulo { font-size: .875rem; font-weight: 700; color: rgb(9 9 11); }
+        .dark .plano-carrito-titulo { color: #fff; }
+        .plano-carrito-detalle { font-size: .8125rem; color: rgb(82 82 91); font-variant-numeric: tabular-nums; }
+        .dark .plano-carrito-detalle { color: rgb(212 212 216); }
+        .plano-carrito-codigos {
+            font-size: .6875rem; color: rgb(113 113 122); margin-top: .125rem; max-width: 24rem;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .dark .plano-carrito-codigos { color: rgb(161 161 170); }
+        .plano-carrito-botones { display: flex; gap: .5rem; margin-left: auto; }
+        .plano-carrito-botones .plano-accion { flex: 0 0 auto; white-space: nowrap; }
+        .plano-marcado { border-color: #f59e0b; color: #b45309; }
+        .dark .plano-marcado { border-color: rgba(245, 158, 11, .55); color: #fbbf24; }
+        .plano-nota-contrato {
+            margin-top: 1rem; border: 1px dashed #f59e0b; border-radius: .625rem;
+            padding: .625rem .75rem; font-size: .8125rem; line-height: 1.6;
+            color: rgb(146 64 14); background: rgba(245, 158, 11, .08);
+        }
+        .dark .plano-nota-contrato { color: #fcd34d; }
+
+        /* La escalera de cuotas. Cada renglon es un tramo de meses que se
+           pagan igual; con todos los lotes al mismo plazo hay uno solo. */
+        .plano-tramos { margin-top: .375rem; display: grid; gap: .0625rem; }
+        .plano-tramos li {
+            display: flex; justify-content: space-between; gap: 1.25rem;
+            font-size: .8125rem; color: rgb(82 82 91); font-variant-numeric: tabular-nums;
+        }
+        .dark .plano-tramos li { color: rgb(212 212 216); }
+        .plano-tramos strong { color: rgb(9 9 11); font-weight: 700; }
+        .dark .plano-tramos strong { color: #fff; }
+
+        .plano-accion:disabled { opacity: .45; cursor: not-allowed; }
+        .plano-accion:disabled:hover { background: #fff; }
+        .dark .plano-accion:disabled:hover { background: rgba(255, 255, 255, .05); }
+
     </style>
 
     <div class="plano-stats">
@@ -349,6 +397,12 @@
                    el plazo elegido y, si se toco, el precio de esa fila. */
                 plazoElegido: null,
                 preciosTocados: {},
+
+                /* El contrato en armado: los lotes marcados para firmarse
+                   JUNTOS, en un solo expediente. Se guarda lo minimo que la
+                   barra necesita —id, codigo y area—; el estado fresco de
+                   cada lote sigue viniendo de los data-* del poligono. */
+                carrito: [],
 
                 /* Que pestaña del modal se esta mirando: 'vender' o
                    'apartar'. Se reinicia con cada lote. */
@@ -509,16 +563,209 @@
                         cliente: datos.cliente ? datos.cliente : null,
                     };
 
-                    this.prima = '';
                     this.modo = 'vender';
-                    this.senia = this.apartado.monto;
-                    this.venceEl = this.apartado.venceIso;
-                    this.preciosTocados = {};
-                    this.plazoElegido = this.planes.length > 0 ? this.planes[0].meses : null;
+
+                    /*
+                       ═══ CADA LOTE TIENE SUS PROPIAS CONDICIONES ═══
+
+                       Un contrato puede llevar el primer lote a 12 meses, el
+                       segundo a 24 y el tercero a 48. Asi que el plazo, el
+                       precio y la prima son DEL LOTE, no de la pantalla: al
+                       abrir uno ya marcado se restaura lo que se le puso, y al
+                       abrir uno nuevo se arranca en blanco.
+
+                       Y NADA viene preseleccionado. Un plazo por defecto es un
+                       plazo que alguien puede firmar sin haberlo mirado, y de
+                       ese plazo depende el precio de la vara².
+                    */
+                    const marcado = this.carrito.find((l) => l.id === this.seleccionado.id);
+
+                    this.plazoElegido = marcado ? marcado.plazo : null;
+                    this.prima = marcado ? marcado.prima : '';
+                    this.preciosTocados = marcado && marcado.precio !== null
+                        ? { [marcado.plazo]: marcado.precio }
+                        : {};
+
+                    /* La seña y el vencimiento SI son del tramite entero: los
+                       tres los fijo la contratante y son iguales para todos
+                       los lotes (R14). */
+                    if (this.carrito.length === 0) {
+                        this.senia = this.apartado.monto;
+                        this.venceEl = this.apartado.venceIso;
+                    }
+
                     this.abierto = true;
                 },
 
                 cerrar() { this.abierto = false },
+
+                enCarrito(id) { return this.carrito.some((l) => l.id === id) },
+
+                /* Sumar o quitar el lote abierto. Cierra el modal: el gesto
+                   siguiente es marcar otro lote, no quedarse mirando este. */
+                alternarCarrito() {
+                    const lote = this.seleccionado;
+
+                    if (! lote) return;
+
+                    if (this.enCarrito(lote.id)) {
+                        this.carrito = this.carrito.filter((l) => l.id !== lote.id);
+                        this.abierto = false;
+
+                        return;
+                    }
+
+                    /* Sin plazo elegido no hay nada que marcar: el precio de la
+                       vara² DEPENDE del plazo, asi que un lote sin plazo es un
+                       lote sin precio. El boton esta deshabilitado, esto es el
+                       cinturon. */
+                    if (! this.hayPlan) return;
+
+                    const plan = this.planes.find((p) => p.meses === this.plazoElegido);
+
+                    this.carrito.push({
+                        id: lote.id,
+                        codigo: lote.codigo,
+                        area: Number(String(lote.areaVaras).replace(/,/g, '')) || 0,
+                        plazo: this.plazoElegido,
+                        etiqueta: plan ? (plan.etiqueta || (plan.meses > 0 ? `${plan.meses} meses` : 'Contado')) : '—',
+                        precio: plan ? this.precioDe(plan).toFixed(2) : null,
+                        prima: this.prima || '',
+                    });
+
+                    this.abierto = false;
+                },
+
+                /* ¿Hay un plazo elegido para el lote abierto? */
+                get hayPlan() {
+                    return this.planes.length > 0 && this.plazoElegido !== null;
+                },
+
+                vaciarCarrito() { this.carrito = [] },
+
+                /* Lo que suma el contrato, con el plan que quedo marcado.
+                   RENGLON POR RENGLON y en centavos enteros: es la misma
+                   cuenta que hace RegistroDeVentas::congelarPrecios() del
+                   lado del servidor. Sumar primero las areas da un centavo
+                   distinto en cuanto dos lotes tengan fracciones. */
+                get resumenCarrito() {
+                    let area = 0;
+                    let centavos = 0;
+                    let primas = 0;
+
+                    for (const lote of this.carrito) {
+                        area += lote.area;
+                        centavos += Math.round(lote.area * Number(lote.precio || 0) * 100);
+                        primas += Math.max(0, Math.round((Number(lote.prima) || 0) * 100));
+                    }
+
+                    const tramos = this.tramos;
+
+                    return {
+                        lotes: this.carrito.length,
+                        area: this.numero(area),
+                        total: this.lempiras(centavos),
+                        prima: this.lempiras(primas),
+                        tramos,
+                        // La primera es la mas alta: es lo que paga mientras
+                        // todos los lotes siguen vivos.
+                        primeraCuota: tramos.length > 0 ? tramos[0].monto : null,
+                        plazoMaximo: this.carrito.reduce((mayor, l) => Math.max(mayor, l.plazo || 0), 0),
+                    };
+                },
+
+                /*
+                   ═══ LOS TRAMOS ═══
+
+                   Con un lote a 12 meses, otro a 24 y otro a 48, la pregunta
+                   «¿cuanto pago por mes?» NO tiene una sola respuesta: paga los
+                   tres juntos hasta el mes 12, dos hasta el 24 y uno hasta el
+                   48. Contestar con el primer numero a secas seria exacto por
+                   doce meses y falso por treinta y seis.
+
+                   Se agrupan los meses consecutivos que se pagan igual. Es el
+                   mismo calculo que hace PlanDelContrato del lado del servidor,
+                   que es el que despues persiste.
+                */
+                get tramos() {
+                    /* La cuota de cada lote, en centavos. El residuo del
+                       redondeo lo reparte PlanDeCuotas en la ULTIMA cuota; aca
+                       se muestra la primera, que es la que se repite. */
+                    const cuotas = this.carrito.map((lote) => {
+                        const meses = Number(lote.plazo) || 0;
+
+                        if (meses <= 0) return { meses: 0, cuota: 0 };
+
+                        const valor = Math.round(lote.area * Number(lote.precio || 0) * 100);
+                        const prima = Math.max(0, Math.round((Number(lote.prima) || 0) * 100));
+                        const saldo = Math.max(valor - prima, 0);
+
+                        return { meses, cuota: Math.round(saldo / meses) };
+                    });
+
+                    const plazo = cuotas.reduce((mayor, c) => Math.max(mayor, c.meses), 0);
+
+                    if (plazo === 0) return [];
+
+                    const delMes = (mes) => cuotas.reduce((suma, c) => suma + (mes <= c.meses ? c.cuota : 0), 0);
+
+                    const tramos = [];
+                    let desde = 1;
+                    let monto = delMes(1);
+
+                    for (let mes = 2; mes <= plazo; mes++) {
+                        const ahora = delMes(mes);
+
+                        if (ahora === monto) continue;
+
+                        tramos.push({ desde, hasta: mes - 1, monto: this.lempiras(monto), centavos: monto });
+                        desde = mes;
+                        monto = ahora;
+                    }
+
+                    tramos.push({ desde, hasta: plazo, monto: this.lempiras(monto), centavos: monto });
+
+                    return tramos;
+                },
+
+                /* Lo mismo, para apartar los marcados. La seña es POR LOTE:
+                   son N compromisos, cada uno con el suyo, y los N cuentan
+                   despues como parte de la prima. */
+                get reservaDelGrupo() {
+                    const senia = Number(this.senia);
+
+                    return {
+                        lote: this.carrito[0].id,
+                        extra: this.carrito.slice(1).map((l) => l.id),
+                        senia: Number.isFinite(senia) && senia > 0 ? senia.toFixed(2) : null,
+                        vence: this.venceEl || null,
+                    };
+                },
+
+                /* La seña de todos los marcados, para que el vendedor sepa
+                   cuanto esta por cobrar antes de apretar. */
+                get seniaDelGrupo() {
+                    const senia = Math.max(0, Math.round((Number(this.senia) || 0) * 100));
+
+                    return this.lempiras(senia * this.carrito.length);
+                },
+
+                /* El contrato entero para la accion de vender: encabeza el
+                   primero que se marco —es el que va a abrir el expediente—
+                   y el resto viaja en `extra`. */
+                get contrato() {
+                    return {
+                        lote: this.carrito[0].id,
+                        // Cada lote con LO SUYO. El servidor arma un plan de
+                        // cuotas por renglon y los suma en tramos.
+                        condiciones: this.carrito.map((l) => ({
+                            lote: l.id,
+                            plazo: l.plazo,
+                            precio: l.precio,
+                            prima: Number(l.prima) > 0 ? Number(l.prima).toFixed(2) : '0.00',
+                        })),
+                    };
+                },
 
                 /*
                    La geometria del lote para dibujarlo solo, en grande.
@@ -799,12 +1046,20 @@
                 get cotizacion() {
                     const plan = this.planes.find((p) => p.meses === this.plazoElegido);
                     const prima = Number(this.prima);
+                    const precio = plan ? this.precioDe(plan).toFixed(2) : null;
+                    const enMano = Number.isFinite(prima) && prima > 0 ? prima.toFixed(2) : '0.00';
 
                     return {
                         lote: this.seleccionado.id,
                         plazo: this.plazoElegido,
-                        precio: plan ? this.precioDe(plan).toFixed(2) : null,
-                        prima: Number.isFinite(prima) && prima > 0 ? prima.toFixed(2) : null,
+                        precio,
+                        prima: enMano,
+                        condiciones: [{
+                            lote: this.seleccionado.id,
+                            plazo: this.plazoElegido,
+                            precio,
+                            prima: enMano,
+                        }],
                     };
                 },
 
@@ -878,8 +1133,12 @@
                             data-etiqueta="{{ $lote['etiqueta'] }}"
                             data-color="{{ $lote['color'] }}"
                             data-cliente="{{ $lote['cliente'] }}"
-                            :stroke="seleccionado?.id === {{ $lote['id'] }} ? '#0f172a' : '#ffffff'"
-                            :stroke-width="seleccionado?.id === {{ $lote['id'] }} ? 2.5 : 1"
+                            :stroke="enCarrito({{ $lote['id'] }})
+                                ? '#f59e0b'
+                                : (seleccionado?.id === {{ $lote['id'] }} ? '#0f172a' : '#ffffff')"
+                            :stroke-width="enCarrito({{ $lote['id'] }})
+                                ? 3
+                                : (seleccionado?.id === {{ $lote['id'] }} ? 2.5 : 1)"
                         >
                             <title>{{ $lote['codigo'] }} — {{ $lote['etiqueta'] }}</title>
                         </polygon>
@@ -972,6 +1231,70 @@
                 <div class="plano-pista" x-text="completo
                     ? 'Rueda para acercar · arrastrá para moverte · clic en un lote · Esc para salir'
                     : 'Rueda para acercar · arrastrá para moverte · clic en un lote · «Ampliar» para pantalla completa'"></div>
+
+                {{-- El contrato en armado.
+
+                     Solo aparece con lotes marcados: una barra vacia
+                     flotando sobre el plano es ruido. Y es el UNICO lugar
+                     desde donde se firma cuando hay varios, para que no
+                     existan dos botones que hacen cosas distintas con el
+                     mismo nombre. --}}
+                <template x-if="carrito.length > 0">
+                    <div class="plano-carrito">
+                        <div>
+                            <p class="plano-carrito-titulo">
+                                <span x-text="resumenCarrito.lotes"></span>
+                                <span x-text="resumenCarrito.lotes === 1 ? 'lote marcado' : 'lotes marcados'"></span>
+                            </p>
+
+                            <p class="plano-carrito-detalle">
+                                <span x-text="resumenCarrito.area"></span> vr² ·
+                                <span x-text="resumenCarrito.total"></span> ·
+                                prima <span x-text="resumenCarrito.prima"></span>
+                            </p>
+
+                            {{-- La escalera. Cuando el lote de 12 meses se
+                                 termina de pagar, a partir del mes 13 es una
+                                 cuota menos — y eso hay que poder decirselo al
+                                 cliente antes de firmar, no despues. --}}
+                            <ul class="plano-tramos">
+                                <template x-for="tramo in resumenCarrito.tramos" :key="tramo.desde">
+                                    <li>
+                                        <span x-text="tramo.desde === tramo.hasta
+                                            ? `mes ${tramo.desde}`
+                                            : `meses ${tramo.desde} al ${tramo.hasta}`"></span>
+                                        <strong x-text="tramo.monto"></strong>
+                                    </li>
+                                </template>
+                            </ul>
+
+                            <p class="plano-carrito-codigos"
+                               x-text="carrito.map((l) => `${l.codigo} (${l.etiqueta})`).join(' · ')"></p>
+                        </div>
+
+                        <div class="plano-carrito-botones">
+                            <button type="button" class="plano-accion" x-on:click="vaciarCarrito()">Vaciar</button>
+
+                            {{-- Apartar y vender salen de la MISMA seleccion: se
+                                 marcan los lotes una vez y recien al final se
+                                 decide que se hace con ellos. --}}
+                            <button
+                                type="button"
+                                class="plano-accion plano-accion-apartar"
+                                x-on:click="$wire.mountAction('apartarLote', reservaDelGrupo); abierto = false"
+                                :title="`Seña de ${seniaDelGrupo} en total, una por lote`"
+                            >
+                                Apartar <span x-text="resumenCarrito.lotes === 1 ? 'el lote' : `los ${resumenCarrito.lotes}`"></span>
+                            </button>
+
+                            <button
+                                type="button"
+                                class="plano-accion plano-accion-vender"
+                                x-on:click="$wire.mountAction('venderLote', contrato); abierto = false"
+                            >Firmar el contrato</button>
+                        </div>
+                    </div>
+                </template>
             </div>
 
             {{--
@@ -1173,12 +1496,23 @@
                                                     </div>
                                                 </template>
 
-                                                <button
-                                                    type="button"
-                                                    class="plano-accion plano-accion-vender plano-accion-ancha"
-                                                    x-on:click="$wire.mountAction('venderLote', cotizacion); abierto = false"
-                                                    x-text="seleccionado.estado === 'apartado' ? 'Convertir en venta' : 'Vender este lote'"
-                                                ></button>
+                                                {{-- Con un contrato en armado este boton NO se muestra:
+                                                     firmar solo este lote dejaria los otros marcados
+                                                     colgados y sin aviso. Cuando hay varios, se firma
+                                                     desde la barra, que es la unica que sabe cuantos
+                                                     son y cuanto suman. --}}
+                                                <template x-if="carrito.length === 0">
+                                                    <button
+                                                        type="button"
+                                                        class="plano-accion plano-accion-vender plano-accion-ancha"
+                                                        :disabled="planes.length > 0 && ! hayPlan"
+                                                        x-on:click="$wire.mountAction('venderLote', cotizacion); abierto = false"
+                                                        x-text="planes.length > 0 && ! hayPlan
+                                                            ? 'Marcá primero un plazo'
+                                                            : (seleccionado.estado === 'apartado' ? 'Convertir en venta' : 'Vender este lote')"
+                                                    ></button>
+                                                </template>
+
                                             </div>
                                         </template>
 
@@ -1239,17 +1573,58 @@
                                                             </li>
                                                         </ul>
 
-                                                        <button
-                                                            type="button"
-                                                            class="plano-accion plano-accion-apartar plano-accion-ancha"
-                                                            x-on:click="$wire.mountAction('apartarLote', reserva); abierto = false"
-                                                        >
-                                                            Apartar este lote
-                                                        </button>
+                                                        <template x-if="carrito.length === 0">
+                                                            <button
+                                                                type="button"
+                                                                class="plano-accion plano-accion-apartar plano-accion-ancha"
+                                                                x-on:click="$wire.mountAction('apartarLote', reserva); abierto = false"
+                                                            >
+                                                                Apartar este lote
+                                                            </button>
+                                                        </template>
                                                     </div>
                                                 </template>
                                             </div>
                                         </template>
+
+                                        {{-- ── Marcar ──────────────────────────────
+
+                                             Fuera de las dos pestañas a proposito:
+                                             marcar lotes es UNA sola cosa, y recien
+                                             al final se decide si el grupo se vende
+                                             o se aparta. Tenerlo adentro de «Vender»
+                                             obligaria a entrar por ahi para armar un
+                                             apartado de tres lotes.
+
+                                             Sobre un mapa, marcar y seguir clickeando
+                                             es el gesto natural; buscar los lotes en
+                                             una lista de 301 no lo es. --}}
+                                        <template x-if="carrito.length > 0">
+                                            <p class="plano-nota-contrato">
+                                                Tenés <strong x-text="carrito.length"></strong>
+                                                <span x-text="carrito.length === 1 ? 'lote marcado' : 'lotes marcados'"></span>,
+                                                cada uno con <strong>su propio plazo</strong>. Se venden o se apartan
+                                                desde la barra de abajo.
+                                            </p>
+                                        </template>
+
+                                        {{-- Marcar SIN plazo no se puede: el precio de la vara²
+                                             depende del plazo, asi que un lote sin plazo es un
+                                             lote sin precio. Y no hay ninguno por defecto —un
+                                             plazo puesto solo es un plazo que alguien firma sin
+                                             haberlo mirado. --}}
+                                        <button
+                                            type="button"
+                                            class="plano-accion plano-accion-ancha"
+                                            :class="enCarrito(seleccionado.id) ? 'plano-marcado' : ''"
+                                            :disabled="! enCarrito(seleccionado.id) && ! hayPlan"
+                                            x-on:click="alternarCarrito()"
+                                            x-text="enCarrito(seleccionado.id)
+                                                ? 'Quitar de la selección'
+                                                : (! hayPlan
+                                                    ? 'Marcá el plazo de este lote para sumarlo'
+                                                    : (carrito.length > 0 ? 'Sumar a la selección' : 'Marcar y seguir eligiendo lotes'))"
+                                        ></button>
                                     </div>
                                 </template>
 

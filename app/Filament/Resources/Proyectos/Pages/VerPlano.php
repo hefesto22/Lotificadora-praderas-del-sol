@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Proyectos\Pages;
 
+use App\Domain\Enums\EstadoLote;
 use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\Plano\AcomodadorDelPlano;
 use App\Domain\Plano\Dxf\ImportadorDeDxf;
@@ -14,6 +15,7 @@ use App\Domain\Plano\PlanoDelProyecto;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\ListaDePrecios;
 use App\Domain\Ventas\PlanDeCuotas;
+use App\Domain\Ventas\PlanDelContrato;
 use App\Domain\Ventas\PrecioPactado;
 use App\Domain\Ventas\RegistroDeCompromisos;
 use App\Domain\Ventas\RegistroDeVentas;
@@ -22,11 +24,13 @@ use App\Filament\Schemas\Components\DNIField;
 use App\Filament\Schemas\Components\MayusculasField;
 use App\Filament\Schemas\Components\MontoField;
 use App\Filament\Schemas\Components\TelefonoHondurasField;
+use App\Filament\Support\Cuadros;
 use App\Models\Bloque;
 use App\Models\Cliente;
 use App\Models\Lote;
 use App\Models\PlanDePago;
 use App\Models\Proyecto;
+use App\Models\Venta;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
@@ -39,8 +43,11 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Concerns\InteractsWithRecord;
 use Filament\Resources\Pages\Page;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\HtmlString;
 use Illuminate\Validation\Rules\Unique;
 use Override;
 use Throwable;
@@ -61,6 +68,16 @@ class VerPlano extends Page
 
     #[Override]
     protected string $view = 'filament.resources.proyectos.pages.ver-plano';
+
+    /**
+     * Los lotes ya leidos en este request, por su lista de ids.
+     *
+     * Privada a proposito: Livewire solo serializa lo publico, asi que esto
+     * vive y muere adentro de un request y nunca viaja al navegador.
+     *
+     * @var array<string, list<Lote>>
+     */
+    private array $lotesLeidos = [];
 
     public function mount(int|string $record): void
     {
@@ -201,19 +218,59 @@ class VerPlano extends Page
             ->icon(Heroicon::OutlinedBookmark)
             ->color('warning')
             ->modalHeading('¿A nombre de quien?')
-            ->modalDescription('Queda reservado para esa persona. Se puede liberar despues sin consecuencias.')
+            ->modalDescription('Quedan reservados para esa persona. Se pueden liberar despues sin consecuencias.')
             ->modalSubmitActionLabel('Apartar')
-            ->modalWidth('lg')
+            ->modalWidth('2xl')
             ->fillForm(fn (array $arguments): array => $this->datosInicialesDeApartado($arguments))
             ->schema([
+                Hidden::make('lote_id'),
                 Hidden::make('monto_senia'),
                 Hidden::make('vence_el'),
 
                 $this->selectorDeCliente('Cliente'),
 
-                Placeholder::make('resumen')
-                    ->label('Condiciones')
-                    ->content(fn (Get $get): string => $this->resumenDeApartado($get)),
+                /*
+                 * Los otros lotes que se marcaron en el plano. Solo los
+                 * DISPONIBLES: un lote ya apartado no se aparta de nuevo, y
+                 * ofrecerlo aca seria ofrecer algo que se va a rechazar.
+                 */
+                Select::make('lotes_extra')
+                    ->label('Sumar otro lote')
+                    ->multiple()
+                    ->options(fn (Get $get): array => $this->otrosLotesVendibles($get, soloDisponibles: true))
+                    ->searchable()
+                    ->live()
+                    ->helperText('Se marcan en el plano; aca solo se corrigen.'),
+
+                Section::make('Lo que se reserva')
+                    ->icon(Heroicon::OutlinedBookmark)
+                    ->columns(3)
+                    ->schema([
+                        Placeholder::make('apartado_lotes')
+                            ->label('Lotes')
+                            ->columnSpanFull()
+                            ->content(fn (Get $get): string => $this->cuentaDelApartado($get, 'lotes')),
+
+                        Placeholder::make('apartado_senia')
+                            ->label('Seña por lote')
+                            ->content(fn (Get $get): string => $this->cuentaDelApartado($get, 'senia')),
+
+                        Placeholder::make('apartado_total')
+                            ->label('Se cobra hoy')
+                            ->content(fn (Get $get): string => $this->cuentaDelApartado($get, 'total')),
+
+                        Placeholder::make('apartado_vence')
+                            ->label('Vence el')
+                            ->content(fn (Get $get): string => $this->cuentaDelApartado($get, 'vence')),
+
+                        Placeholder::make('resumen')
+                            ->hiddenLabel()
+                            ->columnSpanFull()
+                            ->content(
+                                'Al vender cuenta como parte de la prima. Si vence sin que el cliente vuelva, '.
+                                'el lote se libera y el dinero se devuelve.'
+                            ),
+                    ]),
 
                 Textarea::make('observaciones')
                     ->label('Observaciones')
@@ -222,9 +279,10 @@ class VerPlano extends Page
             ->action(function (array $arguments, array $data): void {
                 $this->conElLote($arguments, function (Lote $lote) use ($data): string {
                     $cliente = Cliente::query()->findOrFail($this->entero($data, 'cliente_id', 0));
+                    $lotes = $this->lotesDelContrato((int) $lote->getKey(), $data['lotes_extra'] ?? null);
 
-                    new RegistroDeCompromisos()->apartar(
-                        $lote,
+                    new RegistroDeCompromisos()->apartarVarios(
+                        $lotes,
                         $cliente,
                         montoSenia: $this->texto($data, 'monto_senia', '') ?: null,
                         venceEl: $this->texto($data, 'vence_el', '') ?: null,
@@ -232,9 +290,10 @@ class VerPlano extends Page
                     );
 
                     return sprintf(
-                        '%s quedo apartado a nombre de %s.',
-                        (string) $lote->getAttribute('codigo'),
-                        (string) $cliente->getAttribute('nombre')
+                        '%s %s a nombre de %s.',
+                        $this->codigosDe($lotes),
+                        count($lotes) > 1 ? 'quedaron apartados' : 'quedo apartado',
+                        (string) $cliente->getAttribute('nombre'),
                     );
                 });
             });
@@ -264,99 +323,224 @@ class VerPlano extends Page
             ->color('primary')
             ->modalHeading('Firmar la venta')
             ->modalDescription(
-                'Se numera el expediente, se congelan el area y el precio, y queda armado el plan '.
-                'de cuotas. Si el lote estaba apartado, tiene que ser a nombre de la misma persona.'
+                'Se numera el expediente, se congelan el area y el precio de cada lote, y queda '.
+                'armado el plan de cuotas. Si un lote venia apartado, tiene que ser a nombre del titular.'
             )
             ->modalSubmitActionLabel('Firmar la venta')
-            ->modalWidth('2xl')
+            ->modalWidth('3xl')
             ->fillForm(fn (array $arguments): array => $this->datosInicialesDeVenta($arguments))
             ->schema([
                 Hidden::make('lote_id'),
                 Hidden::make('cotizado'),
 
-                $this->selectorDeCliente('¿Quien compra?'),
+                Section::make('Quienes firman')
+                    ->description('El titular es a quien le sale el estado de cuenta. Los demas firman igual y pueden pagar igual.')
+                    ->icon(Heroicon::OutlinedUsers)
+                    ->columns(2)
+                    ->schema([
+                        $this->selectorDeCliente('Titular'),
 
-                Placeholder::make('resumen')
-                    ->label('Lo que se va a firmar')
-                    ->content(fn (Get $get): string => $this->resumenDeVenta($get)),
+                        /*
+                         * Marido y mujer, o socios. Un lote puede quedar a
+                         * nombre de varias personas (R8): el pivot
+                         * `venta_cliente` guarda a todas y marca a UNA como
+                         * titular —tiene un indice unico parcial sobre
+                         * `venta_id WHERE titular`, o sea que la base no
+                         * admite dos.
+                         */
+                        Select::make('copropietarios')
+                            ->label('Copropietarios')
+                            ->multiple()
+                            ->options(fn (Get $get): array => $this->clientesMenosElTitular($get))
+                            ->searchable()
+                            ->helperText('Opcional. Si falta alguno, se carga con el mismo boton +.'),
+                    ]),
 
-                TextInput::make('plazo_meses')
-                    ->label('Plazo en meses')
-                    ->numeric()
-                    ->minValue(0)
-                    ->maxValue(PlanDeCuotas::PLAZO_MAXIMO_MESES)
-                    ->required()
-                    ->live(onBlur: true)
-                    ->visible(fn (Get $get): bool => ! $get('cotizado'))
-                    ->helperText('0 es contado, sin cuotas.'),
+                /*
+                 * Lo que viaja del plano: una linea por lote con SU plazo, SU
+                 * precio y SU prima. Va como JSON y no como arreglo porque un
+                 * `Hidden` pinta su valor adentro de un <input>, y un arreglo
+                 * ahi se convierte en la palabra «Array».
+                 */
+                Hidden::make('condiciones'),
 
-                MontoField::make('precio_vara', 'Precio por vara²')
-                    ->live(onBlur: true)
-                    ->visible(fn (Get $get): bool => ! $get('cotizado')),
+                Section::make('Que se lleva')
+                    ->description('Cada lote con el plazo que se le marco en el plano.')
+                    ->icon(Heroicon::OutlinedMap)
+                    ->schema([
+                        Placeholder::make('tabla_de_lotes')
+                            ->hiddenLabel()
+                            ->columnSpanFull()
+                            ->content(fn (Get $get): HtmlString => $this->tablaDeLotes($get)),
+                    ]),
 
-                MontoField::make('prima', 'Prima')
-                    ->live(onBlur: true)
-                    ->visible(fn (Get $get): bool => ! $get('cotizado'))
-                    ->helperText('Se paga completa al firmar (R5).'),
+                Section::make('Lo que se va a firmar')
+                    ->description('Con el mismo motor que despues guarda la venta.')
+                    ->icon(Heroicon::OutlinedDocumentCheck)
+                    ->columns(3)
+                    ->schema([
+                        Placeholder::make('resumen_valor')
+                            ->label('Valor')
+                            ->content(fn (Get $get): string => $this->cuenta($get, 'valor')),
 
-                Select::make('dia_pago')
-                    ->label('Dia de pago')
-                    ->options($this->diasDelMes())
-                    ->required()
-                    ->live()
-                    ->native(false)
-                    ->helperText('En los meses cortos se corre al ultimo dia.'),
+                        Placeholder::make('resumen_prima')
+                            ->label('Prima')
+                            ->content(fn (Get $get): string => $this->cuenta($get, 'prima')),
 
-                DatePicker::make('fecha_contrato')
-                    ->label('Fecha del contrato')
-                    ->required()
-                    ->live()
-                    ->native(false)
-                    ->displayFormat('d/m/Y'),
+                        Placeholder::make('resumen_saldo')
+                            ->label('Saldo a financiar')
+                            ->content(fn (Get $get): string => $this->cuenta($get, 'saldo')),
 
-                TextInput::make('motivo_descuento')
-                    ->label('Motivo del descuento')
-                    ->maxLength(200)
-                    ->visible(fn (Get $get): bool => $this->hayDescuento($get))
-                    ->required(fn (Get $get): bool => $this->hayDescuento($get))
-                    ->helperText('El precio va por debajo del de lista. R4: queda con tu usuario y la fecha.'),
+                        /*
+                         * La escalera. Con un lote a 12 meses, otro a 24 y otro
+                         * a 48, «¿cuanto pago por mes?» no tiene una sola
+                         * respuesta: cuando el primero se termina de pagar, a
+                         * partir del mes 13 es una cuota menos.
+                         */
+                        Placeholder::make('resumen_cuotas')
+                            ->label('Lo que paga por mes')
+                            ->columnSpanFull()
+                            ->content(fn (Get $get): HtmlString => $this->escaleraDeCuotas($get)),
 
-                Textarea::make('observaciones')
-                    ->label('Observaciones')
-                    ->rows(2),
+                        // Solo aparece cuando hay algo que no cierra. Ocupa el
+                        // ancho entero porque lo que dice es una frase, no un
+                        // numero, y leerla es lo que desatasca el tramite.
+                        Placeholder::make('resumen')
+                            ->hiddenLabel()
+                            ->columnSpanFull()
+                            ->visible(fn (Get $get): bool => $this->cuenta($get, 'aviso') !== '')
+                            ->content(fn (Get $get): string => $this->cuenta($get, 'aviso')),
+                    ]),
+
+                Section::make('Condiciones')
+                    ->icon(Heroicon::OutlinedBanknotes)
+                    ->columns(3)
+                    ->schema([
+                        /*
+                         * ╔══ dehydratedWhenHidden() NO ES DECORACION ══╗
+                         *
+                         * Filament NO envia lo que esta oculto: isDehydrated()
+                         * llama a isHiddenAndNotDehydratedWhenHidden() y borra
+                         * la clave del estado. Estos tres campos se esconden
+                         * justamente cuando el modal ya los cotizo —que es el
+                         * camino normal—, asi que sin esta linea el plazo, el
+                         * precio y la prima llegaban vacios a la accion: la
+                         * venta se armaba a L 0.00 y de contado.
+                         *
+                         * No se cae solo: el Service ve un precio por debajo de
+                         * la lista, pide motivo por escrito (R4) y tira un
+                         * mensaje que no tiene nada que ver con lo que paso.
+                         * Peor que reventar.
+                         */
+                        TextInput::make('plazo_meses')
+                            ->label('Plazo en meses')
+                            ->numeric()
+                            ->minValue(0)
+                            ->maxValue(PlanDeCuotas::PLAZO_MAXIMO_MESES)
+                            ->required()
+                            ->live(onBlur: true)
+                            ->visible(fn (Get $get): bool => ! $get('cotizado'))
+                            ->dehydratedWhenHidden()
+                            ->helperText('0 es contado, sin cuotas.'),
+
+                        MontoField::make('precio_vara', 'Precio por vara²')
+                            ->live(onBlur: true)
+                            ->visible(fn (Get $get): bool => ! $get('cotizado'))
+                            ->dehydratedWhenHidden(),
+
+                        MontoField::make('prima', 'Prima')
+                            ->live(onBlur: true)
+                            ->visible(fn (Get $get): bool => ! $get('cotizado'))
+                            ->dehydratedWhenHidden()
+                            ->helperText('Se paga completa al firmar (R5).'),
+
+                        Select::make('dia_pago')
+                            ->label('Dia de pago')
+                            ->options($this->diasDelMes())
+                            ->required()
+                            ->live()
+                            ->native(false)
+                            ->helperText('En los meses cortos se corre al ultimo dia.'),
+
+                        DatePicker::make('fecha_contrato')
+                            ->label('Fecha del contrato')
+                            ->required()
+                            ->live()
+                            ->native(false)
+                            ->displayFormat('d/m/Y'),
+
+                        TextInput::make('motivo_descuento')
+                            ->label('Motivo del descuento')
+                            ->maxLength(200)
+                            ->columnSpanFull()
+                            ->visible(fn (Get $get): bool => $this->hayDescuento($get))
+                            ->required(fn (Get $get): bool => $this->hayDescuento($get))
+                            ->helperText('El precio va por debajo del de lista. R4: queda con tu usuario y la fecha.'),
+
+                        Textarea::make('observaciones')
+                            ->label('Observaciones')
+                            ->rows(2)
+                            ->columnSpanFull(),
+                    ]),
             ])
             ->action(function (array $arguments, array $data): void {
                 $this->conElLote($arguments, function (Lote $lote) use ($data): string {
-                    $cliente = Cliente::query()->findOrFail($this->entero($data, 'cliente_id', 0));
-
                     /** @var Proyecto $proyecto */
                     $proyecto = $this->getRecord();
 
+                    $titular = Cliente::query()->findOrFail($this->entero($data, 'cliente_id', 0));
+                    $clientes = $this->clientesDeLaVenta($titular, $data);
+
+                    /*
+                     * Cada lote llega con LO SUYO: su plazo, su precio por
+                     * vara² —que depende del plazo— y su prima. El Service
+                     * arma un plan de cuotas por renglon.
+                     *
+                     * El motivo del descuento, si lo hubo, viaja con cada uno
+                     * porque el CHECK de la base lo exige lote por lote.
+                     */
+                    $condiciones = $this->condicionesDelFormulario($data, $lote);
+                    $lotes = $this->lotesDelContrato((int) $lote->getKey(), array_column($condiciones, 'lote'));
+                    $motivo = $this->texto($data, 'motivo_descuento', '') ?: null;
+
+                    $porLote = [];
+
+                    foreach ($condiciones as $condicion) {
+                        $porLote[$condicion['lote']] = $condicion;
+                    }
+
+                    $primaTotal = Monto::cero();
+                    $precios = [];
+
+                    foreach ($lotes as $uno) {
+                        $suyo = $porLote[(int) $uno->getKey()] ?? null;
+                        $prima = $this->monto($suyo['prima'] ?? '0');
+                        $primaTotal = $primaTotal->sumar($prima);
+
+                        $precios[] = new PrecioPactado(
+                            loteId: (int) $uno->getKey(),
+                            precioVara: $this->monto($suyo['precio'] ?? '0'),
+                            motivo: $motivo,
+                            plazoMeses: $suyo['plazo'] ?? 0,
+                            prima: $prima,
+                        );
+                    }
+
                     $venta = app(RegistroDeVentas::class)->activar(
                         proyecto: $proyecto,
-                        lotes: [$lote],
-                        clientes: [$cliente],
-                        prima: $this->monto($this->texto($data, 'prima', '0')),
-                        plazoMeses: $this->entero($data, 'plazo_meses', 0),
+                        lotes: $lotes,
+                        clientes: $clientes,
+                        prima: $primaTotal,
+                        plazoMeses: $condiciones[0]['plazo'] ?? 0,
                         diaPago: $this->entero($data, 'dia_pago', 1),
                         fechaContrato: CarbonImmutable::parse(
                             $this->texto($data, 'fecha_contrato', today()->toDateString())
                         ),
                         observaciones: $this->texto($data, 'observaciones', '') ?: null,
-                        precios: [new PrecioPactado(
-                            loteId: (int) $lote->getKey(),
-                            precioVara: $this->monto($this->texto($data, 'precio_vara', '0')),
-                            motivo: $this->texto($data, 'motivo_descuento', '') ?: null,
-                        )],
+                        precios: $precios,
                     );
 
-                    return sprintf(
-                        '%s vendido a %s. Contrato %s por %s.',
-                        (string) $lote->getAttribute('codigo'),
-                        (string) $cliente->getAttribute('nombre'),
-                        (string) $venta->getAttribute('numero_contrato'),
-                        $venta->montoValorTotal()->formateado(),
-                    );
+                    return $this->avisoDeVenta($venta, $lotes, $titular, count($clientes));
                 });
             });
     }
@@ -416,19 +600,38 @@ class VerPlano extends Page
         $propio = $lote?->getAttribute('precio_vara');
         $cotizado = $this->texto($arguments, 'precio', '');
 
+        $plazoFinal = match (true) {
+            $plazo >= 0                 => $plazo,
+            $plan instanceof PlanDePago => (int) $plan->getAttribute('meses'),
+            default                     => $this->configEntero('lotificadora.ventas.plazo_meses_default', 60),
+        };
+
+        $precioFinal = match (true) {
+            $cotizado !== ''            => $cotizado,
+            $plan instanceof PlanDePago => $plan->montoPrecioVara()->redondeado(),
+            default                     => is_string($propio) || is_int($propio) ? (string) $propio : '0',
+        };
+
+        $extra = $this->idsExtra($arguments);
+        $condiciones = $this->condicionesDe($arguments['condiciones'] ?? null);
+
         return [
-            'plazo_meses' => match (true) {
-                $plazo >= 0                 => $plazo,
-                $plan instanceof PlanDePago => (int) $plan->getAttribute('meses'),
-                default                     => $this->configEntero('lotificadora.ventas.plazo_meses_default', 60),
-            },
-            'precio_vara' => match (true) {
-                $cotizado !== ''            => $cotizado,
-                $plan instanceof PlanDePago => $plan->montoPrecioVara()->redondeado(),
-                default                     => is_string($propio) || is_int($propio) ? (string) $propio : '0',
-            },
-            'prima'    => $this->texto($arguments, 'prima', '') ?: null,
-            'dia_pago' => $this->configEntero('lotificadora.ventas.dia_pago_default', 5),
+            /*
+             * Una linea por lote, con SU plazo. Van como JSON en un `Hidden`:
+             * un arreglo adentro de un <input> se convierte en «Array».
+             *
+             * Vacio es el proyecto sin planes de pago cargados: ahi no hubo
+             * plazo que elegir y el formulario pregunta los tres campos, para
+             * un solo lote.
+             */
+            'condiciones' => $condiciones === []
+                ? null
+                : json_encode($condiciones, JSON_THROW_ON_ERROR),
+
+            'plazo_meses' => $plazoFinal,
+            'precio_vara' => $precioFinal,
+            'prima'       => $this->primaInicial($arguments, $lote, $extra, $plazoFinal, $precioFinal),
+            'dia_pago'    => $this->configEntero('lotificadora.ventas.dia_pago_default', 5),
 
             /*
              * Al estado, no a $arguments: los closures de un componente del
@@ -436,9 +639,44 @@ class VerPlano extends Page
              * pero el estado del formulario si llega a todos lados.
              */
             'lote_id'        => $lote?->getKey(),
-            'cotizado'       => $this->vinoCotizado($arguments),
+            'cotizado'       => $condiciones !== [],
             'fecha_contrato' => today()->toDateString(),
         ];
+    }
+
+    /**
+     * Con que prima llega el formulario.
+     *
+     * Lo que se escribio en el modal manda. Pero vacio y DE CONTADO, la
+     * prima ES el valor: de contado no queda nada que financiar, asi que
+     * llegar con la prima en blanco es llegar a un formulario que no se
+     * puede guardar —y que ademas explica mal por que, porque el motor
+     * culpa al plazo—. Editable igual: si el cliente da menos, se cambia y
+     * se elige un plazo.
+     *
+     * @param array<string, mixed> $arguments
+     * @param list<int> $extra
+     */
+    private function primaInicial(array $arguments, ?Lote $lote, array $extra, int $plazo, string $precio): ?string
+    {
+        $escrita = $this->texto($arguments, 'prima', '');
+
+        if ($escrita !== '') {
+            return $escrita;
+        }
+
+        if ($plazo !== 0 || ! $lote instanceof Lote) {
+            return null;
+        }
+
+        $precioVara = $this->monto($precio);
+        $total = Monto::cero();
+
+        foreach ($this->lotesDelContrato((int) $lote->getKey(), $extra) as $uno) {
+            $total = $total->sumar(new Monto($precioVara->multiplicarPor($this->areaDe($uno))->redondeado()));
+        }
+
+        return $total->esCero() ? null : $total->redondeado();
     }
 
     /**
@@ -466,6 +704,11 @@ class VerPlano extends Page
                 : today()
                     ->addDays($this->configEntero('lotificadora.apartados.dias_de_vigencia', 15))
                     ->toDateString(),
+
+            // Al estado y no a $arguments: los closures de un componente del
+            // schema no reciben $arguments. Mismo motivo que en la venta.
+            'lote_id'     => $this->entero($arguments, 'lote', 0) ?: null,
+            'lotes_extra' => $this->idsExtra($arguments),
         ];
     }
 
@@ -480,91 +723,282 @@ class VerPlano extends Page
      */
     private function vinoCotizado(array $arguments): bool
     {
-        return $this->entero($arguments, 'plazo', -1) >= 0;
+        return $this->condicionesDe($arguments['condiciones'] ?? null) !== [];
     }
 
     /**
-     * Plazo, precio y prima, leidos del estado del formulario.
+     * Un renglon del cuadro del apartado.
      *
-     * Un campo con visible(false) NO se envia —Filament no deshidrata lo
-     * invisible—, asi que cuando la cotizacion vino del modal los tres se
-     * llenan igual por fillForm y quedan ahi aunque no se vean.
-     *
-     * @return array{plazo: int, precio: Monto, prima: Monto}
+     * La seña es POR LOTE, no por apartado: son N compromisos, cada uno con
+     * el suyo. Decir «L 5,000.00» a secas cuando son tres lotes seria
+     * cotizarle mal al cliente que esta enfrente, y por eso «Seña por lote»
+     * y «Se cobra hoy» son dos numeros distintos y no uno.
      */
-    private function condicionesEnPantalla(Get $get): array
+    private function cuentaDelApartado(Get $get, string $renglon): string
     {
+        $lotes = $this->lotesEnPantalla($get);
+        $monto = $this->monto($get('monto_senia'));
+        $vence = $get('vence_el');
+
+        return match ($renglon) {
+            'lotes' => $lotes === []
+                ? '—'
+                : sprintf(
+                    '%s (%s)',
+                    $this->codigosDe($lotes),
+                    count($lotes) === 1 ? 'un lote' : sprintf('%d lotes', count($lotes)),
+                ),
+            'senia' => $monto->formateado(),
+            'total' => count($lotes) < 2
+                ? $monto->formateado()
+                : new Monto($monto->multiplicarPor((string) count($lotes))->redondeado())->formateado(),
+            'vence' => $this->fechaDe(is_string($vence) ? $vence : null)->format('d/m/Y'),
+            default => '—',
+        };
+    }
+
+    /**
+     * Un renglon del cuadro «Lo que se va a firmar».
+     */
+    private function cuenta(Get $get, string $renglon): string
+    {
+        $cuentas = $this->cuentasDeLaVenta($get);
+
+        return is_string($cuentas[$renglon] ?? null) ? $cuentas[$renglon] : '';
+    }
+
+    /**
+     * Las condiciones de cada lote, leidas de donde esten.
+     *
+     * Viajan como JSON en un `Hidden`: un arreglo adentro de un <input> se
+     * convierte en la palabra «Array».
+     *
+     * Vacio significa que el plano no cotizo —proyecto sin planes de pago
+     * cargados—, y ahi manda lo que se teclea en el formulario, para un solo
+     * lote. Es el unico camino que queda sin plazos por lote, y a proposito:
+     * sin lista de precios por plazo no hay plazos que elegir.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return list<array{lote: int, plazo: int, precio: string, prima: string}>
+     */
+    private function condicionesDelFormulario(array $data, ?Lote $lote = null): array
+    {
+        $condiciones = $this->condicionesDe($data['condiciones'] ?? null);
+
+        if ($condiciones !== [] || ! $lote instanceof Lote) {
+            return $condiciones;
+        }
+
+        return [[
+            'lote'   => (int) $lote->getKey(),
+            'plazo'  => $this->entero($data, 'plazo_meses', 0),
+            'precio' => $this->texto($data, 'precio_vara', '0'),
+            'prima'  => $this->texto($data, 'prima', '0'),
+        ]];
+    }
+
+    /**
+     * @return list<array{lote: int, plazo: int, precio: string, prima: string}>
+     */
+    private function condicionesDe(mixed $crudo): array
+    {
+        $lista = is_string($crudo) ? json_decode($crudo, true) : $crudo;
+
+        if (! is_array($lista)) {
+            return [];
+        }
+
+        $condiciones = [];
+        $vistos = [];
+
+        foreach ($lista as $fila) {
+            /*
+             * Sin plazo NO hay condicion. El plano manda `plazo: null` cuando
+             * el proyecto no tiene planes de pago cargados y no hubo nada que
+             * elegir; tomarlo como 0 seria grabar la venta como si fuera de
+             * contado porque falta una configuracion.
+             */
+            if (! is_array($fila)) {
+                continue;
+            }
+
+            if (! is_numeric($fila['lote'] ?? null)) {
+                continue;
+            }
+
+            if (! is_numeric($fila['plazo'] ?? null)) {
+                continue;
+            }
+
+            $id = (int) $fila['lote'];
+
+            if (isset($vistos[$id])) {
+                continue;
+            }
+
+            $vistos[$id] = true;
+
+            $condiciones[] = [
+                'lote'   => $id,
+                'plazo'  => is_numeric($fila['plazo'] ?? null) ? (int) $fila['plazo'] : 0,
+                'precio' => $this->decimalDe($fila['precio'] ?? null),
+                'prima'  => $this->decimalDe($fila['prima'] ?? null),
+            ];
+        }
+
+        return $condiciones;
+    }
+
+    private function decimalDe(mixed $valor): string
+    {
+        return is_string($valor) || is_int($valor) ? (string) $valor : '0';
+    }
+
+    /**
+     * Un renglon del contrato, ya calculado: valor, prima y su plan propio.
+     *
+     * @return list<array{lote: Lote, codigo: string, area: string, plazo: int, precio: Monto, prima: Monto, valor: Monto, plan: PlanDeCuotas|null, error: string}>
+     */
+    private function renglonesEnPantalla(Get $get): array
+    {
+        $condiciones = $this->condicionesDelFormulario(
+            [
+                'condiciones' => $get('condiciones'),
+                'plazo_meses' => $get('plazo_meses'),
+                'precio_vara' => $get('precio_vara'),
+                'prima'       => $get('prima'),
+            ],
+            Lote::query()->find($this->entero(['id' => $get('lote_id')], 'id', 0)),
+        );
+
+        $ids = array_column($condiciones, 'lote');
+        $lotes = [];
+
+        foreach ($this->lotesDelContrato($ids[0] ?? 0, $ids) as $lote) {
+            $lotes[(int) $lote->getKey()] = $lote;
+        }
+
+        $diaPago = (int) $get('dia_pago');
+        $fecha = $this->fechaDe($get('fecha_contrato'));
+        $renglones = [];
+
+        foreach ($condiciones as $condicion) {
+            $lote = $lotes[$condicion['lote']] ?? null;
+
+            if (! $lote instanceof Lote) {
+                continue;
+            }
+
+            $precio = $this->monto($condicion['precio']);
+            $prima = $this->monto($condicion['prima']);
+            $area = $this->areaDe($lote);
+            $valor = new Monto($precio->multiplicarPor($area)->redondeado());
+            $plan = null;
+            $error = '';
+
+            try {
+                $plan = PlanDeCuotas::nuevo($valor, $prima, $condicion['plazo'], $diaPago, $fecha);
+            } catch (GrupoOlympoException $problema) {
+                // El mensaje del dominio ya esta escrito para quien atiende;
+                // lo que falta es de que lote esta hablando.
+                $error = $problema->getMessage();
+            }
+
+            $renglones[] = [
+                'lote'   => $lote,
+                'codigo' => (string) $lote->getAttribute('codigo'),
+                'area'   => $area,
+                'plazo'  => $condicion['plazo'],
+                'precio' => $precio,
+                'prima'  => $prima,
+                'valor'  => $valor,
+                'plan'   => $plan,
+                'error'  => $error,
+            ];
+        }
+
+        return $renglones;
+    }
+
+    /**
+     * Valor, prima y saldo. Y, si algo no cierra, por que y de que lote.
+     *
+     * @return array{valor: string, prima: string, saldo: string, aviso: string}
+     */
+    private function cuentasDeLaVenta(Get $get): array
+    {
+        $renglones = $this->renglonesEnPantalla($get);
+
+        if ($renglones === []) {
+            return ['valor' => '—', 'prima' => '—', 'saldo' => '—', 'aviso' => 'No se encontro el lote.'];
+        }
+
+        $valor = Monto::cero();
+        $prima = Monto::cero();
+        $aviso = '';
+
+        /*
+         * La suma se hace RENGLON POR RENGLON —cada lote redondeado a dos
+         * decimales y recien ahi sumado—, no como area total x precio. Es la
+         * misma cuenta que hace RegistroDeVentas::congelarPrecios() y la que
+         * exige el CHECK `valor = ROUND(area_varas * precio_vara, 2)`.
+         */
+        foreach ($renglones as $renglon) {
+            $valor = $valor->sumar($renglon['valor']);
+            $prima = $prima->sumar($renglon['prima']);
+
+            if ($aviso === '' && $renglon['error'] !== '') {
+                $aviso = sprintf('En el lote %s: %s', $renglon['codigo'], $renglon['error']);
+            }
+        }
+
         return [
-            'plazo'  => (int) $get('plazo_meses'),
-            'precio' => $this->monto($get('precio_vara')),
-            'prima'  => $this->monto($get('prima')),
+            'valor' => $valor->formateado(),
+            'prima' => $prima->formateado(),
+            'saldo' => $prima->mayorQue($valor) ? '—' : $valor->restar($prima)->formateado(),
+            'aviso' => $aviso,
         ];
     }
 
     /**
-     * El resumen del apartado: los dos numeros que se estan confirmando.
+     * La tabla de lotes del contrato que se esta armando.
+     *
+     * El armado del HTML vive en Cuadros, compartido con la ficha del
+     * expediente: son el mismo cuadro contando dos momentos —antes y despues
+     * de firmar— y con una copia cada uno, algun dia uno diria 48 cuotas y el
+     * otro 47.
      */
-    private function resumenDeApartado(Get $get): string
+    private function tablaDeLotes(Get $get): HtmlString
     {
-        $monto = $this->monto($get('monto_senia'));
-        $vence = $get('vence_el');
-
-        return sprintf(
-            '%s, vence el %s. Al vender cuenta como parte de la prima; si vence sin que el cliente vuelva, el lote se libera y el dinero se devuelve.',
-            $monto->formateado(),
-            $this->fechaDe(is_string($vence) ? $vence : null)->format('d/m/Y'),
-        );
+        return Cuadros::lotes(array_map(
+            static fn (array $renglon): array => [
+                'codigo' => $renglon['codigo'],
+                'area'   => $renglon['area'],
+                'plazo'  => $renglon['plazo'],
+                'precio' => $renglon['precio'],
+                'valor'  => $renglon['valor'],
+                'prima'  => $renglon['prima'],
+                'cuota'  => $renglon['plan']?->cuotaMensual(),
+            ],
+            $this->renglonesEnPantalla($get),
+        ));
     }
 
     /**
-     * Valor, saldo y cuota, con el mismo motor que despues persiste.
+     * La escalera de cuotas de lo que se esta cotizando.
      */
-    private function resumenDeVenta(Get $get): string
+    private function escaleraDeCuotas(Get $get): HtmlString
     {
-        $lote = Lote::query()->find($this->entero(['id' => $get('lote_id')], 'id', 0));
+        $planes = [];
 
-        if (! $lote instanceof Lote) {
-            return 'No se encontro el lote.';
+        foreach ($this->renglonesEnPantalla($get) as $renglon) {
+            if ($renglon['plan'] instanceof PlanDeCuotas) {
+                $planes[] = ['etiqueta' => $renglon['codigo'], 'plan' => $renglon['plan']];
+            }
         }
 
-        $condiciones = $this->condicionesEnPantalla($get);
-        $precio = $condiciones['precio'];
-        $prima = $condiciones['prima'];
-        $valor = new Monto($precio->multiplicarPor((string) $lote->getAttribute('area_varas'))->redondeado());
-
-        try {
-            $plan = PlanDeCuotas::nuevo(
-                $valor,
-                $prima,
-                $condiciones['plazo'],
-                (int) $get('dia_pago'),
-                $this->fechaDe($get('fecha_contrato')),
-            );
-        } catch (GrupoOlympoException $error) {
-            // El mensaje del dominio ya esta escrito para quien atiende.
-            return $error->getMessage();
-        }
-
-        $encabezado = sprintf(
-            '%s la vara² · valor %s · prima %s · saldo %s',
-            $precio->formateado(),
-            $valor->formateado(),
-            $prima->formateado(),
-            $plan->saldoFinanciado->formateado(),
-        );
-
-        $cuota = $plan->cuotaMensual();
-
-        if (! $cuota instanceof Monto) {
-            return $encabezado.' · de contado, sin cuotas.';
-        }
-
-        return $encabezado.sprintf(
-            ' · %d cuotas de %s (la ultima, %s).',
-            $plan->count(),
-            $cuota->formateado(),
-            $plan->ultima()?->monto->formateado() ?? '—',
-        );
+        return Cuadros::escalera(new PlanDelContrato($planes)->tramos());
     }
 
     /**
@@ -572,19 +1006,322 @@ class VerPlano extends Page
      */
     private function hayDescuento(Get $get): bool
     {
-        $lote = Lote::query()->find($this->entero(['id' => $get('lote_id')], 'id', 0));
-
-        if (! $lote instanceof Lote) {
-            return false;
-        }
-
         /** @var Proyecto $proyecto */
         $proyecto = $this->getRecord();
 
-        $condiciones = $this->condicionesEnPantalla($get);
-        $lista = app(ListaDePrecios::class)->deListaPara($proyecto, $lote, $condiciones['plazo']);
+        $lista = app(ListaDePrecios::class);
 
-        return $condiciones['precio']->menorQue($lista);
+        /*
+         * Cada lote se mide contra la lista DE SU PROPIO PLAZO: con el primero
+         * a 12 meses y el tercero a 48, el precio de lista de los dos no es el
+         * mismo. Alcanza con que uno baje para tener que escribir el motivo
+         * (R4). El Service vuelve a mirarlos uno por uno y dice cual falla.
+         */
+        return array_any(
+            $this->renglonesEnPantalla($get),
+            fn (array $renglon): bool => $renglon['precio']
+                ->menorQue($lista->deListaPara($proyecto, $renglon['lote'], $renglon['plazo'])),
+        );
+    }
+
+    /**
+     * Los lotes que el plano marco ademas del que se abrio.
+     *
+     * @param array<string, mixed> $arguments
+     *
+     * @return list<int>
+     */
+    private function idsExtra(array $arguments): array
+    {
+        $extra = $arguments['extra'] ?? null;
+
+        if (! is_array($extra)) {
+            return [];
+        }
+
+        /*
+         * El lote abierto se SACA de la lista de otros lotes.
+         *
+         * No es cosmetica. `Select::getInValidationRuleValues()` devuelve un
+         * conjunto VACIO —o sea: nada permitido— cuando hay mas valores
+         * elegidos que etiquetas que sepa resolver (Select.php:1763). El del
+         * plano no esta entre las opciones de este selector, asi que dejarlo
+         * en el estado tumbaba el formulario entero, y con un mensaje que ni
+         * siquiera decia cual de los lotes era el problema.
+         *
+         * El duplicado igual se vuelve a filtrar en lotesDelContrato(): esto
+         * lo saca de la pantalla, aquello lo saca de la venta.
+         */
+        $abierto = $this->entero($arguments, 'lote', 0);
+
+        return array_values(array_filter(
+            $this->idsElegidos($extra),
+            static fn (int $id): bool => $id !== $abierto,
+        ));
+    }
+
+    /**
+     * Un puñado de ids que vino de la pantalla, limpio.
+     *
+     * @return list<int>
+     */
+    private function idsElegidos(mixed $valores): array
+    {
+        if (! is_array($valores)) {
+            return [];
+        }
+
+        $ids = [];
+
+        foreach ($valores as $valor) {
+            if (is_numeric($valor)) {
+                $ids[] = (int) $valor;
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
+     * Los lotes que se estan cotizando: el del plano, mas los agregados.
+     *
+     * @return list<Lote>
+     */
+    private function lotesEnPantalla(Get $get): array
+    {
+        return $this->lotesDelContrato(
+            $this->entero(['id' => $get('lote_id')], 'id', 0),
+            $get('lotes_extra'),
+        );
+    }
+
+    /**
+     * El lote del plano encabeza; despues los agregados, sin repetidos.
+     *
+     * El orden importa: es el que va a salir impreso en el contrato. Y el
+     * dedup no es cortesia —RegistroDeVentas rechaza el mismo lote dos
+     * veces en una venta— sino evitar que un clic de mas termine en un
+     * mensaje de error por algo que la pantalla podia resolver sola.
+     *
+     * @return list<Lote>
+     */
+    private function lotesDelContrato(int $principal, mixed $extras): array
+    {
+        $ids = [$principal];
+
+        if (is_array($extras)) {
+            foreach ($extras as $extra) {
+                if (is_numeric($extra)) {
+                    $ids[] = (int) $extra;
+                }
+            }
+        }
+
+        $ids = array_values(array_unique(array_filter($ids)));
+        $clave = implode(',', $ids);
+
+        /*
+         * El cuadro del resumen son cinco Placeholders y los cinco preguntan
+         * lo mismo. Sin esta memoria, abrir el formulario con tres lotes
+         * marcados son quince consultas para pintar cuatro numeros.
+         */
+        if (isset($this->lotesLeidos[$clave])) {
+            return $this->lotesLeidos[$clave];
+        }
+
+        $encontrados = [];
+
+        foreach (Lote::query()->whereIn('id', $ids)->get() as $lote) {
+            $encontrados[(int) $lote->getKey()] = $lote;
+        }
+
+        $lotes = [];
+
+        foreach ($ids as $id) {
+            if (isset($encontrados[$id])) {
+                $lotes[] = $encontrados[$id];
+            }
+        }
+
+        return $this->lotesLeidos[$clave] = $lotes;
+    }
+
+    /**
+     * Los otros lotes del proyecto que se pueden sumar a este movimiento.
+     *
+     * Para vender se listan los disponibles Y los apartados: un apartado a
+     * nombre del mismo titular se convierte y su seña cuenta como parte de
+     * la prima (R14); a nombre de otra persona lo rechaza el Service
+     * diciendo de quien es. Para apartar, solo los disponibles.
+     *
+     * ═══ LA LISTA SIEMPRE INCLUYE LO QUE YA ESTA ELEGIDO ═══
+     *
+     * Aunque hoy no califique. No es cortesia:
+     * `Select::getInValidationRuleValues()` devuelve un conjunto VACIO
+     * —nada permitido— cuando hay mas valores elegidos que etiquetas que
+     * sepa resolver (Select.php:1763). O sea que un lote que otro vendedor
+     * aparto mientras este armaba la pantalla no daria «ese lote ya no esta
+     * disponible» sino un formulario invalido entero, sin decir cual de
+     * todos. Se listan con su estado a la vista, y el Service es el que
+     * explica que paso.
+     *
+     * @return array<int, string>
+     */
+    private function otrosLotesVendibles(Get $get, bool $soloDisponibles = false): array
+    {
+        /** @var Proyecto $proyecto */
+        $proyecto = $this->getRecord();
+
+        $estados = $soloDisponibles
+            ? [EstadoLote::Disponible->value]
+            : [EstadoLote::Disponible->value, EstadoLote::Apartado->value];
+
+        $yaElegidos = $this->idsElegidos($get('lotes_extra'));
+
+        $lotes = Lote::query()
+            ->where('proyecto_id', $proyecto->getKey())
+            ->where(static function (Builder $consulta) use ($estados, $yaElegidos): void {
+                $consulta->whereIn('estado', $estados);
+
+                if ($yaElegidos !== []) {
+                    $consulta->orWhereIn('id', $yaElegidos);
+                }
+            })
+            ->whereKeyNot($this->entero(['id' => $get('lote_id')], 'id', 0))
+            ->orderBy('codigo')
+            ->get();
+
+        $opciones = [];
+
+        foreach ($lotes as $lote) {
+            $estado = $lote->getAttribute('estado');
+
+            $opciones[(int) $lote->getKey()] = sprintf(
+                '%s — %s vr²%s',
+                (string) $lote->getAttribute('codigo'),
+                Cuadros::conMiles(new Monto($this->areaDe($lote))->redondeado()),
+                $estado instanceof EstadoLote && $estado !== EstadoLote::Disponible
+                    ? sprintf(' (%s)', mb_strtolower($estado->etiqueta()))
+                    : '',
+            );
+        }
+
+        return $opciones;
+    }
+
+    /**
+     * Los clientes que pueden firmar ADEMAS del titular.
+     *
+     * El titular NO se ofrece. El indice unico (venta_id, cliente_id) del
+     * pivot lo rechazaria de todos modos, y ofrecer algo que se va a rechazar
+     * es una trampa: quien atiende no tiene por que saber que esa opcion, que
+     * ve ahi, no se puede elegir.
+     *
+     * El Service lo filtra igual: la pantalla puede quedar desincronizada
+     * —elegir copropietario y despues volverlo titular— y ahi el que manda
+     * es el de atras.
+     *
+     * @return array<int, string>
+     */
+    private function clientesMenosElTitular(Get $get): array
+    {
+        $titular = $this->entero(['id' => $get('cliente_id')], 'id', 0);
+        $elegidos = $this->idsElegidos($get('copropietarios'));
+        $opciones = [];
+
+        foreach (self::clientesDisponibles() as $id => $nombre) {
+            /*
+             * El titular no se OFRECE, pero si YA estaba elegido se sigue
+             * listando. Pasa de verdad: se marca a alguien como copropietario
+             * y despues se lo pone de titular.
+             *
+             * Sacarlo de las opciones con el estado todavia apuntandolo no
+             * daria «ese no puede ser copropietario» sino el formulario
+             * INVALIDO ENTERO, sin nombrar a nadie: Filament devuelve un
+             * conjunto vacio de valores permitidos cuando hay mas elegidos que
+             * etiquetas que sepa resolver. Se lista, se ve, se puede quitar —
+             * y si no se quita, el Service lo filtra igual.
+             */
+            if ($id !== $titular || in_array($id, $elegidos, true)) {
+                $opciones[$id] = $nombre;
+            }
+        }
+
+        return $opciones;
+    }
+
+    /**
+     * El titular primero; despues quienes firman con el, sin repetirlo.
+     *
+     * Si alguien elige a la misma persona como titular y como
+     * copropietaria, el indice unico (venta_id, cliente_id) del pivot la
+     * rechazaria con un error de base que no le dice nada a nadie. Se
+     * filtra aca, que es donde todavia se puede explicar.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return list<Cliente>
+     */
+    private function clientesDeLaVenta(Cliente $titular, array $data): array
+    {
+        $otros = [];
+        $copropietarios = $data['copropietarios'] ?? null;
+
+        if (is_array($copropietarios)) {
+            foreach ($copropietarios as $id) {
+                if (is_numeric($id) && (int) $id !== (int) $titular->getKey()) {
+                    $otros[] = (int) $id;
+                }
+            }
+        }
+
+        /** @var list<Cliente> $acompanantes */
+        $acompanantes = $otros === []
+            ? []
+            : Cliente::query()->whereIn('id', array_unique($otros))->get()->all();
+
+        return [$titular, ...$acompanantes];
+    }
+
+    /**
+     * Los codigos de los lotes, como se leen en una notificacion.
+     *
+     * @param list<Lote> $lotes
+     */
+    private function codigosDe(array $lotes): string
+    {
+        return implode(', ', array_map(
+            static fn (Lote $lote): string => (string) $lote->getAttribute('codigo'),
+            $lotes,
+        ));
+    }
+
+    /**
+     * El area de un lote como decimal en string. Nunca float (§8.3.1).
+     */
+    private function areaDe(Lote $lote): string
+    {
+        $area = $lote->getAttribute('area_varas');
+
+        return is_string($area) || is_int($area) ? (string) $area : '0';
+    }
+
+    /**
+     * Lo que se lee en la notificacion despues de firmar.
+     *
+     * @param list<Lote> $lotes
+     */
+    private function avisoDeVenta(Venta $venta, array $lotes, Cliente $titular, int $firmantes): string
+    {
+        return sprintf(
+            '%s vendido%s a %s%s. Contrato %s por %s.',
+            $this->codigosDe($lotes),
+            count($lotes) > 1 ? 's' : '',
+            (string) $titular->getAttribute('nombre'),
+            $firmantes > 1 ? sprintf(' y %d mas', $firmantes - 1) : '',
+            (string) $venta->getAttribute('numero_contrato'),
+            $venta->montoValorTotal()->formateado(),
+        );
     }
 
     private function primerPlan(): ?PlanDePago
@@ -735,6 +1472,9 @@ class VerPlano extends Page
             ->options(static fn (): array => self::clientesDisponibles())
             ->searchable()
             ->required()
+            // live: el selector de copropietarios saca de su lista a quien
+            // quede como titular, y para eso tiene que enterarse al toque.
+            ->live()
             ->createOptionForm($this->altaRapidaDeCliente())
             ->createOptionUsing(static fn (array $data): int => self::crearClienteRapido($data));
     }

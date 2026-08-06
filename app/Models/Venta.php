@@ -215,6 +215,62 @@ class Venta extends Model
      * funcion de agregacion, y tira un error 42803. MySQL lo dejaria pasar
      * en silencio; Postgres tiene razon y avisa.
      */
+    /**
+     * Lo que el cliente paga cada mes, agrupado en tramos.
+     *
+     * ═══ SALE DE LAS CUOTAS GUARDADAS, NO DE UN RECALCULO ═══
+     *
+     * El contrato es lo que está en `cuotas`. Recalcularlo acá abriría la
+     * puerta a que la pantalla diga un número y el papel diga otro.
+     *
+     * Con plazos distintos por lote el número BAJA solo: cuando el lote a 12
+     * meses termina de pagarse, a partir del mes 13 es una cuota menos. Es lo
+     * único que puede contestar «¿cuánto pago por mes?» sin mentir.
+     *
+     * @return list<array{desde: int, hasta: int, monto: Monto}>
+     */
+    public function tramosDeCuotas(): array
+    {
+        $porMes = Cuota::query()
+            ->where('venta_id', $this->getKey())
+            ->selectRaw('numero, SUM(monto) AS total')
+            ->groupBy('numero')
+            ->orderBy('numero')
+            ->pluck('total', 'numero');
+
+        // El tramo en curso vive en una variable y se reemplaza entero: tocarle
+        // una clave a un elemento de la lista le ensancha el tipo y `monto`
+        // deja de ser un Monto.
+        $tramos = [];
+        $actual = null;
+
+        foreach ($porMes as $numero => $total) {
+            $monto = new Monto(is_string($total) || is_int($total) ? (string) $total : '0');
+            $mes = (int) $numero;
+
+            if ($actual === null) {
+                $actual = ['desde' => $mes, 'hasta' => $mes, 'monto' => $monto];
+
+                continue;
+            }
+
+            if ($actual['monto']->igualA($monto)) {
+                $actual = ['desde' => $actual['desde'], 'hasta' => $mes, 'monto' => $actual['monto']];
+
+                continue;
+            }
+
+            $tramos[] = $actual;
+            $actual = ['desde' => $mes, 'hasta' => $mes, 'monto' => $monto];
+        }
+
+        if ($actual !== null) {
+            $tramos[] = $actual;
+        }
+
+        return $tramos;
+    }
+
     public function saldoPendiente(): Monto
     {
         /** @var string|int|null $suma */

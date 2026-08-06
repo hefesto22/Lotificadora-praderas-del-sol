@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Ventas\Schemas;
 
 use App\Domain\Enums\EstadoVenta;
+use App\Domain\ValueObjects\Monto;
+use App\Filament\Support\Cuadros;
 use App\Models\Compromiso;
 use App\Models\Venta;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Support\HtmlString;
 
 /**
  * La ficha que se mira cuando el cliente pregunta por su expediente.
@@ -61,21 +64,37 @@ class VentaInfolist
                                 ->implode(' · ')),
                     ]),
 
+                /*
+                 * Un renglón por lote, con SU plazo y SU cuota: desde el
+                 * 5-ago-2026 un contrato puede llevar el primero a 12 meses y
+                 * el tercero a 48. El cuadro es el mismo que se ve en el plano
+                 * antes de firmar —lo arma Cuadros—, para que el papel y la
+                 * pantalla no puedan decir cosas distintas.
+                 */
                 Section::make('Lotes')
                     ->icon('heroicon-o-map')
-                    ->description('Área, precio y valor quedaron congelados al firmar.')
+                    ->description('Área, precio, plazo y valor quedaron congelados al firmar.')
                     ->schema([
                         TextEntry::make('compromisos')
-                            ->label('Lotes del contrato')
-                            ->getStateUsing(static fn (Venta $record): string => $record->compromisos
-                                ->map(static fn (Compromiso $c): string => sprintf(
-                                    '%s — %s vr² — %s',
-                                    (string) $c->lote?->getAttribute('codigo'),
-                                    (string) $c->getAttribute('area_varas'),
-                                    $c->montoValor()->formateado(),
-                                ))
-                                ->implode("\n"))
-                            ->listWithLineBreaks(),
+                            ->hiddenLabel()
+                            // array_values: `Collection::all()` devuelve
+                            // array<int, ...> y Cuadros pide una lista.
+                            ->getStateUsing(static fn (Venta $record): HtmlString => Cuadros::lotes(
+                                array_values($record->compromisos
+                                    ->map(static fn (Compromiso $c): array => [
+                                        'codigo' => (string) $c->lote?->getAttribute('codigo'),
+                                        'area'   => (string) $c->getAttribute('area_varas'),
+                                        'plazo'  => (int) $c->getAttribute('plazo_meses'),
+                                        'precio' => new Monto((string) $c->getAttribute('precio_vara')),
+                                        'valor'  => $c->montoValor(),
+                                        'prima'  => new Monto((string) ($c->getAttribute('prima') ?? '0')),
+                                        'cuota'  => $c->cuotas()->value('monto') === null
+                                            ? null
+                                            : new Monto((string) $c->cuotas()->value('monto')),
+                                    ])
+                                    ->all()),
+                                'Este contrato no tiene lotes.',
+                            )),
                     ]),
 
                 Section::make('Dinero')
@@ -100,12 +119,13 @@ class VentaInfolist
                             ->getStateUsing(static fn (Venta $record): string => $record->saldoPendiente()->formateado()),
 
                         TextEntry::make('cuota_mensual')
-                            ->label('Cuota mensual')
-                            ->formatStateUsing(static fn (Venta $record): string => $record->montoCuotaMensual()?->formateado() ?? 'Venta de contado'),
+                            ->label('Primer mes')
+                            ->formatStateUsing(static fn (Venta $record): string => $record->montoCuotaMensual()?->formateado() ?? 'Venta de contado')
+                            ->helperText('Lo más alto: es lo que paga mientras todos los lotes siguen vivos.'),
 
                         TextEntry::make('plazo_meses')
-                            ->label('Plazo')
-                            ->formatStateUsing(static fn (int $state): string => $state === 0 ? 'Contado' : $state.' meses'),
+                            ->label('Hasta')
+                            ->formatStateUsing(static fn (int $state): string => $state === 0 ? 'Contado' : 'el mes '.$state),
 
                         TextEntry::make('dia_pago')
                             ->label('Día de pago')
@@ -115,6 +135,15 @@ class VentaInfolist
                             ->label('Cuotas por pagar')
                             ->getStateUsing(static fn (Venta $record): string => $record->cuotas()->pendientes()->count()
                                 .' de '.$record->cuotas()->count()),
+
+                        /*
+                         * La escalera. Sale de las CUOTAS GUARDADAS y no de un
+                         * recálculo: el contrato es lo que está en la base.
+                         */
+                        TextEntry::make('escalera')
+                            ->label('Lo que paga por mes')
+                            ->columnSpanFull()
+                            ->getStateUsing(static fn (Venta $record): HtmlString => Cuadros::escalera($record->tramosDeCuotas())),
                     ]),
 
                 Section::make('Observaciones')

@@ -7,6 +7,7 @@ namespace App\Filament\Resources\Ventas;
 use App\Filament\Resources\Ventas\Pages\CreateVenta;
 use App\Filament\Resources\Ventas\Pages\ListVentas;
 use App\Filament\Resources\Ventas\Pages\ViewVenta;
+use App\Filament\Resources\Ventas\RelationManagers\CuotasRelationManager;
 use App\Filament\Resources\Ventas\Schemas\VentaForm;
 use App\Filament\Resources\Ventas\Schemas\VentaInfolist;
 use App\Filament\Resources\Ventas\Tables\VentasTable;
@@ -117,7 +118,9 @@ class VentaResource extends Resource
     #[Override]
     public static function getRelations(): array
     {
-        return [];
+        return [
+            CuotasRelationManager::class,
+        ];
     }
 
     /**
