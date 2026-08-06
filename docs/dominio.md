@@ -272,6 +272,26 @@ se reemplazan. Queda registrado que hubo una reprogramación, con su motivo.
   alternativa (absorber el parcial y recalcular todo) deja aplicaciones de pago colgando de
   cuotas borradas, y ahí «¿por qué la 5 aparece a medias?» deja de tener respuesta.
 
+**Construido el 6-ago-2026.** Lo que se decidió al escribirlo:
+
+| Qué | Cómo quedó |
+|---|---|
+| Dónde queda la constancia | Tabla `reprogramaciones`, con el plan viejo completo en una columna `jsonb`. Se descartó archivar las cuotas viejas en la misma tabla —obligaba a tocar el índice único, el FIFO y todo scope que lee `cuotas` sin filtro— y se descartó dejarlo solo en la bitácora, que guarda propiedades sueltas sin forma declarada |
+| El motivo | **Obligatorio**, y lo hace cumplir un CHECK, igual que el descuento de R4 |
+| El recibo | **Uno solo**, de concepto `abono_capital`. Lleva sus aplicaciones por la parte que puso al día; lo que bajó el capital es `monto − suma de aplicaciones`. El cliente entregó un dinero y se lleva un papel |
+| Quién puede | Solo la administradora, con permiso propio `Reprogramar:Venta`. El receptor cobra (`Create:Recibo`) pero no reescribe un plan firmado |
+| Si no alcanza para lo vencido | Se registra igual **como pago normal** y una notificación explica que no hubo reprogramación. El dinero ya está sobre el mostrador |
+
+**El tope del abono no es el saldo del lote.** Solo se puede abonar hasta *lo vencido + lo que
+se puede reprogramar*. Lo que le falta a una cuota pagada a medias queda afuera: respetarla
+significa no tocarla, ni siquiera para cobrarla de paso. Cancelar el lote entero se hace por
+«Registrar un pago», que cubre todo FIFO sin reescribir nada.
+
+**El calendario no se mueve.** La primera cuota nueva vence el día en que vencía la primera que
+se reemplaza, y la numeración sigue desde ahí (`cuotas_numero_por_lote_uidx` no admitiría
+empezar de nuevo en 1, y el recibo viejo quedaría apuntando a una cuota 5 que ahora significa
+otra cosa). Lo que cambia es cuánto o cuántas, nunca cuándo.
+
 **R22 · La rescisión es POR LOTE, no por contrato.** *(reunión del 6-ago-2026)* «Dio la prima,
 pagó dos meses y ya no quiere el lote». Si el contrato lleva tres lotes y devuelve uno, se
 rescinde **ese lote**: sus cuotas pendientes se cancelan, vuelve a estar disponible en el plano
