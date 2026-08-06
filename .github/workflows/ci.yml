@@ -6,6 +6,16 @@ on:
   pull_request:
     branches: [main, develop]
 
+  # Disparo manual, con `gh workflow run CI --ref main` o desde Actions.
+  #
+  # Por que hace falta: el 6-ago-2026 GitHub dejo de asignar runners dos veces
+  # seguidas. Un run quedo 18 minutos «en progreso» con la seccion JOBS vacia
+  # —nunca le asignaron maquina— y un push posterior directamente no genero
+  # run. Sin `workflow_dispatch`, la unica forma de relanzar sobre el HEAD
+  # actual es inventar un commit vacio, que ensucia la historia por un
+  # problema que no es del codigo.
+  workflow_dispatch:
+
 permissions:
   contents: read
 
