@@ -73,10 +73,18 @@ vencimiento. El estado de cuenta **muestra los días de atraso y las cuotas venc
 información que la administración necesita— pero **no genera ningún cargo**. No hay columna
 de mora, ni tarea programada que la calcule cada noche, ni acumulación silenciosa.
 
-**R3 · El abono extraordinario acorta el plazo.** El monto de la cuota pactada **nunca
+**R3 · El abono extraordinario acorta el plazo…** El monto de la cuota pactada **nunca
 cambia**. Al aplicar un abono a capital se recalculan las cuotas pendientes con el mismo monto
 de siempre, y la última queda por el residuo. El cliente sigue pagando lo mismo cada mes y
 termina antes.
+
+> ⚠️ **…pero desde el 6-ago-2026 no es la única opción.** La contratante agregó en la reunión
+> que el cliente **elige**: acortar el plazo (esto) o bajar la cuota manteniendo los meses. Los
+> dos caminos viven en R21, que es el que manda.
+>
+> R3 se queda escrito porque sigue siendo el **default** y porque explica los dos bordes de
+> abajo, que valen para cualquiera de los dos caminos. Lo que dejó de ser cierto es el «nunca
+> cambia»: cambia si el cliente lo pide.
 
 Dos bordes que hay que cerrar en el código:
 
@@ -119,6 +127,9 @@ hay que explicar.
 cliente: eso se negocia caso por caso. Lo que sí hace es registrar la liquidación —monto
 devuelto, monto retenido, motivo y quién autorizó—, cerrar el compromiso como `rescindido` y
 dejarlo en la historia del lote. El estado `Rescindido` ya existe en `EstadoCompromiso`.
+
+La reunión del 6-ago-2026 precisó **el alcance**: se rescinde un lote, no el contrato entero
+(R22). R6 sigue diciendo *cómo* se liquida; R22 dice *sobre qué*.
 
 ### Contratos y expedientes
 
@@ -209,6 +220,57 @@ antes de firmar, primero se aparta el lote (R14) y el abono entra contra ese apa
 
 > **Por qué importa:** elimina de raíz la conciliación de pagos huérfanos, que es donde estos
 > sistemas se ensucian con los años.
+
+**R19 · Una cuota se paga en varias veces.** *(reunión del 6-ago-2026)* No siempre pagan la
+cuota completa de un tirón: pagan un mes en dos o tres partes, dentro del mismo mes. El sistema
+registra cada pago por separado y los va acumulando contra la cuota; lo que falta se arrastra.
+
+No hay mora (R2), así que una cuota parcialmente pagada no genera ningún cargo: el cliente debe
+exactamente lo que le falta. `monto_pagado` sube, `estado` no existe como columna — se calcula
+(§9.D5).
+
+**R20 · Una cuota a la que le falta poco se puede dar por cerrada, con motivo.**
+*(reunión del 6-ago-2026 — regla confirmada, construcción diferida)*
+
+> El comportamiento base es R19: lo que falta **queda debiendo, sin cargo**, y nadie lo persigue.
+> Eso es lo que se construye primero. La condonación de abajo es un añadido que cuelga del
+> módulo de pagos y entra cuando ese esté andando: sin pagos registrados no hay saldo chico que
+> perdonar. Faltan L 15.00 y no se le van a cobrar. El receptor cierra la cuota
+y **escribe por qué**; queda con su usuario y su fecha, igual que un descuento (R4).
+
+Es una **condonación**, no un redondeo automático: el sistema no perdona plata solo. Se decidió
+así sobre dos alternativas peores — dejar el saldo colgando para siempre (el estado de cuenta
+nunca llega a cero y quien lo lea va a preguntar) o un tope automático (el sistema perdonando
+sin que una persona lo decida y sin que quede quién fue).
+
+**R21 · Abono a capital, y el cliente elige qué pasa con la cuota.**
+*(reunión del 6-ago-2026)* Un abono extraordinario baja el saldo, y ahí hay dos caminos y los
+elige el cliente:
+
+- **misma cantidad de cuotas, cuota más baja** — se reparte el saldo nuevo en los meses que
+  quedaban;
+- **misma cuota, menos meses** — se termina antes.
+
+El abono se aplica **a un lote**, y lo elige quien recibe. Con plazos distintos por lote (R22)
+no hay forma de adivinarlo: el cliente que abona está pensando en un lote concreto, casi
+siempre el que quiere terminar de pagar primero. Repartirlo entre todos recalcularía tres
+cuotas de golpe y le movería números que no pidió tocar.
+
+Recalcular **reescribe el plan de ese lote**: las cuotas ya pagadas no se tocan, las pendientes
+se reemplazan. Queda registrado que hubo una reprogramación, con su motivo.
+
+**R22 · La rescisión es POR LOTE, no por contrato.** *(reunión del 6-ago-2026)* «Dio la prima,
+pagó dos meses y ya no quiere el lote». Si el contrato lleva tres lotes y devuelve uno, se
+rescinde **ese lote**: sus cuotas pendientes se cancelan, vuelve a estar disponible en el plano
+y el expediente sigue vivo con los otros dos, con su saldo recalculado.
+
+Con un solo lote equivale a anular el contrato entero, así que el mismo trámite cubre los dos
+casos. La alternativa —anular todo siempre— obligaría a rehacer a mano el contrato del cliente
+que se queda con dos lotes, y con un número nuevo.
+
+Al rescindir **se pregunta cuánto se le devolvió**, y la respuesta puede ser cero. No se calcula
+solo: cuánto se devuelve lo decide la administración caso por caso, y lo que el sistema tiene
+que hacer es dejar constancia de cuánto entró, cuánto salió y quién lo autorizó.
 
 ### Apartados
 
