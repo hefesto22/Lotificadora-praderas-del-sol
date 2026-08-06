@@ -39,6 +39,17 @@ use Countable;
  *     → saldo L 250,000.00 en 72 cuotas
  *     → 71 de L 3,472.22 + ultima de L 3,472.38 = L 250,000.00 exacto
  *
+ * ═══ LOS TRES CONSTRUCTORES, Y CUAL USA CADA UNO ═══
+ *
+ * - `nuevo()`      — la venta que se firma. Valor, prima y plazo.
+ * - `porCuotaFija()` — R21, camino «misma cuota, menos meses». La cuota es
+ *   un dato de entrada y lo que se calcula es cuantas faltan.
+ * - `porPlazoFijo()` — R21, camino «mismos meses, cuota mas baja». Los meses
+ *   son el dato de entrada y lo que se calcula es la cuota.
+ *
+ * Los tres terminan en el mismo `armar()`, asi que el residuo se reparte
+ * igual en los tres y el golden test los cubre a todos.
+ *
  * ═══ POR QUE ES UN VALUE OBJECT Y NO UN SERVICE ═══
  *
  * No escribe nada, no depende de nada y se puede construir mil veces por
@@ -101,44 +112,24 @@ final readonly class PlanDeCuotas implements Countable
             return new self([], $saldo);
         }
 
-        self::verificarPlazo($plazoMeses);
-        self::verificarDiaDePago($diaPago);
-
-        $base = new Monto($saldo->dividirPor($plazoMeses)->redondeado());
-        $acumuladoPrevio = $base->multiplicarPor($plazoMeses - 1);
-
-        /*
-         * Con un saldo chico y un plazo largo, el redondeo hacia arriba de
-         * cada cuota puede acumular mas que el saldo entero y dejar la
-         * ultima en cero o negativa. Pasa recien cuando la cuota cae a
-         * centavos —financiar L 17 a 60 meses—, pero pasa. Se para aca en
-         * vez de emitir un plan que no cierra.
-         */
-        if (! $saldo->mayorQue($acumuladoPrevio)) {
-            throw PlanDeCuotasInvalidoException::porSaldoDemasiadoChicoParaElPlazo($saldo, $plazoMeses);
-        }
-
-        $ultima = $saldo->restar($acumuladoPrevio);
-
-        return new self(
-            self::armar($base, $ultima, $plazoMeses, $diaPago, $fechaContrato->addMonthsNoOverflow(1)),
-            $saldo,
-        );
+        return self::porPlazoFijo($saldo, $plazoMeses, $diaPago, $fechaContrato->addMonthsNoOverflow(1));
     }
 
     /**
-     * El plan que queda despues de un abono extraordinario a capital (R3).
+     * El plan que queda despues de un abono, acortando el plazo (R21).
      *
-     * La contratante fue explicita: **se acorta el plazo, no se baja la
-     * cuota**. El cliente sigue pagando lo mismo cada mes y termina antes.
-     * Por eso aca la cuota es un dato de entrada —la pactada, que no
-     * cambia nunca— y lo que se calcula es cuantas faltan.
+     * Es el default historico —lo que la contratante contesto en el
+     * cuestionario (R3)— y desde el 6-ago-2026 uno de dos caminos: el
+     * cliente puede pedir el otro, `porPlazoFijo()`.
      *
-     * La ultima vuelve a absorber el residuo, y por construccion queda
-     * menor o igual que la cuota pactada.
+     * La cuota es un dato de entrada —la pactada, que en este camino no
+     * cambia nunca— y lo que se calcula es cuantas faltan. La ultima
+     * vuelve a absorber el residuo, y por construccion queda menor o igual
+     * que la cuota pactada.
      *
      * @param CarbonImmutable $mesDelPrimerVencimiento cualquier dia del mes
      *                                                 en que cae la proxima cuota
+     * @param int $primerNumero con que numero arranca el plan; ver `armar()`
      *
      * @throws PlanDeCuotasInvalidoException
      */
@@ -147,6 +138,7 @@ final readonly class PlanDeCuotas implements Countable
         Monto $cuota,
         int $diaPago,
         CarbonImmutable $mesDelPrimerVencimiento,
+        int $primerNumero = 1,
     ): self {
         if ($cuota->esCero()) {
             throw PlanDeCuotasInvalidoException::porCuotaEnCero();
@@ -165,7 +157,74 @@ final readonly class PlanDeCuotas implements Countable
         $ultima = $saldo->restar($acumuladoPrevio);
 
         return new self(
-            self::armar($cuota, $ultima, $cantidad, $diaPago, $mesDelPrimerVencimiento),
+            self::armar($cuota, $ultima, $cantidad, $diaPago, $mesDelPrimerVencimiento, $primerNumero),
+            $saldo,
+        );
+    }
+
+    /**
+     * El plan que queda despues de un abono, bajando la cuota (R21).
+     *
+     * El otro camino, agregado en la reunion del 6-ago-2026: **mismos
+     * meses, cuota mas baja**. El saldo nuevo se reparte entre los meses
+     * que quedaban, asi que el cliente termina el mismo mes que tenia
+     * pactado pero paga menos cada uno.
+     *
+     * Tambien es el motor de `nuevo()`: una venta que se firma es esto
+     * mismo, con el saldo ya descontada la prima y el primer vencimiento
+     * en el mes siguiente al contrato.
+     *
+     * @param CarbonImmutable $mesDelPrimerVencimiento cualquier dia del mes
+     *                                                 en que cae la proxima cuota
+     * @param int $primerNumero con que numero arranca el plan; ver `armar()`
+     *
+     * @throws PlanDeCuotasInvalidoException
+     */
+    public static function porPlazoFijo(
+        Monto $saldo,
+        int $plazoMeses,
+        int $diaPago,
+        CarbonImmutable $mesDelPrimerVencimiento,
+        int $primerNumero = 1,
+    ): self {
+        // Saldo en cero: el abono cancelo lo que quedaba. Plan vacio, sin
+        // cuotas de L 0.00 colgando — el mismo borde que R3 fija arriba.
+        if ($saldo->esCero()) {
+            return new self([], $saldo);
+        }
+
+        self::verificarPlazo($plazoMeses);
+        self::verificarDiaDePago($diaPago);
+
+        $base = new Monto($saldo->dividirPor($plazoMeses)->redondeado());
+
+        /*
+         * Una cuota base de L 0.00 sale de dividir centavos entre muchos
+         * meses. Antes esto pasaba de largo y lo frenaba el CHECK
+         * `cuotas_monto_positivo_chk` de la base, o sea un error de Postgres
+         * en la cara del usuario en vez de una frase que diga que hacer.
+         */
+        if ($base->esCero()) {
+            throw PlanDeCuotasInvalidoException::porSaldoDemasiadoChicoParaElPlazo($saldo, $plazoMeses);
+        }
+
+        $acumuladoPrevio = $base->multiplicarPor($plazoMeses - 1);
+
+        /*
+         * Con un saldo chico y un plazo largo, el redondeo hacia arriba de
+         * cada cuota puede acumular mas que el saldo entero y dejar la
+         * ultima en cero o negativa. Pasa recien cuando la cuota cae a
+         * centavos —financiar L 17 a 60 meses—, pero pasa. Se para aca en
+         * vez de emitir un plan que no cierra.
+         */
+        if (! $saldo->mayorQue($acumuladoPrevio)) {
+            throw PlanDeCuotasInvalidoException::porSaldoDemasiadoChicoParaElPlazo($saldo, $plazoMeses);
+        }
+
+        $ultima = $saldo->restar($acumuladoPrevio);
+
+        return new self(
+            self::armar($base, $ultima, $plazoMeses, $diaPago, $mesDelPrimerVencimiento, $primerNumero),
             $saldo,
         );
     }
@@ -224,6 +283,15 @@ final readonly class PlanDeCuotas implements Countable
     // ─── Interno ──────────────────────────────────────────────────────
 
     /**
+     * ═══ POR QUE EL PLAN NO SIEMPRE EMPIEZA EN 1 ═══
+     *
+     * Una venta nueva numera desde 1 y ese es el caso normal. Una
+     * reprogramacion (R21) no: las cuotas ya pagadas —y la que quedo a
+     * medias— se respetan tal como estan, y el plan nuevo empieza en la
+     * siguiente. Si renumerara desde 1 chocaria contra el indice unico
+     * `cuotas_numero_por_lote_uidx` y, peor, el recibo viejo quedaria
+     * apuntando a una cuota 5 que ahora significa otra cosa.
+     *
      * @return list<CuotaProyectada>
      */
     private static function armar(
@@ -232,13 +300,14 @@ final readonly class PlanDeCuotas implements Countable
         int $cantidad,
         int $diaPago,
         CarbonImmutable $mesDelPrimerVencimiento,
+        int $primerNumero,
     ): array {
         $mesCero = $mesDelPrimerVencimiento->startOfMonth();
         $cuotas = [];
 
         for ($i = 0; $i < $cantidad; $i++) {
             $cuotas[] = new CuotaProyectada(
-                numero: $i + 1,
+                numero: $primerNumero + $i,
                 vencimiento: self::vencimiento($mesCero, $i, $diaPago),
                 monto: $i === $cantidad - 1 ? $ultima : $base,
             );

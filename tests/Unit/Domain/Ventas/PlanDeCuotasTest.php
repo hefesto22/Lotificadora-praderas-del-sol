@@ -336,3 +336,157 @@ it('cierra exacto tras cualquier abono, en cualquier punto del plan', function (
             ->and($plan->ultima()?->monto->mayorQue($cuota))->toBeFalse();
     }
 });
+
+/*
+|--------------------------------------------------------------------------
+| R21 · El otro camino: mismos meses, cuota mas baja
+|--------------------------------------------------------------------------
+| La contratante agrego en la reunion del 6-ago-2026 que el cliente ELIGE.
+| `porCuotaFija` de arriba es «misma cuota, menos meses» (el default
+| historico, R3); `porPlazoFijo` es el otro.
+|
+| Los numeros salen del mismo lote de siempre: 250 vr² a L 1,400.00 son
+| L 350,000.00, con L 50,000.00 de prima quedan L 300,000.00 a 12 meses, o
+| sea cuotas de L 25,000.00 exactas. Se pueden verificar sin calculadora.
+*/
+
+describe('Bajar la cuota manteniendo los meses', function (): void {
+    it('reparte el saldo nuevo entre los meses que quedaban', function (): void {
+        // Quedaban 8 cuotas de L 25,000.00 (L 200,000.00) y abono L 40,000.00.
+        $plan = PlanDeCuotas::porPlazoFijo(
+            saldo: new Monto('160000.00'),
+            plazoMeses: 8,
+            diaPago: 5,
+            mesDelPrimerVencimiento: CarbonImmutable::parse('2027-01-01'),
+        );
+
+        expect($plan)->toHaveCount(8)
+            ->and($plan->cuotaMensual())->toBeMonto('20000.00')
+            ->and($plan->total())->toBeMonto('160000.00')
+            ->and($plan->cierraExacto())->toBeTrue();
+    });
+
+    it('manda el residuo a la ultima, igual que los otros dos constructores', function (): void {
+        $plan = PlanDeCuotas::porPlazoFijo(
+            saldo: new Monto('100000.00'),
+            plazoMeses: 7,
+            diaPago: 5,
+            mesDelPrimerVencimiento: CarbonImmutable::parse('2027-01-01'),
+        );
+
+        // 100000 / 7 = 14285.714... → 14285.71 x 6 = 85714.26, residuo 14285.74
+        expect($plan->cuotaMensual())->toBeMonto('14285.71')
+            ->and($plan->ultima()?->monto)->toBeMonto('14285.74')
+            ->and($plan->cierraExacto())->toBeTrue();
+    });
+
+    it('cierra exacto en cualquier combinacion de saldo y meses', function (): void {
+        $saldos = ['160000.00', '199999.99', '123456.78', '87654.32', '1.03', '50000.01'];
+        $plazos = [1, 2, 3, 7, 12, 24, 47, 60];
+
+        foreach ($saldos as $saldo) {
+            foreach ($plazos as $plazo) {
+                try {
+                    $plan = PlanDeCuotas::porPlazoFijo(
+                        saldo: new Monto($saldo),
+                        plazoMeses: $plazo,
+                        diaPago: 15,
+                        mesDelPrimerVencimiento: CarbonImmutable::parse('2027-01-01'),
+                    );
+                } catch (PlanDeCuotasInvalidoException) {
+                    // L 1.03 en 60 meses no da un plan: da 60 cuotas de un
+                    // centavo y pico que no cierran. Rechazarlo es el
+                    // comportamiento correcto, no un agujero del test.
+                    continue;
+                }
+
+                expect($plan->cierraExacto())->toBeTrue("No cierra: saldo {$saldo}, plazo {$plazo}");
+            }
+        }
+    });
+
+    /*
+    | El agujero que este constructor tapo: una cuota base de L 0.00 pasaba de
+    | largo y la frenaba el CHECK `cuotas_monto_positivo_chk` de Postgres. O
+    | sea un error de base de datos en la cara del usuario, en vez de una
+    | frase que le diga que hacer.
+    */
+    it('rechaza un saldo de centavos repartido entre muchos meses', function (): void {
+        PlanDeCuotas::porPlazoFijo(
+            saldo: new Monto('0.05'),
+            plazoMeses: 12,
+            diaPago: 5,
+            mesDelPrimerVencimiento: CarbonImmutable::parse('2027-01-01'),
+        );
+    })->throws(PlanDeCuotasInvalidoException::class);
+
+    it('devuelve un plan vacio si el abono cancelo el saldo', function (): void {
+        $plan = PlanDeCuotas::porPlazoFijo(
+            saldo: Monto::cero(),
+            plazoMeses: 8,
+            diaPago: 5,
+            mesDelPrimerVencimiento: CarbonImmutable::parse('2027-01-01'),
+        );
+
+        // Ninguna cuota de L 0.00 colgando (R3).
+        expect($plan)->toHaveCount(0)
+            ->and($plan->cuotaMensual())->toBeNull()
+            ->and($plan->cierraExacto())->toBeTrue();
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| R21 · Un plan reprogramado no empieza en la cuota 1
+|--------------------------------------------------------------------------
+| Las cuotas pagadas —y la que quedo a medias— se respetan tal como estan, y
+| el plan nuevo empieza en la siguiente. Renumerar desde 1 chocaria contra el
+| indice unico `cuotas_numero_por_lote_uidx` y dejaria el recibo viejo
+| apuntando a una cuota 5 que ahora significa otra cosa.
+*/
+
+describe('Numerar desde donde arranca el plan nuevo', function (): void {
+    it('sigue la numeracion del lote al acortar el plazo', function (): void {
+        $plan = PlanDeCuotas::porCuotaFija(
+            saldo: new Monto('75000.00'),
+            cuota: new Monto('25000.00'),
+            diaPago: 5,
+            mesDelPrimerVencimiento: CarbonImmutable::parse('2027-02-01'),
+            primerNumero: 6,
+        );
+
+        $numeros = array_map(static fn (CuotaProyectada $cuota): int => $cuota->numero, $plan->cuotas);
+
+        expect($numeros)->toBe([6, 7, 8])
+            ->and($plan->cuotas[0]->vencimiento->toDateString())->toBe('2027-02-05');
+    });
+
+    it('sigue la numeracion del lote al bajar la cuota', function (): void {
+        $plan = PlanDeCuotas::porPlazoFijo(
+            saldo: new Monto('60000.00'),
+            plazoMeses: 4,
+            diaPago: 5,
+            mesDelPrimerVencimiento: CarbonImmutable::parse('2027-02-01'),
+            primerNumero: 9,
+        );
+
+        $numeros = array_map(static fn (CuotaProyectada $cuota): int => $cuota->numero, $plan->cuotas);
+
+        expect($numeros)->toBe([9, 10, 11, 12])
+            ->and($plan->cuotaMensual())->toBeMonto('15000.00');
+    });
+
+    it('empieza en 1 cuando nadie pide otra cosa', function (): void {
+        $plan = PlanDeCuotas::nuevo(
+            valorTotal: new Monto('350000.00'),
+            prima: new Monto('50000.00'),
+            plazoMeses: 12,
+            diaPago: 5,
+            fechaContrato: CarbonImmutable::parse('2026-08-06'),
+        );
+
+        expect($plan->cuotas[0]->numero)->toBe(1)
+            ->and($plan->ultima()?->numero)->toBe(12)
+            ->and($plan->cuotaMensual())->toBeMonto('25000.00');
+    });
+});
