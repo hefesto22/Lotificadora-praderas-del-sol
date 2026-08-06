@@ -107,6 +107,41 @@ lote. No hay que inventarlo.
    caja lleva autorización explícita: «el dinero no debería salir de la caja
    por un vencimiento de calendario».
 
+### 4. Un recibo POR LOTE, no uno por pago (6-ago-2026)
+
+Alguien aparta tres lotes y entrega L 15,000.00 de una vez. Salen **tres
+recibos de L 5,000.00**, uno por apartado.
+
+Rompe con el criterio del abono a capital —«un pago, un papel»— y a propósito:
+`recibos.compromiso_id` apunta a UN compromiso, y el apartado es del lote. Si
+mañana se libera uno solo de los tres y hay que devolver su seña, el papel que
+la respalda existe y dice exactamente L 5,000.00. Con un recibo por los
+L 15,000.00 haría falta una tabla pivot `recibo_compromiso`, y la devolución
+parcial habría que calcularla en vez de leerla.
+
+### El inventario, para no volver a levantarlo
+
+`RegistroDeCompromisos` **no tiene constructor** y hay que inyectarle
+`ConsumoDeCorrelativos` para que pueda numerar el recibo. Eso rompe **seis
+llamadores** que lo instancian con `new`:
+
+| Archivo | Línea |
+|---|---|
+| `VerPlano.php` — apartarVarios | 284 |
+| `VerPlano.php` — liberar | 566 |
+| `RegistroDeCompromisosTest.php` | 30 |
+| `VenderDesdeElPlanoTest.php` | 339, 442, 464 |
+
+Todos pasan a `app(RegistroDeCompromisos::class)`, que es lo que manda el
+§9.C1 de todos modos.
+
+Y `apartar()` necesita **forma de pago y referencia** —lo exige el CHECK
+`recibos_referencia_cuando_hace_falta_chk` (R11)— así que el modal del plano
+suma dos campos. Ojo: **cuatro tests disparan ese modal**
+(`VenderDesdeElPlanoTest`, líneas 370, 393, 413, 445) pasando solo
+`cliente_id`. Si `forma_pago` queda requerido sin default en `fillForm`, los
+cuatro se caen.
+
 ### Cómo conviene partirlo
 
 - **Primero el dinero que entra**: recibo de seña al apartar, recibo de prima
