@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Exceptions;
 
+use App\Domain\Enums\FormaDePago;
 use App\Domain\ValueObjects\Monto;
 
 /**
@@ -85,6 +86,35 @@ final class CompromisoInvalidoException extends GrupoOlympoException
             "El lote {$codigo} se esta vendiendo a {$pactado->formateado()} la vara² cuando ".
             "el precio de lista es {$lista->formateado()}. Un precio menor se puede registrar, ".
             'pero hay que escribir el motivo: queda anotado con el usuario y la fecha.'
+        );
+    }
+
+    /**
+     * R11: la seña es dinero, y el dinero entra de una forma conocida.
+     *
+     * No se asume efectivo. Un apartado pagado por transferencia y grabado
+     * como efectivo es un recibo que nunca va a cruzar contra el banco, y el
+     * error se descubre meses despues, cuando ya nadie se acuerda de como
+     * fue.
+     */
+    public static function porSeniaSinFormaDePago(string $codigo, Monto $senia): self
+    {
+        return new self(
+            "La seña de {$senia->formateado()} del lote {$codigo} no dice como entro. Hay que ".
+            'elegir efectivo, transferencia o deposito: es lo que va impreso en el recibo que '.
+            'se lleva el cliente.'
+        );
+    }
+
+    /**
+     * R11: sin numero de referencia no hay con que cruzarlo contra el banco.
+     */
+    public static function porSeniaSinReferencia(string $codigo, FormaDePago $forma): self
+    {
+        return new self(
+            "La seña del lote {$codigo} entro por ".mb_strtolower($forma->etiqueta()).' y falta el '.
+            'numero de referencia. Es lo unico que despues permite encontrar ese movimiento en '.
+            'el estado de cuenta del banco; en efectivo no hace falta.'
         );
     }
 }

@@ -4,14 +4,18 @@ declare(strict_types=1);
 
 namespace App\Domain\Ventas;
 
+use App\Domain\Correlativos\ConsumoDeCorrelativos;
+use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\EstadoCompromiso;
 use App\Domain\Enums\EstadoLote;
+use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\TipoCompromiso;
 use App\Domain\Exceptions\CompromisoInvalidoException;
 use App\Domain\ValueObjects\Monto;
 use App\Models\Cliente;
 use App\Models\Compromiso;
 use App\Models\Lote;
+use App\Models\Recibo;
 use App\Models\Venta;
 use Illuminate\Support\Facades\DB;
 
@@ -33,11 +37,38 @@ use Illuminate\Support\Facades\DB;
  * mismo numero; en una venta pueden no serlo, porque el precio se negocia
  * caso por caso (R4). Guardar solo el pactado haria imposible saber
  * despues cuanto se descontó, porque el precio de lista del lote cambia.
+ *
+ * ═══ Y ADEMAS NUMERA ═══
+ *
+ * Apartar cobra: la seña de R14 es dinero que entra, y desde el 6-ago-2026
+ * sale con su recibo. Por eso este Service recibe el correlativo — el
+ * numero se quema DENTRO de la misma transaccion que crea el compromiso,
+ * asi que un apartado que se cae no deja un hueco en la serie.
  */
 final readonly class RegistroDeCompromisos
 {
+    public function __construct(private ConsumoDeCorrelativos $correlativos) {}
+
     /**
      * Aparta un lote disponible a nombre de un cliente.
+     *
+     * ═══ LA SEÑA SE LLEVA SU PAPEL ═══
+     *
+     * Hasta ahora el cliente entregaba L 5,000.00 y se iba con las manos
+     * vacias: el monto quedaba en `monto_senia` y nada mas. Ahora, si hay
+     * seña, se emite un recibo de concepto `senia` colgado de ESTE
+     * compromiso — que es lo que despues deja reconocer esa plata como parte
+     * de la prima al firmar (R14).
+     *
+     * Sin seña no hay recibo, y no es un olvido: el CHECK
+     * `recibos_monto_positivo_chk` no admite un recibo de L 0.00, y un papel
+     * por cero no le sirve a nadie.
+     *
+     * Con seña, la forma de pago es OBLIGATORIA. No se asume efectivo: R11
+     * pide saber como entro cada lempira, y adivinarlo es exactamente lo que
+     * despues no deja cruzar el recibo contra el banco.
+     *
+     * @throws CompromisoInvalidoException
      */
     public function apartar(
         Lote $lote,
@@ -45,23 +76,53 @@ final readonly class RegistroDeCompromisos
         ?string $montoSenia = null,
         ?string $venceEl = null,
         ?string $observaciones = null,
+        ?FormaDePago $forma = null,
+        ?string $referencia = null,
     ): Compromiso {
         $estado = $this->estadoDe($lote);
+        $codigo = $this->codigoDe($lote);
 
         if ($estado !== EstadoLote::Disponible) {
-            throw CompromisoInvalidoException::porLoteNoDisponible($this->codigoDe($lote), $estado->etiqueta());
+            throw CompromisoInvalidoException::porLoteNoDisponible($codigo, $estado->etiqueta());
         }
 
-        return DB::transaction(function () use ($lote, $cliente, $montoSenia, $venceEl, $observaciones): Compromiso {
+        // Monto valida el tipo y rechaza negativos; de paso deja el string
+        // con los dos decimales de la columna.
+        $senia = $montoSenia === null ? null : new Monto($montoSenia);
+        $limpia = trim($referencia ?? '');
+
+        // Antes de abrir la transaccion: una llamada incompleta no tiene por
+        // que llegar a tocar la base.
+        $this->verificarLaSenia($codigo, $senia, $forma, $limpia);
+
+        return DB::transaction(function () use (
+            $lote,
+            $cliente,
+            $senia,
+            $venceEl,
+            $observaciones,
+            $forma,
+            $limpia
+        ): Compromiso {
             $compromiso = $this->crear($lote, $cliente, TipoCompromiso::Apartado, [
-                // Monto valida el tipo y rechaza negativos; de paso deja el
-                // string con los dos decimales de la columna.
-                'monto_senia'   => $montoSenia === null ? null : new Monto($montoSenia)->redondeado(),
+                'monto_senia'   => $senia?->redondeado(),
                 'vence_el'      => $venceEl,
                 'observaciones' => $observaciones,
             ]);
 
             $lote->update(['estado' => EstadoLote::Apartado]);
+
+            /*
+             * El numero es lo ULTIMO que se quema: para cuando se pide, el
+             * compromiso ya existe y el lote ya se movio.
+             *
+             * Los tres `instanceof` se repiten aca aunque `verificarLaSenia()`
+             * ya los haya mirado: el analisis estatico no cruza el borde de un
+             * closure, y de paso el metodo queda leible por si solo.
+             */
+            if ($senia instanceof Monto && ! $senia->esCero() && $forma instanceof FormaDePago) {
+                $this->emitirLaSenia($compromiso, $cliente, $senia, $forma, $limpia, $observaciones);
+            }
 
             return $compromiso;
         });
@@ -87,6 +148,14 @@ final readonly class RegistroDeCompromisos
      * son tres compromisos de L 5,000.00, no L 5,000.00 repartidos. Al
      * firmar, los tres cuentan como parte de la prima.
      *
+     * Y por lo tanto son TRES RECIBOS, cada uno con su numero. Es lo que
+     * pidio la contratante: el papel es del lote, y el dia que uno de los
+     * tres se libere hay que devolver una seña y no un tercio de otra cosa.
+     *
+     * La referencia, en cambio, puede ser la misma en los tres — una sola
+     * transferencia que cubre las tres señas es un caso normal, y por eso
+     * `recibos.referencia` no lleva indice unico.
+     *
      * @param list<Lote> $lotes
      *
      * @return list<Compromiso>
@@ -99,6 +168,8 @@ final readonly class RegistroDeCompromisos
         ?string $montoSenia = null,
         ?string $venceEl = null,
         ?string $observaciones = null,
+        ?FormaDePago $forma = null,
+        ?string $referencia = null,
     ): array {
         if ($lotes === []) {
             return [];
@@ -106,7 +177,15 @@ final readonly class RegistroDeCompromisos
 
         $ids = array_map(static fn (Lote $lote): int => (int) $lote->getKey(), $lotes);
 
-        return DB::transaction(function () use ($ids, $cliente, $montoSenia, $venceEl, $observaciones): array {
+        return DB::transaction(function () use (
+            $ids,
+            $cliente,
+            $montoSenia,
+            $venceEl,
+            $observaciones,
+            $forma,
+            $referencia
+        ): array {
             $frescos = Lote::query()
                 ->whereIn('id', $ids)
                 ->lockForUpdate()
@@ -116,7 +195,15 @@ final readonly class RegistroDeCompromisos
             $compromisos = [];
 
             foreach ($frescos as $lote) {
-                $compromisos[] = $this->apartar($lote, $cliente, $montoSenia, $venceEl, $observaciones);
+                $compromisos[] = $this->apartar(
+                    $lote,
+                    $cliente,
+                    $montoSenia,
+                    $venceEl,
+                    $observaciones,
+                    $forma,
+                    $referencia,
+                );
             }
 
             return $compromisos;
@@ -303,6 +390,71 @@ final readonly class RegistroDeCompromisos
             ->where('lote_id', $lote->getKey())
             ->vigentes()
             ->first();
+    }
+
+    /**
+     * Lo que se puede rechazar sin tocar la base.
+     *
+     * Sin seña no hay nada que verificar: apartar sin adelanto es legitimo
+     * —pasa cuando el cliente vuelve al dia siguiente con la plata— y no
+     * emite recibo.
+     *
+     * @throws CompromisoInvalidoException
+     */
+    private function verificarLaSenia(
+        string $codigo,
+        ?Monto $senia,
+        ?FormaDePago $forma,
+        string $referencia,
+    ): void {
+        if (! $senia instanceof Monto || $senia->esCero()) {
+            return;
+        }
+
+        if (! $forma instanceof FormaDePago) {
+            throw CompromisoInvalidoException::porSeniaSinFormaDePago($codigo, $senia);
+        }
+
+        if ($forma->exigeReferencia() && $referencia === '') {
+            throw CompromisoInvalidoException::porSeniaSinReferencia($codigo, $forma);
+        }
+    }
+
+    /**
+     * El recibo de la seña, con su numero de la serie unica (R12).
+     *
+     * Cuelga del COMPROMISO y no de una venta, porque al apartar todavia no
+     * hay expediente. El CHECK `recibos_cuelgan_de_un_compromiso_chk` se
+     * conforma con eso: lo que no admite es un recibo que no cuelgue de
+     * ninguno de los dos (R13).
+     *
+     * La fecha es la del compromiso y no `today()` otra vez: son el mismo
+     * hecho, y dos llamadas a `today()` a los dos lados de la medianoche
+     * dejarian un recibo fechado un dia despues del apartado que documenta.
+     *
+     * La referencia vacia se guarda como null y no como cadena vacia: el
+     * CHECK de R11 mira `btrim(referencia) <> ''`, asi que un espacio en
+     * blanco no cuenta como referencia.
+     */
+    private function emitirLaSenia(
+        Compromiso $compromiso,
+        Cliente $cliente,
+        Monto $senia,
+        FormaDePago $forma,
+        string $referencia,
+        ?string $observaciones,
+    ): void {
+        Recibo::query()->create([
+            'numero'        => $this->correlativos->siguienteDeReciboInterno(),
+            'compromiso_id' => $compromiso->getKey(),
+            'cliente_id'    => $cliente->getKey(),
+            'concepto'      => ConceptoDeRecibo::Senia,
+            'forma_pago'    => $forma,
+            'referencia'    => $referencia === '' ? null : $referencia,
+            'monto'         => $senia->redondeado(),
+            'fecha'         => $compromiso->getAttribute('fecha'),
+            'observaciones' => $observaciones,
+        ]);
     }
 
     /**

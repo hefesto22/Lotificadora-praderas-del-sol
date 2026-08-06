@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Proyectos\Pages;
 
 use App\Domain\Enums\EstadoLote;
+use App\Domain\Enums\FormaDePago;
 use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\Plano\AcomodadorDelPlano;
 use App\Domain\Plano\Dxf\ImportadorDeDxf;
@@ -272,6 +273,32 @@ class VerPlano extends Page
                             ),
                     ]),
 
+                /*
+                 * La seña se cobra AHORA, y por eso hay que decir como
+                 * entro: cada apartado sale con su recibo numerado (R14 +
+                 * R12) y la forma de pago va impresa en el papel.
+                 *
+                 * Los dos campos desaparecen cuando la seña es L 0.00 —
+                 * apartar sin adelanto es legitimo—, y `visible(false)` en
+                 * Filament ademas no envia el campo: por eso la accion lee
+                 * `forma_pago` con tryFrom y no lo da por presente.
+                 */
+                Select::make('forma_pago')
+                    ->label('¿Como entro la seña?')
+                    ->options(fn (): array => $this->formasDePago())
+                    ->live()
+                    ->native(false)
+                    ->visible(fn (Get $get): bool => $this->hayQueCobrarSenia($get))
+                    ->required(fn (Get $get): bool => $this->hayQueCobrarSenia($get))
+                    ->helperText('Va impreso en el recibo que se lleva el cliente.'),
+
+                TextInput::make('referencia')
+                    ->label('Numero de referencia')
+                    ->maxLength(60)
+                    ->visible(fn (Get $get): bool => $this->hayQueCobrarSenia($get) && $this->exigeReferencia($get))
+                    ->required(fn (Get $get): bool => $this->hayQueCobrarSenia($get) && $this->exigeReferencia($get))
+                    ->helperText('Es lo unico que despues permite encontrar ese movimiento en el estado de cuenta del banco (R11).'),
+
                 Textarea::make('observaciones')
                     ->label('Observaciones')
                     ->rows(2),
@@ -281,12 +308,14 @@ class VerPlano extends Page
                     $cliente = Cliente::query()->findOrFail($this->entero($data, 'cliente_id', 0));
                     $lotes = $this->lotesDelContrato((int) $lote->getKey(), $data['lotes_extra'] ?? null);
 
-                    new RegistroDeCompromisos()->apartarVarios(
+                    app(RegistroDeCompromisos::class)->apartarVarios(
                         $lotes,
                         $cliente,
                         montoSenia: $this->texto($data, 'monto_senia', '') ?: null,
                         venceEl: $this->texto($data, 'vence_el', '') ?: null,
                         observaciones: $this->texto($data, 'observaciones', '') ?: null,
+                        forma: FormaDePago::tryFrom($this->texto($data, 'forma_pago', '')),
+                        referencia: $this->texto($data, 'referencia', '') ?: null,
                     );
 
                     return sprintf(
@@ -563,7 +592,7 @@ class VerPlano extends Page
             ])
             ->action(function (array $arguments, array $data): void {
                 $this->conElLote($arguments, function (Lote $lote) use ($data): string {
-                    new RegistroDeCompromisos()->liberar($lote, $this->texto($data, 'motivo', 'Sin motivo'));
+                    app(RegistroDeCompromisos::class)->liberar($lote, $this->texto($data, 'motivo', 'Sin motivo'));
 
                     return $lote->getAttribute('codigo').' volvio a estar disponible.';
                 });
@@ -705,6 +734,14 @@ class VerPlano extends Page
                     ->addDays($this->configEntero('lotificadora.apartados.dias_de_vigencia', 15))
                     ->toDateString(),
 
+            /*
+             * Efectivo por defecto porque es como llega el 95% de las señas
+             * —el cliente esta parado enfrente con los billetes—, y porque un
+             * Select requerido sin default obliga a un clic mas en el tramite
+             * mas apurado del mostrador. Quien deposito lo cambia.
+             */
+            'forma_pago' => FormaDePago::Efectivo->value,
+
             // Al estado y no a $arguments: los closures de un componente del
             // schema no reciben $arguments. Mismo motivo que en la venta.
             'lote_id'     => $this->entero($arguments, 'lote', 0) ?: null,
@@ -755,6 +792,42 @@ class VerPlano extends Page
             'vence' => $this->fechaDe(is_string($vence) ? $vence : null)->format('d/m/Y'),
             default => '—',
         };
+    }
+
+    /**
+     * ¿Hay plata que cobrar hoy?
+     *
+     * Con seña en L 0.00 no se emite recibo —el CHECK de `recibos` no admite
+     * monto cero— y entonces preguntar la forma de pago seria pedirle a quien
+     * atiende un dato de un movimiento que no existe.
+     */
+    private function hayQueCobrarSenia(Get $get): bool
+    {
+        return ! $this->monto($get('monto_senia'))->esCero();
+    }
+
+    private function exigeReferencia(Get $get): bool
+    {
+        $forma = $get('forma_pago');
+
+        return is_string($forma)
+            && FormaDePago::tryFrom($forma)?->exigeReferencia() === true;
+    }
+
+    /**
+     * Las tres de R11. Cheque no esta, y no se agrega «por si acaso».
+     *
+     * @return array<string, string>
+     */
+    private function formasDePago(): array
+    {
+        $opciones = [];
+
+        foreach (FormaDePago::cases() as $forma) {
+            $opciones[$forma->value] = $forma->etiqueta();
+        }
+
+        return $opciones;
     }
 
     /**

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Domain\Enums\EstadoLote;
+use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\TipoCompromiso;
 use App\Domain\Exceptions\CompromisoInvalidoException;
 use App\Domain\Exceptions\VentaInvalidaException;
@@ -207,7 +208,7 @@ describe('Vendiendo mas barato', function (): void {
 
 describe('Apartar', function (): void {
     test('un apartado congela los dos precios iguales', function (): void {
-        $compromiso = $this->compromisos->apartar($this->lote, $this->cliente, montoSenia: '5000.00');
+        $compromiso = $this->compromisos->apartar($this->lote, $this->cliente, montoSenia: '5000.00', forma: FormaDePago::Efectivo);
 
         expect($compromiso->getAttribute('tipo'))->toBe(TipoCompromiso::Apartado)
             ->and($compromiso->getAttribute('precio_vara'))->toBe('1400.00')

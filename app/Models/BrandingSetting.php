@@ -42,16 +42,52 @@ class BrandingSetting extends Model
     /**
      * Obtiene el registro singleton (cacheado).
      * Si no existe lo crea con valores por defecto.
+     *
+     * ═══ SE CACHEAN LOS DATOS, NO EL OBJETO ═══
+     *
+     * Guardar el modelo entero en Redis escribe el nombre de la clase dentro
+     * del blob serializado. El dia que la clase se mueva de namespace —o que
+     * otra app comparta la misma base de Redis— PHP no la encuentra al
+     * deshidratar, devuelve `__PHP_Incomplete_Class` y el `: self` de esta
+     * firma revienta con un TypeError.
+     *
+     * No es teorico: el 6-ago-2026 tumbo el estado de cuenta con un 500 que
+     * ademas mostraba el trace en pantalla. El panel lo disimulaba porque
+     * `AdminPanelProvider` envuelve esta llamada en un try/catch, asi que el
+     * problema solo se veia en las paginas de documentos.
+     *
+     * Cacheando el array de atributos —puros strings y numeros— no hay
+     * ningun nombre de clase en Redis y el caso no puede volver.
      */
     public static function current(): self
     {
-        /** @var self $setting */
-        $setting = Cache::rememberForever(
+        $atributos = Cache::rememberForever(
             self::CACHE_KEY,
-            static fn (): self => self::query()->firstOrCreate([], ['primary_color' => '#f59e0b'])
+            static fn (): array => self::singleton()->getAttributes()
         );
 
-        return $setting;
+        /*
+         * Y por si Redis todavia trae un blob viejo del formato anterior: se
+         * tira y se vuelve a leer. Sin esto, el sistema queda en 500 hasta
+         * que alguien corra `cache:clear` a mano.
+         */
+        if (! is_array($atributos)) {
+            Cache::forget(self::CACHE_KEY);
+
+            $atributos = self::singleton()->getAttributes();
+
+            Cache::forever(self::CACHE_KEY, $atributos);
+        }
+
+        return new self()->newFromBuilder($atributos);
+    }
+
+    /**
+     * La unica fila, leida de la base.
+     */
+    private static function singleton(): self
+    {
+        return self::query()->firstOrCreate([], ['primary_color' => '#f59e0b']);
     }
 
     /**

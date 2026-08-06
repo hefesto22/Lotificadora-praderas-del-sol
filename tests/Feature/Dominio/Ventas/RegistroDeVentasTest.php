@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Domain\Enums\EstadoCompromiso;
 use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\EstadoVenta;
+use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\TipoCompromiso;
 use App\Domain\Exceptions\VentaInvalidaException;
 use App\Domain\ValueObjects\Monto;
@@ -204,7 +205,7 @@ describe('Apartados', function (): void {
     | monto a la prima es del modulo de pagos.
     */
     test('convierte el apartado del mismo cliente', function (): void {
-        $apartado = $this->compromisos->apartar($this->lote, $this->cliente, montoSenia: '5000.00');
+        $apartado = $this->compromisos->apartar($this->lote, $this->cliente, montoSenia: '5000.00', forma: FormaDePago::Efectivo);
 
         $venta = $this->registro->activar(
             proyecto: $this->proyecto,

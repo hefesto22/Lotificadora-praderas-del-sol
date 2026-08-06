@@ -336,7 +336,7 @@ describe('Varios lotes', function (): void {
         $uno = ($this->lote)('1');
         $dos = ($this->lote)('2');
 
-        new RegistroDeCompromisos()->apartar($dos, $this->carlos);
+        app(RegistroDeCompromisos::class)->apartar($dos, $this->carlos);
 
         ($this->vender)(
             ['cliente_id' => $this->rosa->getKey()],
@@ -439,7 +439,7 @@ describe('Apartar', function (): void {
         $uno = ($this->lote)('1');
         $dos = ($this->lote)('2');
 
-        new RegistroDeCompromisos()->apartar($dos, $this->carlos);
+        app(RegistroDeCompromisos::class)->apartar($dos, $this->carlos);
 
         Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
             ->callAction('apartarLote', ['cliente_id' => $this->rosa->getKey()], [
@@ -461,7 +461,7 @@ describe('Apartar', function (): void {
     test('el lote apartado se le vende a la misma persona', function (): void {
         $lote = ($this->lote)('1');
 
-        new RegistroDeCompromisos()->apartar($lote, $this->rosa);
+        app(RegistroDeCompromisos::class)->apartar($lote, $this->rosa);
 
         ($this->vender)(
             ['cliente_id' => $this->rosa->getKey()],

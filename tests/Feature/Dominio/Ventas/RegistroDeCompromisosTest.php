@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Domain\Enums\EstadoCompromiso;
 use App\Domain\Enums\EstadoLote;
+use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\TipoCompromiso;
 use App\Domain\Exceptions\CompromisoInvalidoException;
 use App\Domain\Exceptions\LoteInmutableException;
@@ -27,12 +28,12 @@ beforeEach(function (): void {
         ->create(['numero' => '1']);
     $this->cliente = Cliente::factory()->create(['nombre' => 'Rosa Elena Fuentes']);
     $this->otro = Cliente::factory()->create(['nombre' => 'Carlos Medina']);
-    $this->registro = new RegistroDeCompromisos;
+    $this->registro = app(RegistroDeCompromisos::class);
 });
 
 describe('Apartar', function (): void {
     test('deja el registro y mueve el lote, en un solo movimiento', function (): void {
-        $compromiso = $this->registro->apartar($this->lote, $this->cliente, montoSenia: '5000.00');
+        $compromiso = $this->registro->apartar($this->lote, $this->cliente, montoSenia: '5000.00', forma: FormaDePago::Efectivo);
 
         expect($this->lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Apartado)
             ->and($compromiso->getAttribute('tipo'))->toBe(TipoCompromiso::Apartado)
@@ -143,7 +144,7 @@ describe('Vender', function (): void {
     });
 
     test('vender un lote apartado convierte el apartado', function (): void {
-        $apartado = $this->registro->apartar($this->lote, $this->cliente, montoSenia: '5000.00');
+        $apartado = $this->registro->apartar($this->lote, $this->cliente, montoSenia: '5000.00', forma: FormaDePago::Efectivo);
         $venta = $this->registro->vender($this->lote->refresh(), $this->cliente);
 
         expect($apartado->refresh()->getAttribute('estado'))->toBe(EstadoCompromiso::Convertido)

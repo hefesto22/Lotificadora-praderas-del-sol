@@ -166,6 +166,25 @@ class Compromiso extends Model
         return $this->hasMany(Reprogramacion::class)->latest();
     }
 
+    /**
+     * Los recibos de ESTE lote: la seña del apartado y despues cada pago.
+     *
+     * Cuelgan del compromiso y no de la venta porque el plan de cuotas es del
+     * renglon: un pago va contra un lote. La seña tambien esta aca — se emitio
+     * antes de que existiera el expediente y sigue perteneciendo al apartado
+     * que la genero, aunque despues se le agregue el `venta_id`.
+     *
+     * Ordenados por numero y no por fecha: el correlativo (R12) ya es
+     * cronologico y no se repite, mientras que dos recibos del mismo dia
+     * quedarian en cualquier orden.
+     *
+     * @return HasMany<Recibo, $this>
+     */
+    public function recibos(): HasMany
+    {
+        return $this->hasMany(Recibo::class)->orderBy('numero');
+    }
+
     public function montoValor(): Monto
     {
         $valor = $this->getAttribute('valor');
