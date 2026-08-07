@@ -108,6 +108,42 @@ return [
     | veces es un apartado que en realidad nunca venció.
     |
     */
+    /*
+    |--------------------------------------------------------------------------
+    | Suspension por mora — Clausula Septima
+    |--------------------------------------------------------------------------
+    | «Suspension de acceso por mora mayor a 15 dias». Va por .env y no por
+    | una tabla del negocio a proposito: es una palanca de Olympo, no un dato
+    | del cliente, y tiene que poder levantarse en diez segundos desde el
+    | servidor el dia que el cliente pague.
+    |
+    | NO borra datos ni bloquea al super-admin: la Clausula Decima obliga a
+    | poder exportarle todo al cliente aunque el acceso este suspendido.
+    */
+    'suspension' => [
+        'activa' => env('PRADERAS_SUSPENDIDO', false),
+
+        'mensaje' => env(
+            'PRADERAS_SUSPENDIDO_MENSAJE',
+            'El acceso al sistema está temporalmente suspendido. Sus datos están intactos y el '.
+            'acceso se restablece apenas se regularice el pago. Comuníquese con Inversiones Olympo.'
+        ),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Almacenamiento incluido — Clausula Novena
+    |--------------------------------------------------------------------------
+    | 25 GB incluidos; el excedente se cobra a L 200/GB/año. El medidor avisa
+    | al 80% porque pasarse sin enterarse significa que el excedente lo paga
+    | Olympo hasta que alguien revise una factura.
+    */
+    'almacenamiento' => [
+        'incluido_gb'    => 25,
+        'alerta_en'      => 0.80,
+        'precio_gb_anio' => '200.00',
+    ],
+
     'apartados' => [
         'monto'             => '5000.00',
         'dias_de_vigencia'  => 15,

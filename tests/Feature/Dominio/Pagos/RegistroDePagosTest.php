@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\EstadoVenta;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Exceptions\PagoInvalidoException;
@@ -198,7 +199,7 @@ describe('Lo que rechaza', function (): void {
             // Es lo que se espera.
         }
 
-        expect(Recibo::query()->count())->toBe(0)
+        expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0)
             ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('300000.00');
     });
 });

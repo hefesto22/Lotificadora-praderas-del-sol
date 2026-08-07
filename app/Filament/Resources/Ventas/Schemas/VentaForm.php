@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Ventas\Schemas;
 
 use App\Domain\Enums\EstadoLote;
+use App\Domain\Enums\FormaDePago;
 use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\ListaDePrecios;
@@ -173,6 +174,29 @@ class VentaForm
                                     ->required()
                                     ->live(onBlur: true)
                                     ->helperText('Se paga completa al firmar. Si hubo apartado, ya cuenta como parte.'),
+
+                                /*
+                                 * La prima entra el dia de la firma y sale con
+                                 * su recibo, asi que R11 pide saber como entro.
+                                 * Lo que se cobra hoy es la prima MENOS las
+                                 * señas de apartado (R14); el Service resta y
+                                 * el papel lo explica.
+                                 */
+                                Select::make('forma_pago_prima')
+                                    ->label('¿Cómo entra la prima?')
+                                    ->options(self::formasDePago())
+                                    ->required()
+                                    ->live()
+                                    ->native(false)
+                                    ->default(FormaDePago::Efectivo->value)
+                                    ->helperText('Va impreso en el recibo de la prima.'),
+
+                                TextInput::make('referencia_prima')
+                                    ->label('Número de referencia')
+                                    ->maxLength(60)
+                                    ->visible(fn (Get $get): bool => self::exigeReferenciaDeLaPrima($get))
+                                    ->required(fn (Get $get): bool => self::exigeReferenciaDeLaPrima($get))
+                                    ->helperText('Sin él no hay cómo cruzar el recibo contra el banco (R11).'),
 
                                 TextInput::make('plazo_meses')
                                     ->label('Plazo en meses')
@@ -642,5 +666,29 @@ class VentaForm
         $valor = config($clave, $porDefecto);
 
         return is_int($valor) ? $valor : $porDefecto;
+    }
+
+    /**
+     * Las tres de R11. Cheque no esta, y no se agrega «por si acaso».
+     *
+     * @return array<string, string>
+     */
+    private static function formasDePago(): array
+    {
+        $opciones = [];
+
+        foreach (FormaDePago::cases() as $forma) {
+            $opciones[$forma->value] = $forma->etiqueta();
+        }
+
+        return $opciones;
+    }
+
+    private static function exigeReferenciaDeLaPrima(Get $get): bool
+    {
+        $forma = $get('forma_pago_prima');
+
+        return is_string($forma)
+            && FormaDePago::tryFrom($forma)?->exigeReferencia() === true;
     }
 }

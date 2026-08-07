@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Ventas\Pages;
 
+use App\Domain\Enums\FormaDePago;
 use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\PrecioPactado;
@@ -63,6 +64,8 @@ class CreateVenta extends CreateRecord
                 fechaContrato: CarbonImmutable::parse((string) $data['fecha_contrato']),
                 observaciones: is_string($data['observaciones'] ?? null) ? $data['observaciones'] : null,
                 precios: $this->precios($data),
+                formaPrima: FormaDePago::tryFrom((string) ($data['forma_pago_prima'] ?? '')) ?? FormaDePago::Efectivo,
+                referenciaPrima: is_string($data['referencia_prima'] ?? null) ? $data['referencia_prima'] : null,
             );
         } catch (GrupoOlympoException $e) {
             Notification::make()

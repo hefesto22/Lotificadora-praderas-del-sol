@@ -119,6 +119,15 @@ class RoleSeeder extends Seeder
         $permisos = [...$permisos, ...$this->permisos(['Reprogramar'], ['Venta'])];
         $permisos = [...$permisos, ...$this->permisos(['ViewAny', 'View'], ['Reprogramacion'])];
 
+        /*
+         * R14: prorrogar un apartado y marcar la devolucion de su seña. Los
+         * dos se nombran solos y NO van a RECURSOS ni a ACCIONES: ver un
+         * apartado y estirarlo son cosas distintas, y el receptor hace lo
+         * primero todo el dia. Meterlos en el cruce inventaria un
+         * `Prorrogar:Cliente` que ninguna politica conoce.
+         */
+        $permisos = [...$permisos, ...$this->permisos(['Prorrogar', 'DevolverSenia'], ['Compromiso'])];
+
         $this->rol(Roles::ADMINISTRADORA)->syncPermissions($permisos);
     }
 

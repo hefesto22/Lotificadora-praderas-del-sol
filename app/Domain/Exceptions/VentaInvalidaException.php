@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Exceptions;
 
+use App\Domain\Enums\FormaDePago;
 use App\Domain\ValueObjects\Monto;
 
 /**
@@ -135,6 +136,38 @@ final class VentaInvalidaException extends GrupoOlympoException
             "El plan de cuotas suma {$sumaDeCuotas->formateado()} pero el saldo a financiar "
             ."es {$saldo->formateado()}. No se registro nada. Es un error del calculo, no "
             .'de los datos: reportarlo.'
+        );
+    }
+
+    /**
+     * R14: la seña del apartado cuenta como parte de la prima.
+     *
+     * Si las señas ya suman mas que la prima que se escribio en la pantalla,
+     * el numero esta mal: el cliente entrego mas plata de la que el contrato
+     * declara como prima, y el papel de hoy saldria en negativo.
+     *
+     * No se acepta y se descuenta del saldo: eso rompe el «valor - prima»
+     * que el contrato impreso declara, y esa conversacion es de la
+     * contratante, no del sistema.
+     */
+    public static function porSeniaMayorALaPrima(Monto $senias, Monto $prima): self
+    {
+        return new self(
+            "Los apartados de este contrato ya suman {$senias->formateado()} en señas, y la prima ".
+            "quedo en {$prima->formateado()}. La seña cuenta como parte de la prima (R14), asi que ".
+            'la prima no puede ser menor a lo que el cliente ya entrego: hay que subirla.'
+        );
+    }
+
+    /**
+     * R11: sin numero de referencia no hay con que cruzarlo contra el banco.
+     */
+    public static function porPrimaSinReferencia(FormaDePago $forma): self
+    {
+        return new self(
+            'La prima entro por '.mb_strtolower($forma->etiqueta()).' y falta el numero de '.
+            'referencia. Es lo unico que despues permite encontrar ese movimiento en el estado '.
+            'de cuenta del banco; en efectivo no hace falta.'
         );
     }
 }

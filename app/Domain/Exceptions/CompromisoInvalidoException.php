@@ -117,4 +117,72 @@ final class CompromisoInvalidoException extends GrupoOlympoException
             'el estado de cuenta del banco; en efectivo no hace falta.'
         );
     }
+
+    /**
+     * R14: **una sola prorroga**, y la autoriza la administracion.
+     *
+     * Sin este tope, un apartado se estira para siempre de a quince dias y
+     * el lote queda fuera del mercado sin que nadie haya decidido nada. Es
+     * exactamente lo que la contratante quiso evitar cuando puso el plazo.
+     */
+    public static function porProrrogaAgotada(string $codigo, int $usadas, int $maximas): self
+    {
+        return new self(
+            "El apartado del lote {$codigo} ya lleva {$usadas} prorroga(s) y R14 autoriza ".
+            "{$maximas}. Si el cliente necesita mas tiempo hay que liberar el lote y volver a ".
+            'apartarlo, que deja la decision escrita con su fecha.'
+        );
+    }
+
+    /**
+     * Una prorroga es una decision de la administracion, no un tramite. Sin
+     * el motivo escrito, dentro de dos meses nadie puede decir por que ese
+     * lote estuvo un mes fuera del mercado.
+     */
+    public static function porProrrogaSinMotivo(string $codigo): self
+    {
+        return new self(
+            "Para prorrogar el apartado del lote {$codigo} hay que escribir por que. Queda ".
+            'anotado con el usuario y la fecha, que es lo que despues permite revisarlo.'
+        );
+    }
+
+    public static function porProrrogarLoQueNoEsApartado(string $codigo): self
+    {
+        return new self(
+            "El lote {$codigo} tiene una venta registrada, no un apartado. Una venta no vence, ".
+            'asi que no hay nada que prorrogar.'
+        );
+    }
+
+    public static function porProrrogarUnApartadoCerrado(string $codigo, string $estado): self
+    {
+        return new self(
+            "El apartado del lote {$codigo} esta {$estado} y ya no ocupa el lote. Prorrogar algo ".
+            'cerrado no lo reabre: si el cliente volvio, hay que apartarlo de nuevo.'
+        );
+    }
+
+    /**
+     * Un apartado sin fecha de vencimiento es de los que se cargaron antes
+     * de que el sistema llevara este registro (R15). No hay plazo que correr.
+     */
+    public static function porProrrogarSinVencimiento(string $codigo): self
+    {
+        return new self(
+            "El apartado del lote {$codigo} no tiene fecha de vencimiento, asi que no hay plazo ".
+            'que correr. Ponele una fecha desde la ficha del apartado y despues se prorroga.'
+        );
+    }
+
+    /**
+     * No se devuelve una seña que no existe, ni dos veces la misma.
+     */
+    public static function porDevolverLoQueNoSeDebe(string $codigo): self
+    {
+        return new self(
+            "El apartado del lote {$codigo} no tiene una seña pendiente de devolver: o no dejo ".
+            'seña, o el apartado sigue vigente, o ya se devolvio.'
+        );
+    }
 }

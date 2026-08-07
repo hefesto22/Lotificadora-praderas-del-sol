@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\EstadoVenta;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\ValueObjects\Monto;
@@ -88,8 +89,8 @@ test('el pago entra por la pantalla y se reparte FIFO', function (): void {
 
     // 25,000 + 25,000 + 10,000 = 60,000
     expect($pagadas)->toBe(['25000.00', '25000.00', '10000.00'])
-        ->and(Recibo::query()->count())->toBe(1)
-        ->and(Recibo::query()->firstOrFail()->aplicaciones()->count())->toBe(3);
+        ->and(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(1)
+        ->and(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->firstOrFail()->aplicaciones()->count())->toBe(3);
 });
 
 /*
@@ -107,7 +108,7 @@ test('una transferencia sin referencia no pasa del formulario', function (): voi
         ])
         ->assertHasActionErrors(['referencia']);
 
-    expect(Recibo::query()->count())->toBe(0);
+    expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0);
 });
 
 test('con referencia, la transferencia se registra', function (): void {
@@ -121,7 +122,7 @@ test('con referencia, la transferencia se registra', function (): void {
         ])
         ->assertHasNoActionErrors();
 
-    expect(Recibo::query()->firstOrFail()->getAttribute('referencia'))->toBe('TRF-88120');
+    expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->firstOrFail()->getAttribute('referencia'))->toBe('TRF-88120');
 });
 
 /*
@@ -139,7 +140,7 @@ test('un pago mayor a lo que se debe no rompe la pantalla', function (): void {
         ])
         ->assertHasNoActionErrors();
 
-    expect(Recibo::query()->count())->toBe(0)
+    expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0)
         ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('600000.00');
 });
 

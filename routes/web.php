@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\EstadoDeCuentaController;
 use App\Http\Controllers\ImprimirReciboController;
+use App\Http\Middleware\SuspensionPorMora;
 use App\Http\Middleware\UsuarioActivoDelPanel;
 use Illuminate\Support\Facades\Route;
 
@@ -38,7 +39,7 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::middleware(UsuarioActivoDelPanel::class)
+Route::middleware(UsuarioActivoDelPanel::class, SuspensionPorMora::class)
     ->prefix('documentos')
     ->name('documentos.')
     ->group(function (): void {

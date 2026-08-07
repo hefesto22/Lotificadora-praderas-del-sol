@@ -87,8 +87,19 @@ test('lleva la cantidad en letras', function (): void {
     ($this->papel)()->assertSee('SESENTA MIL LEMPIRAS CON 00/100');
 });
 
-test('dice que no es comprobante fiscal (R10)', function (): void {
-    ($this->papel)()->assertSee('No es comprobante fiscal');
+/*
+| La Clausula Segunda, modulo g-i, pide el recibo interno «con NO VALIDO
+| PARA CREDITO FISCAL». Son palabras del contrato, no una parafrasis: hasta
+| el 6-ago el papel decia «No es comprobante fiscal», que significa lo mismo
+| pero no es lo que se firmo.
+|
+| R10 sigue detras: no se usa CAI, asi que este papel nunca va a ser un
+| comprobante fiscal y por eso lo dice.
+*/
+test('lleva la leyenda fiscal con las palabras del contrato (g-i, R10)', function (): void {
+    ($this->papel)()
+        ->assertSee('NO VÁLIDO PARA CRÉDITO FISCAL', escape: false)
+        ->assertSee('Documento de uso interno.');
 });
 
 describe('El original y las copias', function (): void {

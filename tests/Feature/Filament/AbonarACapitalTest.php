@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\EstadoVenta;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\ModalidadDeReprogramacion;
@@ -77,7 +78,7 @@ test('el abono entra por la pantalla y reescribe el plan', function (): void {
     // 300,000 − 75,000 = 225,000, que en cuotas de 25,000 son 9 exactas.
     expect(Cuota::query()->where('compromiso_id', $this->renglon->getKey())->count())->toBe(9)
         ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('225000.00')
-        ->and(Recibo::query()->count())->toBe(1)
+        ->and(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(1)
         ->and(Reprogramacion::query()->count())->toBe(1);
 });
 
@@ -117,7 +118,7 @@ test('sin motivo no pasa del formulario', function (): void {
         ->callAction('abonar_a_capital', ($this->datos)(['motivo' => '']))
         ->assertHasActionErrors(['motivo']);
 
-    expect(Recibo::query()->count())->toBe(0)
+    expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0)
         ->and(Reprogramacion::query()->count())->toBe(0);
 });
 
@@ -131,7 +132,7 @@ test('un abono que supera el saldo no rompe la pantalla', function (): void {
         ->callAction('abonar_a_capital', ($this->datos)(['monto' => '999999.00']))
         ->assertHasNoActionErrors();
 
-    expect(Recibo::query()->count())->toBe(0)
+    expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0)
         ->and(Reprogramacion::query()->count())->toBe(0)
         ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('300000.00');
 });
@@ -150,7 +151,7 @@ test('si no alcanza para lo vencido se registra como pago normal', function (): 
         ->callAction('abonar_a_capital', ($this->datos)(['monto' => '50000.00']))
         ->assertHasNoActionErrors();
 
-    expect(Recibo::query()->count())->toBe(1)
+    expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(1)
         ->and(Reprogramacion::query()->count())->toBe(0)
         ->and(Cuota::query()->where('compromiso_id', $this->renglon->getKey())->count())->toBe(12);
 });

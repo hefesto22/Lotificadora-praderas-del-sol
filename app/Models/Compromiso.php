@@ -54,6 +54,8 @@ use Spatie\Activitylog\Support\LogOptions;
     'monto_senia',
     'fecha',
     'vence_el',
+    'prorrogas',
+    'senia_devuelta_el',
     'cerrado_el',
     'motivo',
     'observaciones',
@@ -79,18 +81,19 @@ class Compromiso extends Model
     protected function casts(): array
     {
         return [
-            'tipo'       => TipoCompromiso::class,
-            'estado'     => EstadoCompromiso::class,
-            'fecha'      => 'date',
-            'vence_el'   => 'date',
-            'cerrado_el' => 'date',
+            'tipo'              => TipoCompromiso::class,
+            'estado'            => EstadoCompromiso::class,
+            'fecha'             => 'date',
+            'vence_el'          => 'date',
+            'cerrado_el'        => 'date',
+            'senia_devuelta_el' => 'date',
         ];
     }
 
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['tipo', 'estado', 'cliente_id', 'valor', 'monto_senia', 'vence_el', 'motivo'])
+            ->logOnly(['tipo', 'estado', 'cliente_id', 'valor', 'monto_senia', 'vence_el', 'prorrogas', 'senia_devuelta_el', 'motivo'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges()
             ->setDescriptionForEvent(fn (string $evento): string => "Compromiso {$evento}");
@@ -217,6 +220,91 @@ class Compromiso extends Model
             && $vence->isBefore(today());
     }
 
+    /**
+     * Cuantos dias faltan para que se venza. Negativo si ya paso.
+     *
+     * Null cuando no hay fecha —una venta, o un apartado historico cargado
+     * sin vencimiento— porque «faltan 0 dias» y «no vence» son cosas
+     * distintas y la pantalla las pinta distinto.
+     */
+    public function diasParaVencer(): ?int
+    {
+        $vence = $this->getAttribute('vence_el');
+
+        if ($vence === null) {
+            return null;
+        }
+
+        return (int) today()->diffInDays($vence, false);
+    }
+
+    /**
+     * ¿Le queda prorroga? R14: una sola, y la autoriza la administracion.
+     *
+     * Solo los apartados vigentes: una venta no vence, y un apartado ya
+     * liberado o convertido no se estira hacia atras.
+     */
+    public function puedeProrrogarse(): bool
+    {
+        $tipo = $this->getAttribute('tipo');
+
+        if (! $tipo instanceof TipoCompromiso || $tipo !== TipoCompromiso::Apartado) {
+            return false;
+        }
+
+        return $this->estaVigente() && $this->prorrogasUsadas() < self::prorrogasMaximas();
+    }
+
+    public function prorrogasUsadas(): int
+    {
+        return (int) $this->getAttribute('prorrogas');
+    }
+
+    /**
+     * La seña que quedo por devolverle a esta persona, si quedo alguna.
+     *
+     * Es lo que R14 promete cuando el apartado se cae: la plata vuelve. No
+     * hay modulo de egresos todavia, asi que esto es lo que alimenta el
+     * aviso y la lista de pendientes — y `senia_devuelta_el` es lo que la
+     * saca de esa lista.
+     */
+    public function seniaPorDevolver(): ?Monto
+    {
+        $estado = $this->getAttribute('estado');
+
+        if (! $estado instanceof EstadoCompromiso || $estado !== EstadoCompromiso::Liberado) {
+            return null;
+        }
+
+        if ($this->getAttribute('senia_devuelta_el') !== null) {
+            return null;
+        }
+
+        $senia = $this->getAttribute('monto_senia');
+
+        if (! is_string($senia) && ! is_int($senia)) {
+            return null;
+        }
+
+        $monto = new Monto($senia);
+
+        return $monto->esCero() ? null : $monto;
+    }
+
+    /**
+     * El tope de R14, de la config y no de una constante.
+     *
+     * El monto, los dias de vigencia, los de prorroga y este numero los fijo
+     * la contratante y se cambian juntos. Por eso ninguno esta clavado en un
+     * CHECK ni en el codigo.
+     */
+    public static function prorrogasMaximas(): int
+    {
+        $maximas = config('lotificadora.apartados.prorrogas_maximas', 1);
+
+        return is_int($maximas) && $maximas >= 0 ? $maximas : 1;
+    }
+
     // ─── Scopes ───────────────────────────────────────────────────────
 
     /**
@@ -239,5 +327,68 @@ class Compromiso extends Model
     protected function delProyecto(Builder $query, Proyecto $proyecto): Builder
     {
         return $query->where('proyecto_id', $proyecto->getKey());
+    }
+
+    /**
+     * @param Builder<Compromiso> $query
+     *
+     * @return Builder<Compromiso>
+     */
+    #[Scope]
+    protected function apartados(Builder $query): Builder
+    {
+        return $query->where('tipo', TipoCompromiso::Apartado);
+    }
+
+    /**
+     * Los apartados a los que ya se les paso la fecha y siguen ocupando el
+     * lote. Es la pregunta del lunes por la mañana.
+     *
+     * @param Builder<Compromiso> $query
+     *
+     * @return Builder<Compromiso>
+     */
+    #[Scope]
+    protected function vencidos(Builder $query): Builder
+    {
+        return $query->apartados()
+            ->vigentes()
+            ->whereNotNull('vence_el')
+            ->whereDate('vence_el', '<', today());
+    }
+
+    /**
+     * Los que vencen de hoy en adelante dentro de N dias — los que todavia
+     * se pueden salvar con una llamada.
+     *
+     * @param Builder<Compromiso> $query
+     *
+     * @return Builder<Compromiso>
+     */
+    #[Scope]
+    protected function porVencer(Builder $query, int $dias = 3): Builder
+    {
+        return $query->apartados()
+            ->vigentes()
+            ->whereNotNull('vence_el')
+            ->whereDate('vence_el', '>=', today())
+            ->whereDate('vence_el', '<=', today()->addDays($dias));
+    }
+
+    /**
+     * Apartados que se cayeron y todavia le deben plata a alguien (R14).
+     *
+     * @param Builder<Compromiso> $query
+     *
+     * @return Builder<Compromiso>
+     */
+    #[Scope]
+    protected function conSeniaPorDevolver(Builder $query): Builder
+    {
+        return $query->apartados()
+            ->where('estado', EstadoCompromiso::Liberado)
+            ->whereNotNull('monto_senia')
+            ->where('monto_senia', '>', 0)
+            ->whereNull('senia_devuelta_el');
     }
 }

@@ -255,9 +255,13 @@
         <p class="nota">{{ $recibo->getAttribute('observaciones') }}</p>
     @endif
 
-    {{-- R10: no se usa CAI. Decirlo en el papel evita que alguien lo presente
-         como comprobante fiscal. --}}
-    <p class="nota">Documento de uso interno. No es comprobante fiscal.</p>
+    {{-- La Clausula Segunda, modulo g-i, pide el recibo interno correlativo
+         «con NO VALIDO PARA CREDITO FISCAL». Esas palabras son texto del
+         contrato, no una parafrasis nuestra, y son las que evitan que
+         alguien intente presentar este papel ante el SAR. R10: no se usa
+         CAI, asi que este recibo nunca va a ser un comprobante fiscal. --}}
+    <p class="nota"><strong>NO VÁLIDO PARA CRÉDITO FISCAL</strong></p>
+    <p class="nota">Documento de uso interno.</p>
 
     <div class="firmas">
         <div class="firma">Recibí conforme</div>

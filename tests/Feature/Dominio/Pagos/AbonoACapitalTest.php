@@ -283,7 +283,7 @@ describe('La cuota a medias se respeta', function (): void {
         expect(fn () => ($this->abonar)('280000.00'))
             ->toThrow(PagoInvalidoException::class, 'se puede abonar hasta');
 
-        expect(Recibo::query()->count())->toBe(1)
+        expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(1)
             ->and(($this->plan)())->toHaveCount(12);
     });
 });
@@ -321,7 +321,7 @@ describe('Lo que rechaza', function (): void {
         expect(fn () => ($this->abonar)('75000.00', ModalidadDeReprogramacion::AcortarPlazo, '   '))
             ->toThrow(PagoInvalidoException::class, 'por qué');
 
-        expect(Recibo::query()->count())->toBe(0)
+        expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0)
             ->and(($this->plan)())->toHaveCount(12);
     });
 
@@ -336,7 +336,7 @@ describe('Lo que rechaza', function (): void {
             // Es lo que se espera.
         }
 
-        expect(Recibo::query()->count())->toBe(0)
+        expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0)
             ->and(Reprogramacion::query()->count())->toBe(0)
             ->and(($this->plan)())->toHaveCount(12)
             ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('300000.00');

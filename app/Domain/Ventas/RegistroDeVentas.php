@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace App\Domain\Ventas;
 
 use App\Domain\Correlativos\ConsumoDeCorrelativos;
+use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\EstadoVenta;
+use App\Domain\Enums\FormaDePago;
+use App\Domain\Enums\TipoCompromiso;
 use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\Exceptions\VentaInvalidaException;
 use App\Domain\ValueObjects\Monto;
@@ -15,6 +18,7 @@ use App\Models\Compromiso;
 use App\Models\Cuota;
 use App\Models\Lote;
 use App\Models\Proyecto;
+use App\Models\Recibo;
 use App\Models\Venta;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -70,6 +74,15 @@ final readonly class RegistroDeVentas
      * @param list<Cliente> $clientes duenos; **el primero queda como titular** (R8)
      * @param list<PrecioPactado> $precios precios negociados, para los lotes que no van al de lista
      *
+     * ═══ LA FORMA DE PAGO DE LA PRIMA ═══
+     *
+     * Trae default y los otros montos del sistema no: la seña es opcional
+     * —se puede apartar sin adelanto— y por eso ahi la forma se exige. La
+     * prima no lo es. R5: **se paga completa y ahi se firma**, asi que no
+     * existe la venta sin prima entrada, y efectivo es como llega en el
+     * mostrador. La pantalla la pregunta igual, y la referencia se sigue
+     * exigiendo en transferencia y deposito (R11).
+     *
      * @throws VentaInvalidaException
      */
     public function activar(
@@ -82,6 +95,8 @@ final readonly class RegistroDeVentas
         ?CarbonImmutable $fechaContrato = null,
         ?string $observaciones = null,
         array $precios = [],
+        FormaDePago $formaPrima = FormaDePago::Efectivo,
+        ?string $referenciaPrima = null,
     ): Venta {
         $this->verificarConjuntos($proyecto, $lotes, $clientes);
 
@@ -106,7 +121,9 @@ final readonly class RegistroDeVentas
             $diaPago,
             $fecha,
             $observaciones,
-            $pactados
+            $pactados,
+            $formaPrima,
+            $referenciaPrima
         ): Venta {
             // 1. Bloquear y re-mirar. Lo que decia la pantalla no vale.
             $frescos = $this->bloquearYVerificar($lotes, $titular);
@@ -118,6 +135,21 @@ final readonly class RegistroDeVentas
 
             if ($prima->mayorQue($valorTotal)) {
                 throw VentaInvalidaException::porPrimaMayorAlValor($prima, $valorTotal);
+            }
+
+            /*
+             * Los apartados que se van a convertir, leidos AHORA porque
+             * `vender()` los cierra: despues de la conversion `vigenteDe()`
+             * devuelve el compromiso de la venta y la seña queda invisible.
+             *
+             * R14: esa plata cuenta como parte de la prima, asi que la prima
+             * no puede ser menor de lo que el cliente ya entrego.
+             */
+            $apartados = $this->apartadosDe($frescos);
+            $senias = $this->sumarSenias($apartados);
+
+            if ($senias->mayorQue($prima)) {
+                throw VentaInvalidaException::porSeniaMayorALaPrima($senias, $prima);
             }
 
             $saldo = $valorTotal->restar($prima);
@@ -195,11 +227,158 @@ final readonly class RegistroDeVentas
                 $this->asentarCuotas($venta, $compromiso, $renglon['plan']);
             }
 
+            // 9. El papel de la prima, por lo que el cliente pone HOY.
+            $this->cobrarLaPrima($venta, $titular, $prima, $senias, $formaPrima, $referenciaPrima, $fecha, $apartados);
+
             return $venta;
         });
     }
 
     // ─── Interno ──────────────────────────────────────────────────────
+
+    /**
+     * El recibo de la prima, por lo que el cliente entrega el dia que firma.
+     *
+     * ═══ POR QUE NO ES LA PRIMA ENTERA ═══
+     *
+     * R14: la seña del apartado cuenta como parte de la prima. Si el cliente
+     * ya dejo L 5,000.00 para reservar, hoy pone la prima MENOS eso, y el
+     * papel tiene que decir esa cifra —la que efectivamente entrego—. Un
+     * recibo por la prima entera, sumado al de la seña, daria de mas: la
+     * misma plata contada dos veces.
+     *
+     * Si las señas cubren la prima exacta no se emite recibo: hoy no entro
+     * dinero, y el CHECK `recibos_monto_positivo_chk` tampoco admite L 0.00.
+     *
+     * ═══ Y POR QUE CUELGA DE LA VENTA Y NO DE UN LOTE ═══
+     *
+     * La prima es del CONTRATO: se pacta una sola vez aunque el expediente
+     * lleve tres lotes. `repartirPrima()` la divide entre los renglones para
+     * poder calcular las cuotas, pero eso es aritmetica interna — el cliente
+     * pago una prima, no tres. Por eso `compromiso_id` va nulo y el CHECK de
+     * R13 se conforma con el `venta_id`.
+     *
+     * @param list<Compromiso> $apartados
+     *
+     * @throws VentaInvalidaException
+     */
+    private function cobrarLaPrima(
+        Venta $venta,
+        Cliente $titular,
+        Monto $prima,
+        Monto $senias,
+        FormaDePago $forma,
+        ?string $referencia,
+        CarbonImmutable $fecha,
+        array $apartados,
+    ): void {
+        $aCobrar = $prima->restar($senias);
+        $limpia = trim($referencia ?? '');
+
+        if (! $aCobrar->esCero() && $forma->exigeReferencia() && $limpia === '') {
+            throw VentaInvalidaException::porPrimaSinReferencia($forma);
+        }
+
+        $this->ligarLasSenias($venta, $apartados);
+
+        if ($aCobrar->esCero()) {
+            return;
+        }
+
+        Recibo::query()->create([
+            'numero'        => $this->correlativos->siguienteDeReciboInterno(),
+            'venta_id'      => $venta->getKey(),
+            'cliente_id'    => $titular->getKey(),
+            'concepto'      => ConceptoDeRecibo::Prima,
+            'forma_pago'    => $forma,
+            'referencia'    => $limpia === '' ? null : $limpia,
+            'monto'         => $aCobrar->redondeado(),
+            'fecha'         => $fecha->toDateString(),
+            'observaciones' => $senias->esCero() ? null : sprintf(
+                'Prima del contrato %s, menos %s ya recibidos en señas de apartado.',
+                $prima->formateado(),
+                $senias->formateado(),
+            ),
+        ]);
+    }
+
+    /**
+     * Los recibos de seña quedan colgados del expediente.
+     *
+     * Se les pone el `venta_id` y NO se les toca el `compromiso_id`: el papel
+     * sigue siendo del apartado que lo genero —ahi nacio y ahi se devuelve si
+     * el trato se cae—, pero ahora el estado de cuenta lo encuentra sin tener
+     * que saber que hubo un apartado antes.
+     *
+     * @param list<Compromiso> $apartados
+     */
+    private function ligarLasSenias(Venta $venta, array $apartados): void
+    {
+        if ($apartados === []) {
+            return;
+        }
+
+        $ids = array_map(static fn (Compromiso $apartado): int => (int) $apartado->getKey(), $apartados);
+
+        Recibo::query()
+            ->whereIn('compromiso_id', $ids)
+            ->where('concepto', ConceptoDeRecibo::Senia)
+            ->update(['venta_id' => $venta->getKey()]);
+    }
+
+    /**
+     * Los apartados vigentes de estos lotes, antes de convertirlos.
+     *
+     * @param list<Lote> $lotes
+     *
+     * @return list<Compromiso>
+     */
+    private function apartadosDe(array $lotes): array
+    {
+        $apartados = [];
+
+        foreach ($lotes as $lote) {
+            $vigente = $this->compromisos->vigenteDe($lote);
+
+            if (! $vigente instanceof Compromiso) {
+                continue;
+            }
+
+            if ($vigente->getAttribute('tipo') !== TipoCompromiso::Apartado) {
+                continue;
+            }
+
+            $apartados[] = $vigente;
+        }
+
+        return $apartados;
+    }
+
+    /**
+     * Lo que el cliente ya puso en señas por estos lotes.
+     *
+     * Sale de `compromisos.monto_senia` y no de los recibos, a proposito: los
+     * apartados que se cargaron antes de que el sistema emitiera papel tienen
+     * el monto registrado y no tienen recibo, y esa plata se recibio igual.
+     *
+     * @param list<Compromiso> $apartados
+     */
+    private function sumarSenias(array $apartados): Monto
+    {
+        $total = Monto::cero();
+
+        foreach ($apartados as $apartado) {
+            $senia = $apartado->getAttribute('monto_senia');
+
+            if (! is_string($senia) && ! is_int($senia)) {
+                continue;
+            }
+
+            $total = $total->sumar(new Monto($senia));
+        }
+
+        return $total;
+    }
 
     /**
      * Lo que se puede verificar sin tocar la base.

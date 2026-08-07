@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers\Filament;
 
+use App\Http\Middleware\SuspensionPorMora;
 use App\Models\BrandingSetting;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
 use Filament\Http\Middleware\Authenticate;
@@ -97,6 +98,14 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
+                /*
+                 * Clausula Septima. Va DESPUES de Authenticate y no en
+                 * `middleware()`: asi la pantalla de login sigue viva y el
+                 * super-admin puede entrar a levantar la suspension. Si
+                 * corriera sobre todas las rutas del panel, la palanca se
+                 * tragaria al que la maneja.
+                 */
+                SuspensionPorMora::class,
             ])
             ->plugins([
                 FilamentShieldPlugin::make(),

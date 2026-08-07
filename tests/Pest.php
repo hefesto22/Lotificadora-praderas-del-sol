@@ -124,7 +124,14 @@ function sembrarPermisosDeShield(): void
      * `Reprogramar:Venta` es el del abono a capital (R21) y los dos de
      * `Reprogramacion` son la pestaña que explica por que el plan cambio.
      */
-    foreach (['Reprogramar:Venta', 'ViewAny:Reprogramacion', 'View:Reprogramacion'] as $permiso) {
+    foreach ([
+        'Reprogramar:Venta',
+        'ViewAny:Reprogramacion',
+        'View:Reprogramacion',
+        // R14: prorrogar y marcar la devolucion de la seña de un apartado.
+        'Prorrogar:Compromiso',
+        'DevolverSenia:Compromiso',
+    ] as $permiso) {
         Permission::query()->firstOrCreate(['name' => $permiso], ['guard_name' => 'web']);
     }
 }

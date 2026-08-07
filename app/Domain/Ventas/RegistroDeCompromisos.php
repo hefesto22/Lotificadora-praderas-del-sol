@@ -382,6 +382,123 @@ final readonly class RegistroDeCompromisos
     }
 
     /**
+     * Le da a un apartado los dias de prorroga de R14. UNA sola vez.
+     *
+     * ═══ DESDE CUANDO CORREN LOS QUINCE DIAS ═══
+     *
+     * Desde el vencimiento si todavia no llego, y desde HOY si ya paso. Es
+     * la unica lectura que no le regala menos de lo prometido a nadie: un
+     * apartado que vencio hace diez dias y se prorroga «desde su
+     * vencimiento» le dejaria al cliente cinco dias, no quince, y el que
+     * autorizo la prorroga creyo estar dando quince.
+     *
+     * ═══ EL MOTIVO VA A OBSERVACIONES Y NO A `motivo` ═══
+     *
+     * `motivo` es del cierre: lo escribe `liberar()` para decir por que se
+     * solto el lote. Si la prorroga lo pisara, la liberacion posterior
+     * borraria el rastro de la prorroga, o al reves. Van a campos distintos
+     * porque son dos decisiones distintas, y las dos tienen que sobrevivir.
+     *
+     * @throws CompromisoInvalidoException
+     */
+    public function prorrogar(Compromiso $apartado, string $motivo): Compromiso
+    {
+        $codigo = (string) $apartado->lote()->value('codigo');
+        $tipo = $apartado->getAttribute('tipo');
+        $estado = $apartado->getAttribute('estado');
+
+        if (! $tipo instanceof TipoCompromiso || $tipo !== TipoCompromiso::Apartado) {
+            throw CompromisoInvalidoException::porProrrogarLoQueNoEsApartado($codigo);
+        }
+
+        if (! $apartado->estaVigente()) {
+            $etiqueta = $estado instanceof EstadoCompromiso ? $estado->etiqueta() : 'cerrado';
+
+            throw CompromisoInvalidoException::porProrrogarUnApartadoCerrado($codigo, $etiqueta);
+        }
+
+        $maximas = Compromiso::prorrogasMaximas();
+        $usadas = $apartado->prorrogasUsadas();
+
+        if ($usadas >= $maximas) {
+            throw CompromisoInvalidoException::porProrrogaAgotada($codigo, $usadas, $maximas);
+        }
+
+        $vence = $apartado->getAttribute('vence_el');
+
+        if ($vence === null) {
+            throw CompromisoInvalidoException::porProrrogarSinVencimiento($codigo);
+        }
+
+        $limpio = trim($motivo);
+
+        if ($limpio === '') {
+            throw CompromisoInvalidoException::porProrrogaSinMotivo($codigo);
+        }
+
+        return DB::transaction(function () use ($apartado, $vence, $usadas, $limpio): Compromiso {
+            $desde = $vence->lessThan(today()) ? today() : $vence;
+            $nuevo = $desde->copy()->addDays($this->diasDeProrroga());
+
+            $apartado->update([
+                'vence_el'      => $nuevo,
+                'prorrogas'     => $usadas + 1,
+                'observaciones' => $this->anotar(
+                    $apartado,
+                    sprintf('Prorroga al %s: %s', $nuevo->format('d/m/Y'), $limpio),
+                ),
+            ]);
+
+            return $apartado;
+        });
+    }
+
+    /**
+     * Marca que la seña de un apartado caido ya se le devolvio al cliente.
+     *
+     * ═══ POR QUE ESTO NO ES UN EGRESO ═══
+     *
+     * Porque todavia no hay modulo de egresos, y se decidio el 6-ago-2026
+     * dejarlo para despues. Lo que esto resuelve es mas chico y mas urgente:
+     * que la lista de «plata que hay que devolver» se pueda vaciar. Una
+     * lista que no se vacia se deja de mirar a la semana, y entonces R14
+     * queda escrita en el contrato y en ningun otro lado.
+     *
+     * Cuando exista el egreso con su comprobante, este metodo pasa a
+     * llamarlo y la fecha se sigue escribiendo igual.
+     *
+     * @throws CompromisoInvalidoException
+     */
+    public function devolverLaSenia(Compromiso $apartado, ?string $observacion = null): Compromiso
+    {
+        if (! $apartado->seniaPorDevolver() instanceof Monto) {
+            throw CompromisoInvalidoException::porDevolverLoQueNoSeDebe(
+                (string) $apartado->lote()->value('codigo')
+            );
+        }
+
+        $limpia = trim($observacion ?? '');
+
+        return DB::transaction(function () use ($apartado, $limpia): Compromiso {
+            $hoy = today();
+
+            $apartado->update([
+                'senia_devuelta_el' => $hoy,
+                'observaciones'     => $this->anotar(
+                    $apartado,
+                    sprintf(
+                        'Seña devuelta el %s%s',
+                        $hoy->format('d/m/Y'),
+                        $limpia === '' ? '.' : ': '.$limpia,
+                    ),
+                ),
+            ]);
+
+            return $apartado;
+        });
+    }
+
+    /**
      * El compromiso que hoy ocupa el lote, si hay alguno.
      */
     public function vigenteDe(Lote $lote): ?Compromiso
@@ -390,6 +507,28 @@ final readonly class RegistroDeCompromisos
             ->where('lote_id', $lote->getKey())
             ->vigentes()
             ->first();
+    }
+
+    /**
+     * Agrega un renglon al historial escrito del compromiso, sin pisar lo
+     * que ya habia.
+     *
+     * Las prorrogas y las devoluciones son pocas y se leen en orden; un
+     * renglon por linea alcanza y se entiende sin abrir la bitacora.
+     */
+    private function anotar(Compromiso $compromiso, string $renglon): string
+    {
+        $previas = $compromiso->getAttribute('observaciones');
+        $texto = is_string($previas) ? trim($previas) : '';
+
+        return $texto === '' ? $renglon : $texto."\n".$renglon;
+    }
+
+    private function diasDeProrroga(): int
+    {
+        $dias = config('lotificadora.apartados.dias_de_prorroga', 15);
+
+        return is_int($dias) && $dias > 0 ? $dias : 15;
     }
 
     /**

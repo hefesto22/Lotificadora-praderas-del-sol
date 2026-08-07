@@ -506,6 +506,28 @@ class VerPlano extends Page
                             ->required(fn (Get $get): bool => $this->hayDescuento($get))
                             ->helperText('El precio va por debajo del de lista. R4: queda con tu usuario y la fecha.'),
 
+                        /*
+                         * La prima se paga completa al firmar (R5), asi que
+                         * al firmar hay dinero entrando y sale su recibo. Lo
+                         * que se cobra hoy es la prima MENOS lo que ya se
+                         * recibio en señas de apartado (R14) — el Service
+                         * hace esa resta y el recibo lo dice.
+                         */
+                        Select::make('forma_pago_prima')
+                            ->label('¿Como entra la prima?')
+                            ->options(fn (): array => $this->formasDePago())
+                            ->required()
+                            ->live()
+                            ->native(false)
+                            ->helperText('Va impreso en el recibo de la prima.'),
+
+                        TextInput::make('referencia_prima')
+                            ->label('Numero de referencia')
+                            ->maxLength(60)
+                            ->visible(fn (Get $get): bool => $this->exigeReferenciaDeLaPrima($get))
+                            ->required(fn (Get $get): bool => $this->exigeReferenciaDeLaPrima($get))
+                            ->helperText('Es lo unico que despues permite encontrar ese movimiento en el estado de cuenta del banco (R11).'),
+
                         Textarea::make('observaciones')
                             ->label('Observaciones')
                             ->rows(2)
@@ -567,6 +589,9 @@ class VerPlano extends Page
                         ),
                         observaciones: $this->texto($data, 'observaciones', '') ?: null,
                         precios: $precios,
+                        formaPrima: FormaDePago::tryFrom($this->texto($data, 'forma_pago_prima', ''))
+                            ?? FormaDePago::Efectivo,
+                        referenciaPrima: $this->texto($data, 'referencia_prima', '') ?: null,
                     );
 
                     return $this->avisoDeVenta($venta, $lotes, $titular, count($clientes));
@@ -670,6 +695,11 @@ class VerPlano extends Page
             'lote_id'        => $lote?->getKey(),
             'cotizado'       => $condiciones !== [],
             'fecha_contrato' => today()->toDateString(),
+
+            // Mismo motivo que en el apartado: es como llega la prima en el
+            // mostrador, y un Select requerido sin default obliga a un clic
+            // mas en el tramite mas largo del sistema.
+            'forma_pago_prima' => FormaDePago::Efectivo->value,
         ];
     }
 
@@ -809,6 +839,14 @@ class VerPlano extends Page
     private function exigeReferencia(Get $get): bool
     {
         $forma = $get('forma_pago');
+
+        return is_string($forma)
+            && FormaDePago::tryFrom($forma)?->exigeReferencia() === true;
+    }
+
+    private function exigeReferenciaDeLaPrima(Get $get): bool
+    {
+        $forma = $get('forma_pago_prima');
 
         return is_string($forma)
             && FormaDePago::tryFrom($forma)?->exigeReferencia() === true;
