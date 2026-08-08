@@ -15,10 +15,85 @@ Son **14 días** desde el 6-ago.
 
 | | |
 |---|---|
-| Tests | 618 verdes antes del último drop (R14 + obligaciones sin verificar todavía) |
+| Tests | **685 verdes** (3572 assertions), cadena completa después de interés y mora |
 | PHPStan | 271/271, nivel 7 |
 | Pint / Rector | limpios |
 | Plano real | **cargado: 301 lotes, 0 sin dibujar** |
+
+## Lo que se construyó el 8-ago, tarde: interés y mora configurables
+
+Implementa `docs/que-le-falta.md` §1, el drop más grande del producto. **El
+detalle completo está en `docs/interes-y-mora.md`** — acá van solo las tres
+cosas que hay que saber antes de tocar nada.
+
+### 🔴 El §1.2 del análisis tenía un error, y cambió el diseño
+
+Decía que con `i = 0` la fórmula francesa «degenera exactamente en P ÷ n» y
+que por eso habría **un solo camino de código**. El límite es correcto, pero
+**la cuenta es `0 ÷ 0`**: numerador `P × 0`, denominador `1 − 1`. bcmath la
+rechaza.
+
+Así que son dos caminos, y el `if` de la tasa cero es obligatorio. De regalo:
+**Praderas del Sol corre exactamente el mismo código que corría el 7-ago**, a
+doce días de arrancar. El golden test del §9.C9 mide el mismo `armar()` de
+siempre, sin una línea tocada — y si falla, eso es lo único de este drop que
+puede afectar el 20-ago.
+
+### La imputación de pagos cambió: mora → interés → capital
+
+Es lo más profundo que se tocó. Con tasa 0 y sin mora los dos primeros pasos
+valen cero y el reparto es el FIFO a capital de siempre, así que Praderas no
+se entera. **Hay que escribirlo en el contrato** de la lotificadora que sí
+cobre: con capital primero, un cliente atrasado nunca sale de la deuda.
+
+Adentro de cada cuota el interés se paga antes que el capital, y no hizo falta
+ninguna columna: se deriva de `monto_interes` y `monto_pagado`.
+
+### Todo nace apagado
+
+Tasa 0, mora `ninguna`. R1 y R2 pasaron de estar **cableados** a ser la
+**configuración de fábrica**. Las cuatro modalidades de mora están disponibles
+para que cada lotificadora vea cuál le aplica, como pidió Mauricio.
+
+**26 archivos**: 7 nuevos, 8 reescritos, 9 parcheados, 1 migración.
+
+### La cadena pasó entera, y lo que costó
+
+`lint` → `ci` → 685 verdes. Tres vueltas, y las tres fueron del mismo tipo de
+error mío, ninguno de lógica:
+
+1. **Pint** — alineé cinco `=>` contra un key que estaba **del otro lado de un
+   comentario**; el comentario parte el grupo. Y metí dos `use` de clases del
+   **propio namespace** (`App\Domain\Ventas` dentro de `App\Domain\Ventas`).
+2. **PHPStan** — `numeric-string` se pierde al cruzar un parámetro declarado
+   `string`. Cuatro errores de un solo molde. Va `@param numeric-string` en el
+   docblock, y `is_numeric()` cuando el valor viene de afuera.
+3. **Rector** — `private static` que solo se llama desde adentro va de
+   instancia. Ojo: `modalidadDe()` y `comoModalidad()` **se quedan static** a
+   propósito porque viven en closures `static fn`, donde no hay `$this`.
+
+⚠️ **Los tests no necesitaron ni un cambio.** Se esperaban fallos por la firma
+nueva de `CuotaProyectada`, y no hubo: nadie la construye fuera de
+`PlanDeCuotas`, y con tasa 0 `cierraExacto()` compara los mismos dos números
+que comparaba antes. Es la mejor prueba de que el camino de Praderas quedó
+intacto.
+
+### 🔴 Sigue abierto: el tope legal
+
+No hay número que citar. La **Ley de Créditos Usurarios (Decreto 100-62)** no
+fija un porcentaje: delega en la Secretaría de Finanzas el máximo no bancario
+y habla de contratos de **préstamo**, no de compraventa a plazo. El tope de
+120 % del CHECK es **de cordura** —frena un 1200 donde iba 12.00—, no legal.
+Antes de que una lotificadora ofrezca una tasa, va un abogado.
+
+### Lo que no hace
+
+Condonar mora sin cobrar nada; el estado de cuenta y el recibo impreso
+todavía no muestran las columnas de capital, interés y mora —los datos están,
+falta la presentación, y con tasa 0 se ven igual que hoy, así que **no bloquea
+el 20-ago**—; avisos de mora al cliente.
+
+---
 
 ## Lo que se construyó el 6-ago
 

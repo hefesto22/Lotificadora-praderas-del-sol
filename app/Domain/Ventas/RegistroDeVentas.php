@@ -17,6 +17,7 @@ use App\Models\Cliente;
 use App\Models\Compromiso;
 use App\Models\Cuota;
 use App\Models\Lote;
+use App\Models\PlanDePago;
 use App\Models\Proyecto;
 use App\Models\Recibo;
 use App\Models\Venta;
@@ -174,8 +175,14 @@ final readonly class RegistroDeVentas
             $renglones = $this->planificar($renglones, $diaPago, $fecha);
             $contrato = $this->planDelContrato($renglones);
 
-            if (! $contrato->total()->igualA($saldo)) {
-                throw VentaInvalidaException::porPlanQueNoCierra($contrato->total(), $saldo);
+            /*
+             * ⚠️ CAPITAL, no la suma de las cuotas. Con interes la segunda da
+             * capital + intereses y toda venta financiada se rechazaria. Sin
+             * interes los dos numeros son el mismo y esto compara lo que
+             * comparaba antes.
+             */
+            if (! $contrato->totalCapital()->igualA($saldo)) {
+                throw VentaInvalidaException::porPlanQueNoCierra($contrato->totalCapital(), $saldo);
             }
 
             // 5. Recien ahora se quema un numero.
@@ -221,6 +228,8 @@ final readonly class RegistroDeVentas
                     precioVaraLista: $renglon['lista'],
                     plazoMeses: $renglon['plazo'],
                     prima: $renglon['prima'],
+                    tasa: $renglon['tasa'],
+                    mora: $renglon['mora'],
                 );
 
                 // 8. El plan congelado (§9.D6), el de ESTE lote.
@@ -482,7 +491,7 @@ final readonly class RegistroDeVentas
      * @param list<Lote> $lotes
      * @param array<int, PrecioPactado> $pactados por id de lote
      *
-     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto}>
+     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, mora: CondicionesDeMora}>
      *
      * @throws VentaInvalidaException
      */
@@ -513,6 +522,15 @@ final readonly class RegistroDeVentas
                 throw VentaInvalidaException::porDescuentoSinMotivo($this->codigo($lote), $lista, $precio);
             }
 
+            /*
+             * El plan de ESE plazo, entero: de ahi salen el precio de lista,
+             * la tasa y la mora, y las tres se congelan juntas en el
+             * compromiso. Buscarlo una vez y pasarlo es lo que impide que
+             * alguien copie el precio y se olvide de la tasa.
+             */
+            $plazo = $acuerdo->plazoMeses ?? $plazoMeses;
+            $delPlazo = $this->lista->planParaPlazo($proyecto, $plazo);
+
             $renglones[] = [
                 'lote'   => $lote,
                 'lista'  => $lista,
@@ -520,11 +538,18 @@ final readonly class RegistroDeVentas
                 'motivo' => $motivo,
                 // El plazo de ESTE lote. Sin acuerdo propio, el del contrato:
                 // es el caso normal y el unico que existia antes.
-                'plazo' => $acuerdo->plazoMeses ?? $plazoMeses,
+                'plazo' => $plazo,
                 // La MISMA expresion que usa RegistroDeCompromisos::valorDe()
                 // y que exige el CHECK de la base. Si los tres no dan el
                 // mismo numero, la venta no se graba — y asi tiene que ser.
                 'valor' => new Monto($precio->multiplicarPor($this->decimalDe($lote, 'area_varas'))->redondeado()),
+                /*
+                 * Sin plan cargado para ese plazo —la lista vacia— van en
+                 * cero y sin mora, que es exactamente lo que hacia el sistema
+                 * antes de que el interes existiera (R1, R2).
+                 */
+                'tasa' => $delPlazo instanceof PlanDePago ? $delPlazo->tasaDeInteres() : TasaDeInteres::cero(),
+                'mora' => $delPlazo instanceof PlanDePago ? $delPlazo->condicionesDeMora() : CondicionesDeMora::ninguna(),
             ];
         }
 
@@ -554,10 +579,10 @@ final readonly class RegistroDeVentas
      * dejaria, con muchos lotes y una prima chica, una ultima parte negativa
      * — y Monto rechaza negativos, con razon.
      *
-     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto}> $renglones
+     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, mora: CondicionesDeMora}> $renglones
      * @param array<int, PrecioPactado> $pactados
      *
-     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, prima: Monto}>
+     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, mora: CondicionesDeMora, prima: Monto}>
      *
      * @throws VentaInvalidaException
      */
@@ -639,6 +664,8 @@ final readonly class RegistroDeVentas
                 'motivo' => $renglon['motivo'],
                 'plazo'  => $renglon['plazo'],
                 'valor'  => $renglon['valor'],
+                'tasa'   => $renglon['tasa'],
+                'mora'   => $renglon['mora'],
                 'prima'  => $suyas[$indice] ?? Monto::cero(),
             ];
         }
@@ -653,9 +680,9 @@ final readonly class RegistroDeVentas
      * lote: con tres plazos distintos, «el saldo es demasiado chico para 60
      * meses» obliga a adivinar cual de los tres es.
      *
-     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, prima: Monto}> $renglones
+     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, mora: CondicionesDeMora, prima: Monto}> $renglones
      *
-     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, prima: Monto, plan: PlanDeCuotas}>
+     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, mora: CondicionesDeMora, prima: Monto, plan: PlanDeCuotas}>
      *
      * @throws VentaInvalidaException
      */
@@ -671,6 +698,7 @@ final readonly class RegistroDeVentas
                     $renglon['plazo'],
                     $diaPago,
                     $fecha,
+                    $renglon['tasa'],
                 );
             } catch (GrupoOlympoException $error) {
                 throw VentaInvalidaException::porElLote($this->codigo($renglon['lote']), $error->getMessage());
@@ -687,6 +715,8 @@ final readonly class RegistroDeVentas
                 'motivo' => $renglon['motivo'],
                 'plazo'  => $renglon['plazo'],
                 'valor'  => $renglon['valor'],
+                'tasa'   => $renglon['tasa'],
+                'mora'   => $renglon['mora'],
                 'prima'  => $renglon['prima'],
                 'plan'   => $plan,
             ];
@@ -784,6 +814,8 @@ final readonly class RegistroDeVentas
                 'numero'            => $cuota->numero,
                 'fecha_vencimiento' => $cuota->vencimientoParaBase(),
                 'monto'             => $cuota->montoParaBase(),
+                'monto_capital'     => $cuota->capitalParaBase(),
+                'monto_interes'     => $cuota->interesParaBase(),
                 'monto_pagado'      => '0.00',
                 'created_at'        => $ahora,
                 'updated_at'        => $ahora,

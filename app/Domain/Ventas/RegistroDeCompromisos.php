@@ -257,6 +257,8 @@ final readonly class RegistroDeCompromisos
         ?Monto $precioVaraLista = null,
         ?int $plazoMeses = null,
         ?Monto $prima = null,
+        ?TasaDeInteres $tasa = null,
+        ?CondicionesDeMora $mora = null,
     ): Compromiso {
         $estado = $this->estadoDe($lote);
         $codigo = $this->codigoDe($lote);
@@ -311,7 +313,9 @@ final readonly class RegistroDeCompromisos
             $pactado,
             $motivo,
             $plazoMeses,
-            $prima
+            $prima,
+            $tasa,
+            $mora
         ): Compromiso {
             /*
              * El apartado se cierra ANTES de crear la venta. El indice
@@ -341,6 +345,21 @@ final readonly class RegistroDeCompromisos
                 'plazo_meses'      => $plazoMeses,
                 'prima'            => $prima?->redondeado(),
                 'motivo_descuento' => $motivo === '' ? null : $motivo,
+                /*
+                 * Y EL PRECIO DEL DINERO, congelado igual que el del terreno.
+                 *
+                 * Si manana la lotificadora sube la tasa del plan de 48 meses,
+                 * este contrato sigue con la que se firmo. Sin esto, un cambio
+                 * en la lista de precios reescribiria en silencio la cuota de
+                 * cada cliente viejo — y el papel que el se llevo diria otra
+                 * cosa que el sistema.
+                 *
+                 * `paraBase()` devuelve las cuatro columnas de mora con sus
+                 * nombres, asi que van todas o no va ninguna: una modalidad
+                 * sin su monto no pasa el CHECK de coherencia.
+                 */
+                'tasa_interes_anual' => ($tasa ?? TasaDeInteres::cero())->paraBase(),
+                ...($mora ?? CondicionesDeMora::ninguna())->paraBase(),
             ]);
 
             $lote->update(['estado' => EstadoLote::Vendido]);

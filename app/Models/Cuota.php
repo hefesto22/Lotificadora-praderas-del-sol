@@ -24,12 +24,36 @@ use Override;
  * nocturna que los recalcule, y esa tarea falla justo el dia que el cliente
  * llega a pagar y el sistema le dice que no debe nada (§9.D5).
  *
- * ═══ NO HAY MORA ═══
+ * ═══ LA CUOTA VIENE PARTIDA, DESDE EL 8-AGO-2026 ═══
  *
- * R2: el atraso no genera cargo. `diasDeAtraso()` existe porque la
- * administracion necesita saber quien esta atrasado —para llamarlo, no para
- * cobrarle de mas—. Un cliente atrasado debe exactamente lo mismo que
- * debia el dia del vencimiento.
+ * `monto` es lo que el cliente paga ese mes y sigue siendo el numero que
+ * manda. `monto_capital` y `monto_interes` son en que se descompone, y suman
+ * exacto —lo exige el CHECK `cuotas_partes_suman_el_monto_chk`—.
+ *
+ * Con tasa 0 (R1, Praderas del Sol) el capital es la cuota entera y el
+ * interes es cero, que es lo que el sistema hacia antes de que estas dos
+ * columnas existieran.
+ *
+ * ═══ DENTRO DE UNA CUOTA SE PAGA INTERES PRIMERO ═══
+ *
+ * `monto_pagado` sigue siendo UN numero, y de el se derivan las dos partes:
+ * lo primero que cubre un pago parcial es el interes y recien despues el
+ * capital. Esa es la imputacion estandar y es la que decide si un cliente
+ * sale de la deuda o no sale nunca.
+ *
+ * No hacen falta columnas nuevas para eso: con `monto_interes` y
+ * `monto_pagado` alcanza, y un dato derivado que no se guarda es un dato que
+ * no se puede desincronizar.
+ *
+ * ═══ LA MORA NO ES PARTE DEL MONTO ═══
+ *
+ * `mora_pagada` y `mora_condonada` NO entran en `monto` ni en `monto_pagado`:
+ * la mora es un derivado del tiempo, se calcula al vuelo (`CalculoDeMora`) y
+ * se congela en el recibo. Lo unico que se guarda acá es cuanta ya se
+ * resolvio, para no cobrarla dos veces cuando el cliente sigue atrasado.
+ *
+ * Y de ahi sale gratis la regla de que **la mora no genera mora**: la base
+ * del calculo es `saldo()`, que nunca la incluye.
  *
  * ═══ NO SE EDITA ═══
  *
@@ -44,7 +68,11 @@ use Override;
     'numero',
     'fecha_vencimiento',
     'monto',
+    'monto_capital',
+    'monto_interes',
     'monto_pagado',
+    'mora_pagada',
+    'mora_condonada',
 ])]
 class Cuota extends Model
 {
@@ -56,7 +84,10 @@ class Cuota extends Model
      */
     #[Override]
     protected $attributes = [
-        'monto_pagado' => '0.00',
+        'monto_pagado'   => '0.00',
+        'monto_interes'  => '0.00',
+        'mora_pagada'    => '0.00',
+        'mora_condonada' => '0.00',
     ];
 
     /**
@@ -113,11 +144,90 @@ class Cuota extends Model
     }
 
     /**
-     * Lo que falta para darla por pagada.
+     * La parte de la cuota que baja la deuda.
+     */
+    public function montoCapital(): Monto
+    {
+        $capital = $this->getAttribute('monto_capital');
+
+        // Sin la columna cargada —una cuota recien construida en memoria— la
+        // verdad de un plan sin interes es que todo el monto es capital.
+        return is_string($capital) || is_int($capital)
+            ? new Monto($capital)
+            : $this->montoTotal();
+    }
+
+    /**
+     * La parte de la cuota que paga el interes del mes. Cero con R1.
+     */
+    public function montoInteres(): Monto
+    {
+        return $this->montoDe('monto_interes');
+    }
+
+    /**
+     * Lo que falta para darla por pagada. NO incluye mora.
      */
     public function saldo(): Monto
     {
         return $this->montoTotal()->restar($this->montoPagado());
+    }
+
+    // ─── El reparto adentro de la cuota: interes primero ──────────────
+
+    /**
+     * Cuanto del interes de esta cuota ya se cubrio.
+     *
+     * Derivado, no guardado: el pago cubre interes primero, asi que lo pagado
+     * es interes hasta que el interes se acaba.
+     */
+    public function interesPagado(): Monto
+    {
+        $pagado = $this->montoPagado();
+        $interes = $this->montoInteres();
+
+        return $pagado->mayorQue($interes) ? $interes : $pagado;
+    }
+
+    public function interesPendiente(): Monto
+    {
+        return $this->montoInteres()->restar($this->interesPagado());
+    }
+
+    public function capitalPagado(): Monto
+    {
+        return $this->montoPagado()->restar($this->interesPagado());
+    }
+
+    /**
+     * Lo que esta cuota todavia le debe al capital.
+     *
+     * Es el numero que se reamortiza en un abono a capital (R21): reprogramar
+     * sobre `saldo()` cobraria interes sobre el interes del plan viejo.
+     */
+    public function capitalPendiente(): Monto
+    {
+        return $this->montoCapital()->restar($this->capitalPagado());
+    }
+
+    // ─── Mora ─────────────────────────────────────────────────────────
+
+    public function moraPagada(): Monto
+    {
+        return $this->montoDe('mora_pagada');
+    }
+
+    public function moraCondonada(): Monto
+    {
+        return $this->montoDe('mora_condonada');
+    }
+
+    /**
+     * La mora de esta cuota que ya no hay que volver a cobrar.
+     */
+    public function moraResuelta(): Monto
+    {
+        return $this->moraPagada()->sumar($this->moraCondonada());
     }
 
     // ─── Estado derivado ──────────────────────────────────────────────
@@ -144,8 +254,10 @@ class Cuota extends Model
     /**
      * Dias corridos desde el vencimiento. Cero si no esta vencida.
      *
-     * Es informacion para la administracion, no la base de ningun cobro:
-     * no hay mora (R2).
+     * Sigue siendo informacion —quien esta atrasado, para llamarlo— y no la
+     * base de ningun cobro: quien calcula la mora es `CalculoDeMora`, con las
+     * condiciones congeladas del compromiso y los dias de gracia que
+     * correspondan.
      */
     public function diasDeAtraso(): int
     {
@@ -156,6 +268,11 @@ class Cuota extends Model
         $vence = $this->getAttribute('fecha_vencimiento');
 
         return (int) $vence->diffInDays(today());
+    }
+
+    public function llevaInteres(): bool
+    {
+        return ! $this->montoInteres()->esCero();
     }
 
     // ─── Scopes ───────────────────────────────────────────────────────

@@ -11,7 +11,9 @@ use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\ModalidadDeReprogramacion;
 use App\Domain\Exceptions\PagoInvalidoException;
 use App\Domain\ValueObjects\Monto;
+use App\Domain\Ventas\CondicionesDeMora;
 use App\Domain\Ventas\PlanDeCuotas;
+use App\Domain\Ventas\TasaDeInteres;
 use App\Models\Cliente;
 use App\Models\Compromiso;
 use App\Models\Cuota;
@@ -37,19 +39,42 @@ use Illuminate\Support\Facades\DB;
  * propio plazo y su propio plan (R21/R22), así que «pagar la cuota» sin decir
  * de cuál lote no significa nada.
  *
+ * ═══ MORA → INTERES → CAPITAL, DESDE EL 8-AGO-2026 ═══
+ *
+ * Cuando la lotificadora cobra interes o mora (§8.5, configurable por plan de
+ * pago), el orden en que se imputa un pago deja de ser un detalle: **es la
+ * diferencia entre que un cliente salga de la deuda o no salga nunca**. El
+ * estandar, y lo que hace este Service, es:
+ *
+ *  1. La MORA de la cuota mas vieja, calculada al vuelo al dia del cobro.
+ *  2. El INTERES pendiente de esa cuota.
+ *  3. El CAPITAL, que es lo unico que baja la deuda.
+ *
+ * Y recien entonces la cuota siguiente.
+ *
+ * Con Praderas del Sol —tasa 0 y sin mora (R1, R2)— los pasos 1 y 2 valen
+ * cero en todas las cuotas y el reparto es identico al que corria antes: todo
+ * a capital, FIFO. **No hay dos motores.**
+ *
+ * ═══ LA MORA NO ES UNA CUOTA ═══
+ *
+ * No se guarda como fila de `cuotas`: se calcula al cobrar (`CalculoDeMora`)
+ * y se congela en el recibo, que dice cuanta se cobro y por que. Lo unico que
+ * `cuotas` acumula es `mora_pagada` y `mora_condonada`, para no volver a
+ * cobrar la de los mismos dias.
+ *
  * ═══ UNA CUOTA SE PAGA EN VARIAS VECES (R19) ═══
  *
  * No hay nada especial que hacer: el monto se reparte hasta agotarse y la
- * última cuota tocada queda parcial. Lo que falta se arrastra y NO genera
- * cargo — R2, el atraso no cuesta. El cliente debe exactamente lo que le
- * faltaba el día del vencimiento.
+ * última cuota tocada queda parcial. Adentro de cada cuota el orden es el de
+ * arriba, asi que un pago parcial cubre interes antes que capital.
  *
  * ═══ Y EL ABONO A CAPITAL, QUE ES OTRA COSA (R21) ═══
  *
  * `cobrarCuotas()` reparte y no toca el plan. `abonarACapital()` primero pone
- * al día y después REESCRIBE las cuotas que nadie tocó todavía, en una de dos
- * formas que elige el cliente. Los dos emiten un recibo y los dos son todo o
- * nada; lo que cambia es qué pasa con el contrato después.
+ * al día —lo vencido Y su mora— y después REESCRIBE las cuotas que nadie tocó
+ * todavía, en una de dos formas que elige el cliente. Los dos emiten un recibo
+ * y los dos son todo o nada; lo que cambia es qué pasa con el contrato después.
  *
  * ═══ TODO O NADA ═══
  *
@@ -80,6 +105,8 @@ final readonly class RegistroDePagos
         ?string $referencia = null,
         ?CarbonImmutable $fecha = null,
         ?string $observaciones = null,
+        bool $condonarMora = false,
+        ?string $motivoCondonacion = null,
     ): Recibo {
         return $this->cobrarVariosLotes(
             venta: $venta,
@@ -89,6 +116,8 @@ final readonly class RegistroDePagos
             referencia: $referencia,
             fecha: $fecha,
             observaciones: $observaciones,
+            condonarMora: $condonarMora,
+            motivoCondonacion: $motivoCondonacion,
         );
     }
 
@@ -119,10 +148,17 @@ final readonly class RegistroDePagos
      * al revés—. Con un orden único para todo el sistema, el segundo espera y
      * sigue.
      *
-     * ═══ TODO O NADA ═══
+     * ═══ CONDONAR LA MORA ES UN TRAMITE, NO UN CAMPO EN CERO ═══
      *
-     * Se bloquea y se verifica TODO antes de emitir. Si el tercer renglón paga
-     * de más, el correlativo no llegó a moverse: medio recibo no existe.
+     * Perdonar la mora pasa todas las semanas en ventanilla, y por eso tiene
+     * motivo obligatorio y queda escrito en el recibo con el nombre de quien
+     * lo autorizo — como el descuento de R4 y la anulacion. Condona la mora de
+     * TODOS los lotes de ese cobro: quien perdona esta perdonando el atraso de
+     * ese cliente ese dia, no el de un renglon.
+     *
+     * ⚠️ Condonar no congela el reloj. Si la cuota sigue vencida, los dias que
+     * pasen despues vuelven a generar mora — que es lo correcto, porque el
+     * atraso siguio.
      *
      * @param list<array{lote: Compromiso, monto: Monto}> $renglones
      *
@@ -136,6 +172,8 @@ final readonly class RegistroDePagos
         ?string $referencia = null,
         ?CarbonImmutable $fecha = null,
         ?string $observaciones = null,
+        bool $condonarMora = false,
+        ?string $motivoCondonacion = null,
     ): Recibo {
         if ($renglones === []) {
             throw PagoInvalidoException::porNoElegirNingunLote();
@@ -158,6 +196,12 @@ final readonly class RegistroDePagos
         $cuandoSePago = $fecha ?? CarbonImmutable::parse(today()->toDateString());
         $this->verificarLaFecha($venta, $cuandoSePago);
 
+        $porQueSePerdona = trim($motivoCondonacion ?? '');
+
+        if ($condonarMora && $porQueSePerdona === '') {
+            throw PagoInvalidoException::porFaltarElMotivoDeLaCondonacion();
+        }
+
         // El orden del bloqueo, igual para todos. Ver el docblock.
         usort(
             $renglones,
@@ -174,9 +218,13 @@ final readonly class RegistroDePagos
             $forma,
             $limpia,
             $cuando,
-            $observaciones
+            $observaciones,
+            $condonarMora,
+            $porQueSePerdona
         ): Recibo {
             $total = Monto::cero();
+            $moraCobrada = Monto::cero();
+            $moraPerdonada = Monto::cero();
             $tandas = [];
 
             /*
@@ -184,6 +232,10 @@ final readonly class RegistroDePagos
              * cada uno debe recién leído. La pantalla puede estar vieja: entre
              * que se pintó el modal y se apretó Guardar, el otro receptor pudo
              * cobrar el mismo lote.
+             *
+             * La mora se calcula ACA, con las cuotas ya bloqueadas y a la
+             * fecha del cobro: la del modal era un estimado, igual que el
+             * reparto FIFO que muestra la pantalla.
              */
             foreach ($renglones as $renglon) {
                 $lote = $renglon['lote'];
@@ -192,11 +244,22 @@ final readonly class RegistroDePagos
                 $pendientes = $this->pendientesBloqueadas($lote);
                 $saldo = $this->saldoDe($pendientes);
 
-                if ($monto->mayorQue($saldo)) {
-                    throw PagoInvalidoException::porPagarDeMas($monto, $saldo, $this->codigo($lote));
+                $mora = MoraDelLote::calcular($pendientes, $this->condicionesDe($lote), $cuando);
+
+                /*
+                 * Lo maximo que se le puede cobrar a este lote hoy: lo que
+                 * deben las cuotas MAS la mora corrida. Sin el segundo
+                 * sumando, cobrar la cuota con su mora se rechazaria por
+                 * «paga de mas». Si se va a condonar, la mora no se cobra y
+                 * el tope vuelve a ser el saldo pelado.
+                 */
+                $tope = $condonarMora ? $saldo : $saldo->sumar($mora->total);
+
+                if ($monto->mayorQue($tope)) {
+                    throw PagoInvalidoException::porPagarDeMas($monto, $tope, $this->codigo($lote));
                 }
 
-                $tandas[] = ['pendientes' => $pendientes, 'monto' => $monto];
+                $tandas[] = ['pendientes' => $pendientes, 'monto' => $monto, 'mora' => $mora];
                 $total = $total->sumar($monto);
             }
 
@@ -213,12 +276,26 @@ final readonly class RegistroDePagos
                 $observaciones,
             );
 
-            // 4. FIFO adentro de cada lote, sobre el mismo recibo.
+            // 4. Mora → interés → capital, FIFO adentro de cada lote.
             foreach ($tandas as $tanda) {
-                $this->repartir($recibo, $tanda['pendientes'], $tanda['monto']);
+                $reparto = $this->repartir(
+                    $recibo,
+                    $tanda['pendientes'],
+                    $tanda['monto'],
+                    $tanda['mora'],
+                    $condonarMora,
+                );
+
+                $moraCobrada = $moraCobrada->sumar($reparto['cobrada']);
+                $moraPerdonada = $moraPerdonada->sumar($reparto['condonada']);
             }
 
-            // 5. Si con esto terminó de pagar todo, el expediente se cierra.
+            // 5. La mora que efectivamente entró y la que se perdonó, en el
+            // papel. Se escriben despues de repartir porque hasta ahi no se
+            // sabe cuanta mora alcanzo a cubrir el dinero entregado.
+            $this->asentarLaMora($recibo, $moraCobrada, $moraPerdonada, $porQueSePerdona);
+
+            // 6. Si con esto terminó de pagar todo, el expediente se cierra.
             $this->cerrarSiQuedoPagada($venta, $cuando);
 
             return $recibo;
@@ -230,16 +307,19 @@ final readonly class RegistroDePagos
      *
      * ═══ QUE HACE, EXACTAMENTE ═══
      *
-     * Devuelve a las cuotas lo que ese recibo les había aplicado, marca el
-     * recibo con quién lo anuló y por qué, y —si la venta se había liquidado
-     * con ese cobro— la vuelve a abrir. El número NO se libera y la fila NO se
-     * borra: una serie con huecos deja de servir para decir «entre el 000120 y
-     * el 000130 no falta ninguno», que es lo único que hace serio a un recibo
-     * interno (R12).
+     * Devuelve a las cuotas lo que ese recibo les había aplicado —capital,
+     * interés y mora, cada uno a su columna—, marca el recibo con quién lo
+     * anuló y por qué, y —si la venta se había liquidado con ese cobro— la
+     * vuelve a abrir. El número NO se libera y la fila NO se borra: una serie
+     * con huecos deja de servir para decir «entre el 000120 y el 000130 no
+     * falta ninguno», que es lo único que hace serio a un recibo interno (R12).
      *
      * Las aplicaciones tampoco se borran: son la traza de a qué se había
      * aplicado, y sin ellas «¿por qué la cuota 5 volvió a deber?» no tiene
      * respuesta.
+     *
+     * ⚠️ La mora condonada en ese recibo tambien se revierte: si el cobro no
+     * debio registrarse, el perdon que venia con el tampoco.
      *
      * ═══ QUE NO HACE ═══
      *
@@ -307,10 +387,20 @@ final readonly class RegistroDePagos
                     continue;
                 }
 
+                /*
+                 * `monto_pagado` recibe capital + interes, nunca la mora: la
+                 * mora nunca entro ahi, asi que devolverla la dejaria
+                 * debiendo de menos. Va a su propia columna.
+                 */
+                $aLaCuota = $aplicacion->montoCapital()->sumar($aplicacion->montoInteres());
+
                 $cuota->update([
-                    'monto_pagado' => $cuota->montoPagado()->restar($aplicacion->montoAplicado())->redondeado(),
+                    'monto_pagado' => $cuota->montoPagado()->restar($aLaCuota)->redondeado(),
+                    'mora_pagada'  => $cuota->moraPagada()->restar($aplicacion->montoMora())->redondeado(),
                 ]);
             }
+
+            $this->revertirLaCondonacion($vivo);
 
             $vivo->update([
                 'anulado_el'       => now(),
@@ -335,17 +425,23 @@ final readonly class RegistroDePagos
      *     pantalla ya le mostró al cliente.
      *  3. Se rechaza lo que no se puede hacer: pagar de más, pasarse del tope,
      *     un plan que no se puede armar. Todo antes del paso 5.
-     *  4. Si el abono no alcanza ni para lo vencido, esto NO era un abono: se
-     *     registra como pago normal y no se reescribe ningún plan.
+     *  4. Si el abono no alcanza ni para lo vencido —y su mora—, esto NO era
+     *     un abono: se registra como pago normal y no se reescribe ningún plan.
      *  5. Recién acá se quema un número de recibo.
-     *  6. Se pone al día lo vencido, FIFO.
-     *  7. Se borran las cuotas que nadie tocó y se escribe el plan nuevo. Lo
-     *     pagado —incluida la cuota a medias— no se toca nunca.
+     *  6. Se pone al día lo vencido, FIFO, con la mora primero.
+     *  7. Se borran las cuotas que nadie tocó y se escribe el plan nuevo, con
+     *     la MISMA tasa congelada del compromiso.
      *  8. Queda la constancia con su motivo, y el resumen del expediente se
      *     recalcula desde las cuotas.
      *
      * Si algo falla en cualquier paso se cae todo junto: el correlativo
      * vuelve, el plan viejo sigue en pie y no queda media reprogramación.
+     *
+     * ═══ CON INTERES, UN ABONO AHORRA INTERESES ═══
+     *
+     * Y ese pasa a ser el numero que el cliente mira para decidir. Lo calcula
+     * `EfectoDelAbono::interesesAhorrados()` y la pantalla lo muestra ANTES de
+     * confirmar (§10.8).
      *
      * @param string $motivo obligatorio (R21); la base también lo exige
      *
@@ -389,11 +485,24 @@ final readonly class RegistroDePagos
         ): Recibo {
             // 1 y 2. Releer bloqueando, y calcular con lo recién leído.
             $pendientes = $this->pendientesBloqueadas($lote);
-            $efecto = EfectoDelAbono::calcular($pendientes, $monto, $modalidad, $this->diaDePago($venta));
+            $mora = MoraDelLote::calcular($pendientes, $this->condicionesDe($lote), $cuando);
+
+            $efecto = EfectoDelAbono::calcular(
+                $pendientes,
+                $monto,
+                $modalidad,
+                $this->diaDePago($venta),
+                $this->tasaDe($lote),
+                $mora->total,
+            );
 
             // 3. Lo que no se puede hacer, antes de quemar nada.
-            if ($monto->mayorQue($efecto->saldoDelLote)) {
-                throw PagoInvalidoException::porPagarDeMas($monto, $efecto->saldoDelLote, $this->codigo($lote));
+            if ($monto->mayorQue($efecto->saldoDelLote->sumar($mora->total))) {
+                throw PagoInvalidoException::porPagarDeMas(
+                    $monto,
+                    $efecto->saldoDelLote->sumar($mora->total),
+                    $this->codigo($lote),
+                );
             }
 
             if ($efecto->superaElTope) {
@@ -424,7 +533,8 @@ final readonly class RegistroDePagos
                     $observaciones,
                 );
 
-                $this->repartir($recibo, $pendientes, $monto);
+                $reparto = $this->repartir($recibo, $pendientes, $monto, $mora);
+                $this->asentarLaMora($recibo, $reparto['cobrada'], Monto::cero(), '');
                 $this->cerrarSiQuedoPagada($venta, $cuando);
 
                 return $recibo;
@@ -442,7 +552,7 @@ final readonly class RegistroDePagos
             // Un plan que no cierra al céntimo no llega nunca a la base
             // (§8.3.4). Es la misma verificación que hace RegistroDeVentas.
             if (! $plan->cierraExacto()) {
-                throw PagoInvalidoException::porPlanQueNoCierra($plan->total(), $efecto->saldoNuevo);
+                throw PagoInvalidoException::porPlanQueNoCierra($plan->totalCapital(), $efecto->saldoNuevo);
             }
 
             // 5. Recién ahora se quema un número (R12).
@@ -459,11 +569,13 @@ final readonly class RegistroDePagos
             );
 
             /*
-             * 6. Poner al día, FIFO. Con lo vencido cubierto por completo, esas
-             * cuotas quedan saldadas y ninguna sale parcial de este paso.
+             * 6. Poner al día, FIFO, con la mora adelante. Con lo vencido
+             * cubierto por completo, esas cuotas quedan saldadas y ninguna
+             * sale parcial de este paso.
              */
             if (! $efecto->ponerAlDia->esCero()) {
-                $this->repartir($recibo, $pendientes, $efecto->ponerAlDia);
+                $reparto = $this->repartir($recibo, $pendientes, $efecto->ponerAlDia, $mora);
+                $this->asentarLaMora($recibo, $reparto['cobrada'], Monto::cero(), '');
             }
 
             // 7 y 8.
@@ -514,6 +626,31 @@ final readonly class RegistroDePagos
         if ($forma->exigeReferencia() && trim($referencia ?? '') === '') {
             throw PagoInvalidoException::porFaltarReferencia($forma->etiqueta());
         }
+    }
+
+    /**
+     * Las condiciones de mora CONGELADAS de este lote.
+     *
+     * Del compromiso y no del plan de pago del proyecto: si mañana la
+     * lotificadora sube la mora al 30 %, este contrato sigue con la que se
+     * firmó. Es el mismo criterio que ya rige área, precio, plazo y prima.
+     */
+    private function condicionesDe(Compromiso $lote): CondicionesDeMora
+    {
+        return CondicionesDeMora::deBase(
+            $lote->getAttribute('mora_modalidad'),
+            $lote->getAttribute('mora_monto'),
+            $lote->getAttribute('mora_porcentaje'),
+            $lote->getAttribute('mora_dias_gracia'),
+        );
+    }
+
+    /**
+     * La tasa de interés CONGELADA de este lote. Cero con R1.
+     */
+    private function tasaDe(Compromiso $lote): TasaDeInteres
+    {
+        return TasaDeInteres::deBase($lote->getAttribute('tasa_interes_anual'));
     }
 
     /**
@@ -568,6 +705,10 @@ final readonly class RegistroDePagos
      * haberse cobrado, y uno fechado en 2019 —el clásico error de tipear el
      * año— entra sin que nada chille.
      *
+     * ⚠️ Con mora, la fecha ademas MUEVE PLATA: los dias de atraso se cuentan
+     * hasta ella. Un cobro fechado un mes atras cobraria treinta dias menos de
+     * mora, y eso ya no es un dato mal escrito sino dinero que no entro.
+     *
      * @throws PagoInvalidoException
      */
     private function verificarLaFecha(Venta $venta, CarbonImmutable $cuando): void
@@ -601,6 +742,11 @@ final readonly class RegistroDePagos
      *
      * El CHECK `ventas_cierre_segun_estado_chk` exige `cerrada_el` cuando el
      * estado es uno de los cerrados, así que van juntos o no van.
+     *
+     * ⚠️ Se mira el saldo de las CUOTAS, no la mora. Un contrato con todo el
+     * capital pagado y mora suelta se liquida igual: la mora es un cargo del
+     * atraso, no parte del precio, y dejar el expediente abierto por ella haria
+     * que un cliente que ya pagó su lote figure debiendo el lote.
      */
     private function cerrarSiQuedoPagada(Venta $venta, CarbonImmutable $cuando): void
     {
@@ -677,42 +823,162 @@ final readonly class RegistroDePagos
     }
 
     /**
-     * El reparto FIFO.
+     * La mora cobrada y la perdonada, congeladas en el papel.
+     *
+     * Se escribe despues de repartir porque hasta ese momento no se sabe
+     * cuanta mora alcanzo a cubrir el dinero que entro: si el cliente trajo
+     * menos de lo que debe, la mora se cobra a medias y el recibo tiene que
+     * decir cuanta, no cuanta se habia calculado.
+     */
+    private function asentarLaMora(Recibo $recibo, Monto $cobrada, Monto $perdonada, string $motivo): void
+    {
+        if ($cobrada->esCero() && $perdonada->esCero()) {
+            return;
+        }
+
+        $recibo->update([
+            'monto_mora'         => $cobrada->redondeado(),
+            'mora_condonada'     => $perdonada->redondeado(),
+            'motivo_condonacion' => $perdonada->esCero() ? null : $motivo,
+            'condonada_por'      => $perdonada->esCero() ? null : auth()->id(),
+        ]);
+    }
+
+    /**
+     * Anular el recibo devuelve tambien la mora que perdonó.
+     *
+     * ⚠️ Se descuenta lo que perdonó ESTE recibo, renglón por renglón, y no se
+     * pone la columna en cero: una cuota puede arrastrar condonaciones de dos
+     * recibos distintos, y borrarlas todas volvería a cobrar una mora que ya
+     * alguien perdonó por escrito. Por eso `aplicaciones_de_pago` guarda
+     * `mora_condonada` propia, fuera de `monto`.
+     */
+    private function revertirLaCondonacion(Recibo $recibo): void
+    {
+        foreach ($recibo->aplicaciones()->with('cuota')->get() as $aplicacion) {
+            $perdonada = $aplicacion->moraCondonada();
+
+            if ($perdonada->esCero()) {
+                continue;
+            }
+
+            $cuota = $aplicacion->cuota;
+
+            if (! $cuota instanceof Cuota) {
+                continue;
+            }
+
+            $cuota->update([
+                'mora_condonada' => $cuota->moraCondonada()->restar($perdonada)->redondeado(),
+            ]);
+        }
+    }
+
+    /**
+     * El reparto: mora → interés → capital, cuota por cuota, FIFO.
+     *
+     * ═══ POR QUE ESTE ORDEN, ESCRITO ACA Y NO EN EL CONTRATO SOLAMENTE ═══
+     *
+     * Con capital primero, un cliente atrasado ve bajar su deuda pero la mora
+     * sigue corriendo sobre lo que no pagó y nunca termina. Con mora primero,
+     * el atraso se limpia y el capital vuelve a bajar. Es la imputación que
+     * usa cualquier crédito serio, y es la que hay que escribir en el contrato
+     * con todas las letras.
+     *
+     * Con tasa 0 y sin mora, los dos primeros pasos valen cero y esto es
+     * exactamente el FIFO a capital de siempre.
+     *
+     * ═══ CONDONAR ALCANZA A LAS CUOTAS QUE EL PAGO TOCA ═══
+     *
+     * Perdonar la mora de una cuota a la que el dinero nunca llegó seria
+     * perdonar en el aire: no habria renglon donde anotarlo y anular el recibo
+     * no podria deshacerlo. Se condona la mora de las cuotas que este pago
+     * efectivamente alcanza, que es ademas lo que pasa en el mostrador — el
+     * cliente viene a pagar la cuota y se le perdona SU mora.
      *
      * @param Collection<int, Cuota> $pendientes
+     *
+     * @return array{cobrada: Monto, condonada: Monto}
      */
-    private function repartir(Recibo $recibo, mixed $pendientes, Monto $monto): void
-    {
+    private function repartir(
+        Recibo $recibo,
+        mixed $pendientes,
+        Monto $monto,
+        ?MoraDelLote $mora = null,
+        bool $condonar = false,
+    ): array {
         $porRepartir = $monto;
+        $moraCobrada = Monto::cero();
+        $moraPerdonada = Monto::cero();
 
         foreach ($pendientes as $cuota) {
             if ($porRepartir->esCero()) {
                 break;
             }
 
-            $falta = $cuota->saldo();
+            // 1. La mora de ESTA cuota: se cobra, o se perdona entera.
+            $deMora = $mora instanceof MoraDelLote ? $mora->deLaCuota($cuota) : Monto::cero();
 
-            // Lo que le toca a esta cuota: todo lo que le falta, o lo que
-            // quede del pago si ya no alcanza.
-            $leToca = $porRepartir->mayorQue($falta) ? $falta : $porRepartir;
+            $aMora = $condonar
+                ? Monto::cero()
+                : ($porRepartir->mayorQue($deMora) ? $deMora : $porRepartir);
+
+            $perdonada = $condonar ? $deMora : Monto::cero();
+
+            $porRepartir = $porRepartir->restar($aMora);
+
+            // 2 y 3. Lo que le falta a la cuota, interés antes que capital.
+            $falta = $cuota->saldo();
+            $aLaCuota = $porRepartir->mayorQue($falta) ? $falta : $porRepartir;
+
+            $interesPendiente = $cuota->interesPendiente();
+            $aInteres = $aLaCuota->mayorQue($interesPendiente) ? $interesPendiente : $aLaCuota;
+            $aCapital = $aLaCuota->restar($aInteres);
+
+            $total = $aMora->sumar($aLaCuota);
+
+            /*
+             * El CHECK `aplicaciones_monto_positivo_chk` no admite renglones
+             * de L 0.00. Puede pasar si la mora de esta cuota es cero y el
+             * pago ya se agotó: se corta y no se escribe un renglón vacío.
+             */
+            if ($total->esCero()) {
+                continue;
+            }
 
             $recibo->aplicaciones()->create([
-                'cuota_id' => $cuota->getKey(),
-                'monto'    => $leToca->redondeado(),
+                'cuota_id'      => $cuota->getKey(),
+                'monto'         => $total->redondeado(),
+                'monto_mora'    => $aMora->redondeado(),
+                'monto_interes' => $aInteres->redondeado(),
+                'monto_capital' => $aCapital->redondeado(),
+                /*
+                 * Fuera de `monto` a proposito: lo condonado no es dinero que
+                 * entro. Va en el renglon igual porque es lo unico que le
+                 * permite a `anular()` deshacer el perdon de ESTE recibo sin
+                 * borrar el de otro.
+                 */
+                'mora_condonada' => $perdonada->redondeado(),
             ]);
 
             /*
-             * `monto_pagado` es la suma de sus aplicaciones. Se guarda igual y
-             * no se deriva en cada lectura: el estado de cuenta lo consulta
-             * lote por lote y hacerlo con un JOIN por cuota es pagar una
-             * consulta cara por un número que no cambia solo.
+             * `monto_pagado` es la suma de sus aplicaciones, SIN la mora. Se
+             * guarda igual y no se deriva en cada lectura: el estado de cuenta
+             * lo consulta lote por lote y hacerlo con un JOIN por cuota es
+             * pagar una consulta cara por un número que no cambia solo.
              */
             $cuota->update([
-                'monto_pagado' => $cuota->montoPagado()->sumar($leToca)->redondeado(),
+                'monto_pagado'   => $cuota->montoPagado()->sumar($aLaCuota)->redondeado(),
+                'mora_pagada'    => $cuota->moraPagada()->sumar($aMora)->redondeado(),
+                'mora_condonada' => $cuota->moraCondonada()->sumar($perdonada)->redondeado(),
             ]);
 
-            $porRepartir = $porRepartir->restar($leToca);
+            $moraCobrada = $moraCobrada->sumar($aMora);
+            $moraPerdonada = $moraPerdonada->sumar($perdonada);
+            $porRepartir = $porRepartir->restar($aLaCuota);
         }
+
+        return ['cobrada' => $moraCobrada, 'condonada' => $moraPerdonada];
     }
 
     /**
@@ -726,6 +992,10 @@ final readonly class RegistroDePagos
      * el `restrictOnDelete` de `aplicaciones_de_pago.cuota_id` nunca se
      * dispara acá: es la red por si algún día esta invariante se rompe, no un
      * obstáculo que haya que esquivar.
+     *
+     * ⚠️ Con interés, cada cuota nueva se escribe con su capital y su interés
+     * ya separados: el CHECK `cuotas_partes_suman_el_monto_chk` no deja pasar
+     * una fila que no cuadre, ni siquiera en un insert masivo.
      */
     private function reescribirElPlan(Venta $venta, Compromiso $lote, EfectoDelAbono $efecto, PlanDeCuotas $plan): void
     {
@@ -750,7 +1020,11 @@ final readonly class RegistroDePagos
                 'numero'            => $cuota->numero,
                 'fecha_vencimiento' => $cuota->vencimientoParaBase(),
                 'monto'             => $cuota->montoParaBase(),
+                'monto_capital'     => $cuota->capitalParaBase(),
+                'monto_interes'     => $cuota->interesParaBase(),
                 'monto_pagado'      => '0.00',
+                'mora_pagada'       => '0.00',
+                'mora_condonada'    => '0.00',
                 'created_at'        => $ahora,
                 'updated_at'        => $ahora,
             ];

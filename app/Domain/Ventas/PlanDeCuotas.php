@@ -12,28 +12,44 @@ use Countable;
 /**
  * El motor de cuotas. Aritmetica pura, sin base de datos y sin Laravel.
  *
- * ═══ LA REGLA QUE LO DEFINE TODO ═══
+ * ═══ DOS CAMINOS, Y CUAL CORRE CADA LOTIFICADORA ═══
  *
- * R1 del `docs/dominio.md`, contestada por la contratante el 3-ago-2026:
- * **el saldo financiado NO genera interes.** El precio del lote ya incluye
- * todo, asi que la cuota es una division y nada mas:
+ * Desde el 8-ago-2026 el interes es **configurable por plan de pago** (§8.5):
+ * cada lotificadora decide si su plazo de 48 meses cobra 0 % o 12 %, y ese
+ * numero se congela en el compromiso al firmar. De ahi salen dos caminos:
  *
- *     cuota = (valor de la venta − prima) ÷ plazo en meses
+ *  - **Tasa 0 — el de siempre.** `cuota = (valor − prima) ÷ plazo`, con el
+ *    residuo a la ultima (§8.2). Es el que corre Praderas del Sol por R1, y
+ *    es **exactamente el mismo codigo que corria antes del 8-ago**: no se
+ *    toco una linea de su aritmetica. El golden test del §9.C9 lo congela.
+ *  - **Tasa > 0 — tabla francesa.** `TablaDeAmortizacion` reparte el capital
+ *    y cada cuota sale partida en capital e interes.
  *
- * No hay tabla francesa, no hay capital e interes separados, no hay
- * columna de interes en ninguna parte. Y por R2 tampoco hay mora: un
- * cliente atrasado debe exactamente lo mismo que debia el dia del
- * vencimiento.
+ * ═══ 🔴 POR QUE SON DOS CAMINOS Y NO UNO ═══
+ *
+ * `docs/que-le-falta.md` §1.2 argumento que la formula francesa con `i = 0`
+ * «degenera exactamente en P ÷ n» y que por eso habria **un solo camino de
+ * codigo**. Matematicamente es cierto —es el limite— pero **la cuenta no se
+ * puede hacer**: con `i = 0` la formula es `P × 0 ÷ (1 − 1)`, o sea `0 ÷ 0`.
+ * En float daria `NAN`; en bcmath, division por cero.
+ *
+ * Asi que el `if` de la tasa cero no es una optimizacion prescindible: es
+ * obligatorio. Y tiene una consecuencia que conviene por otro motivo — a doce
+ * dias del arranque, **el cliente que va a operar el 20-ago no cambia de
+ * camino de codigo**.
  *
  * ═══ EL RESIDUO VA A LA ULTIMA CUOTA ═══
  *
  * La division casi nunca cierra exacta. El §8.2 lo resuelve mandando el
- * residuo a la ultima cuota, de modo que **la suma de las cuotas es
- * exactamente igual al saldo, al centimo**. Es la unica forma de que un
- * estado de cuenta termine en cero el ultimo mes en vez de dejar un
- * arrastre de centavos que nadie sabe explicar.
+ * residuo a la ultima cuota, de modo que **la suma del CAPITAL es exactamente
+ * igual al saldo, al centimo**. Es la unica forma de que un estado de cuenta
+ * termine en cero el ultimo mes en vez de dejar un arrastre de centavos que
+ * nadie sabe explicar.
  *
- * El golden test del §9.C9 congela el caso de referencia:
+ * ⚠️ Con interes, lo que cierra contra el saldo es el CAPITAL y no la suma de
+ * las cuotas: esa da capital + intereses. Ver `cierraExacto()`.
+ *
+ * El golden test del §9.C9 congela el caso de referencia, sin interes:
  *
  *     250 varas² x L 1,400.00 = L 350,000.00, prima L 100,000.00
  *     → saldo L 250,000.00 en 72 cuotas
@@ -41,14 +57,15 @@ use Countable;
  *
  * ═══ LOS TRES CONSTRUCTORES, Y CUAL USA CADA UNO ═══
  *
- * - `nuevo()`      — la venta que se firma. Valor, prima y plazo.
+ * - `nuevo()`      — la venta que se firma. Valor, prima, plazo y tasa.
  * - `porCuotaFija()` — R21, camino «misma cuota, menos meses». La cuota es
  *   un dato de entrada y lo que se calcula es cuantas faltan.
  * - `porPlazoFijo()` — R21, camino «mismos meses, cuota mas baja». Los meses
  *   son el dato de entrada y lo que se calcula es la cuota.
  *
- * Los tres terminan en el mismo `armar()`, asi que el residuo se reparte
- * igual en los tres y el golden test los cubre a todos.
+ * La tasa entra como ULTIMO parametro y con default en los tres: todas las
+ * llamadas que existian el 7-ago siguen compilando y siguen dando el mismo
+ * numero.
  *
  * ═══ POR QUE ES UN VALUE OBJECT Y NO UN SERVICE ═══
  *
@@ -77,14 +94,18 @@ final readonly class PlanDeCuotas implements Countable
     private function __construct(
         public array $cuotas,
         public Monto $saldoFinanciado,
+        public TasaDeInteres $tasa,
     ) {}
 
     /**
-     * El plan de una venta nueva (R1).
+     * El plan de una venta nueva.
      *
      * La primera cuota vence el `diaPago` del mes SIGUIENTE al contrato.
      * Que caiga a pocos dias de la firma es normal y buscado: el dia de
      * pago es fijo por venta, no un aniversario movil.
+     *
+     * @param TasaDeInteres|null $tasa null es lo mismo que 0 %: el caso de
+     *                                 Praderas del Sol (R1)
      *
      * @throws PlanDeCuotasInvalidoException
      */
@@ -94,6 +115,7 @@ final readonly class PlanDeCuotas implements Countable
         int $plazoMeses,
         int $diaPago,
         CarbonImmutable $fechaContrato,
+        ?TasaDeInteres $tasa = null,
     ): self {
         if ($prima->mayorQue($valorTotal)) {
             throw PlanDeCuotasInvalidoException::porPrimaMayorAlValor($prima, $valorTotal);
@@ -109,10 +131,17 @@ final readonly class PlanDeCuotas implements Countable
                 throw PlanDeCuotasInvalidoException::porContadoConPlazo($plazoMeses);
             }
 
-            return new self([], $saldo);
+            return new self([], $saldo, $tasa ?? TasaDeInteres::cero());
         }
 
-        return self::porPlazoFijo($saldo, $plazoMeses, $diaPago, $fechaContrato->addMonthsNoOverflow(1));
+        return self::porPlazoFijo(
+            $saldo,
+            $plazoMeses,
+            $diaPago,
+            $fechaContrato->addMonthsNoOverflow(1),
+            1,
+            $tasa,
+        );
     }
 
     /**
@@ -127,6 +156,10 @@ final readonly class PlanDeCuotas implements Countable
      * vuelve a absorber el residuo, y por construccion queda menor o igual
      * que la cuota pactada.
      *
+     * ⚠️ Con interes, `$saldo` es CAPITAL pendiente, no la suma de las cuotas
+     * que quedan: reamortizar sobre un numero que ya incluia intereses seria
+     * cobrar interes sobre el interes del plan viejo.
+     *
      * @param CarbonImmutable $mesDelPrimerVencimiento cualquier dia del mes
      *                                                 en que cae la proxima cuota
      * @param int $primerNumero con que numero arranca el plan; ver `armar()`
@@ -139,7 +172,10 @@ final readonly class PlanDeCuotas implements Countable
         int $diaPago,
         CarbonImmutable $mesDelPrimerVencimiento,
         int $primerNumero = 1,
+        ?TasaDeInteres $tasa = null,
     ): self {
+        $tasa ??= TasaDeInteres::cero();
+
         if ($cuota->esCero()) {
             throw PlanDeCuotasInvalidoException::porCuotaEnCero();
         }
@@ -149,7 +185,18 @@ final readonly class PlanDeCuotas implements Countable
         // Saldo en cero: el abono termino de pagar la venta. Plan vacio, y
         // ninguna cuota de L 0.00 colgando (R3).
         if ($saldo->esCero()) {
-            return new self([], $saldo);
+            return new self([], $saldo, $tasa);
+        }
+
+        if (! $tasa->esCero()) {
+            return self::conTabla(
+                TablaDeAmortizacion::porCuota($saldo, $tasa, $cuota, self::PLAZO_MAXIMO_MESES),
+                $saldo,
+                $tasa,
+                $diaPago,
+                $mesDelPrimerVencimiento,
+                $primerNumero,
+            );
         }
 
         $cantidad = self::cuotasQueCaben($saldo, $cuota);
@@ -159,6 +206,7 @@ final readonly class PlanDeCuotas implements Countable
         return new self(
             self::armar($cuota, $ultima, $cantidad, $diaPago, $mesDelPrimerVencimiento, $primerNumero),
             $saldo,
+            $tasa,
         );
     }
 
@@ -186,15 +234,29 @@ final readonly class PlanDeCuotas implements Countable
         int $diaPago,
         CarbonImmutable $mesDelPrimerVencimiento,
         int $primerNumero = 1,
+        ?TasaDeInteres $tasa = null,
     ): self {
+        $tasa ??= TasaDeInteres::cero();
+
         // Saldo en cero: el abono cancelo lo que quedaba. Plan vacio, sin
         // cuotas de L 0.00 colgando — el mismo borde que R3 fija arriba.
         if ($saldo->esCero()) {
-            return new self([], $saldo);
+            return new self([], $saldo, $tasa);
         }
 
         self::verificarPlazo($plazoMeses);
         self::verificarDiaDePago($diaPago);
+
+        if (! $tasa->esCero()) {
+            return self::conTabla(
+                TablaDeAmortizacion::porPlazo($saldo, $tasa, $plazoMeses),
+                $saldo,
+                $tasa,
+                $diaPago,
+                $mesDelPrimerVencimiento,
+                $primerNumero,
+            );
+        }
 
         $base = new Monto($saldo->dividirPor($plazoMeses)->redondeado());
 
@@ -226,6 +288,7 @@ final readonly class PlanDeCuotas implements Countable
         return new self(
             self::armar($base, $ultima, $plazoMeses, $diaPago, $mesDelPrimerVencimiento, $primerNumero),
             $saldo,
+            $tasa,
         );
     }
 
@@ -245,12 +308,17 @@ final readonly class PlanDeCuotas implements Countable
         return $this->cuotas === [] ? null : $this->cuotas[count($this->cuotas) - 1];
     }
 
+    public function llevaInteres(): bool
+    {
+        return ! $this->tasa->esCero();
+    }
+
     /**
-     * La suma de todas las cuotas.
+     * La suma de todas las cuotas: lo que el cliente termina pagando.
      *
-     * Tiene que dar exactamente `saldoFinanciado`. El golden test del
-     * §9.C9 vive de esta igualdad, y el Service que persista el plan la
-     * verifica dentro de la transaccion (§8.3.4).
+     * ⚠️ Sin interes esto da el saldo financiado; con interes da el saldo MAS
+     * los intereses. Para «¿el plan cierra?» va `cierraExacto()`, que compara
+     * capital contra capital.
      */
     public function total(): Monto
     {
@@ -264,15 +332,52 @@ final readonly class PlanDeCuotas implements Countable
     }
 
     /**
+     * La suma del capital. Tiene que dar exactamente `saldoFinanciado`.
+     */
+    public function totalCapital(): Monto
+    {
+        $total = Monto::cero();
+
+        foreach ($this->cuotas as $cuota) {
+            $total = $total->sumar($cuota->capital);
+        }
+
+        return $total;
+    }
+
+    /**
+     * Lo que el interes le agrega al precio del lote.
+     *
+     * Es el numero que hay que imprimir en el contrato con todas las letras.
+     * A 48 meses y 12 % anual son L 184,816.92 sobre un lote de L 700,000: un
+     * 26 % mas. Esconderlo dentro de la cuota es exactamente como se pierde
+     * un juicio.
+     */
+    public function totalInteres(): Monto
+    {
+        $total = Monto::cero();
+
+        foreach ($this->cuotas as $cuota) {
+            $total = $total->sumar($cuota->interes);
+        }
+
+        return $total;
+    }
+
+    /**
      * ¿El plan cierra al centimo contra el saldo que dice financiar?
      *
      * Se expone a proposito en vez de dejarlo solo en los tests: el
      * Service lo llama antes de escribir, porque un plan que no cierra no
      * debe llegar nunca a la base de datos.
+     *
+     * ⚠️ Compara **capital**, no la suma de las cuotas. Sin interes son el
+     * mismo numero y esta funcion se comporta igual que siempre; con interes,
+     * comparar la suma de las cuotas daria falso en todos los planes validos.
      */
     public function cierraExacto(): bool
     {
-        return $this->total()->igualA($this->saldoFinanciado);
+        return $this->totalCapital()->igualA($this->saldoFinanciado);
     }
 
     public function count(): int
@@ -306,7 +411,7 @@ final readonly class PlanDeCuotas implements Countable
         $cuotas = [];
 
         for ($i = 0; $i < $cantidad; $i++) {
-            $cuotas[] = new CuotaProyectada(
+            $cuotas[] = CuotaProyectada::sinInteres(
                 numero: $primerNumero + $i,
                 vencimiento: self::vencimiento($mesCero, $i, $diaPago),
                 monto: $i === $cantidad - 1 ? $ultima : $base,
@@ -314,6 +419,36 @@ final readonly class PlanDeCuotas implements Countable
         }
 
         return $cuotas;
+    }
+
+    /**
+     * El mismo calendario que `armar()`, sobre una tabla francesa ya armada.
+     *
+     * Los vencimientos se calculan igual en los dos caminos: la tabla dice
+     * CUANTO y esto dice CUANDO. Separarlos es lo que hace que un plan con
+     * interes y uno sin interes venzan el mismo dia del mes.
+     */
+    private static function conTabla(
+        TablaDeAmortizacion $tabla,
+        Monto $saldo,
+        TasaDeInteres $tasa,
+        int $diaPago,
+        CarbonImmutable $mesDelPrimerVencimiento,
+        int $primerNumero,
+    ): self {
+        $mesCero = $mesDelPrimerVencimiento->startOfMonth();
+        $cuotas = [];
+
+        foreach ($tabla->renglones as $i => $renglon) {
+            $cuotas[] = CuotaProyectada::conInteres(
+                numero: $primerNumero + $i,
+                vencimiento: self::vencimiento($mesCero, $i, $diaPago),
+                capital: $renglon['capital'],
+                interes: $renglon['interes'],
+            );
+        }
+
+        return new self($cuotas, $saldo, $tasa);
     }
 
     /**

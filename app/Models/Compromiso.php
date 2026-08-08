@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Domain\Enums\EstadoCompromiso;
+use App\Domain\Enums\ModalidadDeMora;
 use App\Domain\Enums\TipoCompromiso;
 use App\Domain\ValueObjects\Monto;
+use App\Domain\Ventas\CondicionesDeMora;
+use App\Domain\Ventas\TasaDeInteres;
 use App\Traits\HasAuditFields;
 use Database\Factories\CompromisoFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -50,6 +53,11 @@ use Spatie\Activitylog\Support\LogOptions;
     'valor',
     'plazo_meses',
     'prima',
+    'tasa_interes_anual',
+    'mora_modalidad',
+    'mora_monto',
+    'mora_porcentaje',
+    'mora_dias_gracia',
     'motivo_descuento',
     'monto_senia',
     'fecha',
@@ -82,6 +90,7 @@ class Compromiso extends Model
     {
         return [
             'tipo'              => TipoCompromiso::class,
+            'mora_modalidad'    => ModalidadDeMora::class,
             'estado'            => EstadoCompromiso::class,
             'fecha'             => 'date',
             'vence_el'          => 'date',
@@ -390,5 +399,42 @@ class Compromiso extends Model
             ->whereNotNull('monto_senia')
             ->where('monto_senia', '>', 0)
             ->whereNull('senia_devuelta_el');
+    }
+
+    // ─── El precio del dinero, congelado al firmar ────────────────────
+
+    /**
+     * La tasa con la que se firmo ESTE renglon del contrato.
+     *
+     * Del compromiso y no del plan de pago del proyecto: si manana la
+     * lotificadora sube la tasa, este contrato sigue con la suya. Es el mismo
+     * criterio que ya rige area, precio de lista, precio pactado y plazo.
+     */
+    public function tasaDeInteres(): TasaDeInteres
+    {
+        return TasaDeInteres::deBase($this->getAttribute('tasa_interes_anual'));
+    }
+
+    /**
+     * Como se cobra el atraso de ESTE renglon, congelado igual que la tasa.
+     */
+    public function condicionesDeMora(): CondicionesDeMora
+    {
+        return CondicionesDeMora::deBase(
+            $this->getAttribute('mora_modalidad'),
+            $this->getAttribute('mora_monto'),
+            $this->getAttribute('mora_porcentaje'),
+            $this->getAttribute('mora_dias_gracia'),
+        );
+    }
+
+    public function cobraInteres(): bool
+    {
+        return ! $this->tasaDeInteres()->esCero();
+    }
+
+    public function cobraMora(): bool
+    {
+        return $this->condicionesDeMora()->cobra();
     }
 }

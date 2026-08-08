@@ -88,6 +88,11 @@ final readonly class PlanDelContrato
      * lotes al mismo plazo da UN tramo, que es exactamente lo que pasaba
      * antes de que existieran los plazos por lote.
      *
+     * ⚠️ Con interes los tramos son mas: en una tabla francesa la cuota es
+     * pareja, asi que esto sigue dando un tramo por plazo — pero la ULTIMA
+     * cuota de cada lote difiere por el residuo y abre su propio tramo de un
+     * mes. Es correcto y es lo que el cliente va a pagar.
+     *
      * @return list<array{desde: int, hasta: int, monto: Monto}>
      */
     public function tramos(): array
@@ -120,7 +125,7 @@ final readonly class PlanDelContrato
     }
 
     /**
-     * La suma de todo lo que se va a financiar.
+     * La suma de todo lo que se va a financiar. Es CAPITAL.
      */
     public function saldoFinanciado(): Monto
     {
@@ -134,10 +139,11 @@ final readonly class PlanDelContrato
     }
 
     /**
-     * La suma de todas las cuotas de todos los lotes.
+     * La suma de todas las cuotas de todos los lotes: lo que el cliente
+     * termina pagando.
      *
-     * Tiene que dar exactamente `saldoFinanciado()`: cada plan cierra al
-     * céntimo contra el suyo, así que la suma cierra contra la suma.
+     * ⚠️ Sin interes da `saldoFinanciado()`; con interes da eso mas los
+     * intereses. Para verificar que el contrato cierra va `totalCapital()`.
      */
     public function total(): Monto
     {
@@ -148,6 +154,46 @@ final readonly class PlanDelContrato
         }
 
         return $total;
+    }
+
+    /**
+     * La suma del capital de todos los lotes.
+     *
+     * Tiene que dar exactamente `saldoFinanciado()`: cada plan cierra al
+     * céntimo contra el suyo, así que la suma cierra contra la suma. Es lo
+     * que `RegistroDeVentas` compara antes de escribir una sola fila.
+     */
+    public function totalCapital(): Monto
+    {
+        $total = Monto::cero();
+
+        foreach ($this->renglones as $renglon) {
+            $total = $total->sumar($renglon['plan']->totalCapital());
+        }
+
+        return $total;
+    }
+
+    /**
+     * Lo que los intereses le agregan al contrato entero.
+     *
+     * Es el numero que va impreso en el contrato con todas las letras. Cero
+     * con R1, y por eso las pantallas lo esconden cuando no aplica.
+     */
+    public function totalInteres(): Monto
+    {
+        $total = Monto::cero();
+
+        foreach ($this->renglones as $renglon) {
+            $total = $total->sumar($renglon['plan']->totalInteres());
+        }
+
+        return $total;
+    }
+
+    public function llevaInteres(): bool
+    {
+        return ! $this->totalInteres()->esCero();
     }
 
     /**

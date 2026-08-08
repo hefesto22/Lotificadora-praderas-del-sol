@@ -6,6 +6,7 @@ namespace App\Domain\Exceptions;
 
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\PlanDeCuotas;
+use App\Domain\Ventas\TasaDeInteres;
 
 /**
  * Ese plan de pagos no se puede armar.
@@ -71,5 +72,66 @@ final class PlanDeCuotasInvalidoException extends GrupoOlympoException
         return new self(
             'La cuota fija no puede ser cero: con eso el saldo nunca termina de pagarse.'
         );
+    }
+
+    /**
+     * La cuota y sus dos partes tienen que sumar exacto.
+     *
+     * No es un error que un usuario pueda provocar: es la red que atrapa un
+     * reparto de residuo mal hecho antes de que llegue a un estado de cuenta.
+     */
+    public static function porCuotaQueNoCuadraConSusPartes(
+        Monto $monto,
+        Monto $capital,
+        Monto $interes,
+        int $numero,
+    ): self {
+        return new self(
+            "La cuota {$numero} dice {$monto->formateado()} pero sus partes suman "
+            ."{$capital->sumar($interes)->formateado()} ({$capital->formateado()} de capital "
+            ."+ {$interes->formateado()} de interes)."
+        );
+    }
+
+    /**
+     * Una cuota que no cubre ni el interes del mes deja la deuda creciendo
+     * para siempre. Pasa al acortar plazo (R21) con una tasa alta.
+     */
+    public static function porCuotaQueNoCubreElInteres(Monto $cuota, Monto $interes, TasaDeInteres $tasa): self
+    {
+        return new self(
+            "La cuota de {$cuota->formateado()} no alcanza a cubrir el interes del mes "
+            ."({$interes->formateado()} al {$tasa->formateada()} anual): la deuda nunca bajaria. "
+            .'Hace falta una cuota mayor o una tasa menor.'
+        );
+    }
+
+    /**
+     * La tabla no cierra contra el capital que dice repartir.
+     */
+    public static function porTablaQueNoCierra(Monto $suma, Monto $capital): self
+    {
+        return new self(
+            "La tabla de amortizacion reparte {$suma->formateado()} de capital "
+            ."y el saldo a financiar es {$capital->formateado()}."
+        );
+    }
+
+    /**
+     * 🔴 Con tasa 0 la formula francesa es 0 ÷ 0. El camino sin interes es
+     * otro —el de siempre— y quien llame a la tabla con tasa cero se
+     * equivoco de puerta, no de numero.
+     */
+    public static function porTasaCeroEnLaTablaFrancesa(): self
+    {
+        return new self(
+            'La tabla francesa no admite tasa 0: la formula quedaria 0 ÷ 0. '
+            .'Un plan sin interes se arma con el camino de siempre, (valor - prima) ÷ plazo.'
+        );
+    }
+
+    public static function porTasaQueNoAmortiza(): self
+    {
+        return new self('Con esa tasa y ese plazo la cuota no se puede calcular.');
     }
 }

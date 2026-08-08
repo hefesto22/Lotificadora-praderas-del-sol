@@ -226,4 +226,13 @@ final class PagoInvalidoException extends GrupoOlympoException
             'No se registró nada. Avisá a soporte: es un error de cálculo, no de digitación.'
         );
     }
+
+    /**
+     * Perdonar la mora es un tramite, no un campo que se deja vacio: sin
+     * motivo escrito no hay condonacion, igual que el descuento de R4.
+     */
+    public static function porFaltarElMotivoDeLaCondonacion(): self
+    {
+        return new self('Para condonar la mora hace falta escribir por que. Queda en el recibo, con el nombre de quien la autorizo.');
+    }
 }

@@ -38,13 +38,27 @@ final readonly class ListaDePrecios
      */
     public function paraPlazo(Proyecto $proyecto, int $meses): ?Monto
     {
-        $plan = PlanDePago::query()
+        return $this->planParaPlazo($proyecto, $meses)?->montoPrecioVara();
+    }
+
+    /**
+     * El plan entero de ese plazo, no solo su precio.
+     *
+     * Desde el 8-ago-2026 el plan trae ademas la tasa de interes y las
+     * condiciones de mora (§8.5), y las tres cosas se congelan juntas en el
+     * compromiso al firmar. Devolver el modelo y no tres valores sueltos es
+     * lo que impide que alguien copie el precio y se olvide de la tasa.
+     *
+     * Solo planes ACTIVOS, igual que `paraPlazo()`: uno apagado dejo de
+     * ofrecerse y cotizar con el seria vender algo que ya se retiro.
+     */
+    public function planParaPlazo(Proyecto $proyecto, int $meses): ?PlanDePago
+    {
+        return PlanDePago::query()
             ->where('proyecto_id', $proyecto->getKey())
             ->where('meses', $meses)
             ->activos()
             ->first();
-
-        return $plan instanceof PlanDePago ? $plan->montoPrecioVara() : null;
     }
 
     /**

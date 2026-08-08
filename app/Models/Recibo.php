@@ -43,6 +43,10 @@ use Spatie\Activitylog\Support\LogOptions;
     'monto',
     'fecha',
     'observaciones',
+    'monto_mora',
+    'mora_condonada',
+    'motivo_condonacion',
+    'condonada_por',
     'anulado_el',
     'anulado_por',
     'motivo_anulacion',
@@ -284,5 +288,54 @@ class Recibo extends Model
     public function folio(): string
     {
         return str_pad((string) $this->getAttribute('numero'), 6, '0', STR_PAD_LEFT);
+    }
+
+    // ─── Mora ─────────────────────────────────────────────────────────
+
+    /**
+     * La mora que entro con este recibo. Ya esta adentro de `monto`: no se
+     * suma aparte, se DESGLOSA — el papel dice «de los L 15,000, L 287.67
+     * fueron mora».
+     */
+    public function montoMora(): Monto
+    {
+        return $this->montoDeColumna('monto_mora');
+    }
+
+    /**
+     * La mora que se perdono en este cobro. NO esta adentro de `monto`:
+     * nunca entro por la puerta.
+     */
+    public function moraCondonada(): Monto
+    {
+        return $this->montoDeColumna('mora_condonada');
+    }
+
+    public function cobroMora(): bool
+    {
+        return ! $this->montoMora()->esCero();
+    }
+
+    public function condonoMora(): bool
+    {
+        return ! $this->moraCondonada()->esCero();
+    }
+
+    /**
+     * Lo que se aplico al contrato: el monto sin la mora.
+     *
+     * Es el numero que baja la deuda, y el que el cliente busca cuando
+     * compara el recibo contra su estado de cuenta.
+     */
+    public function montoAlContrato(): Monto
+    {
+        return $this->montoTotal()->restar($this->montoMora());
+    }
+
+    private function montoDeColumna(string $columna): Monto
+    {
+        $valor = $this->getAttribute($columna);
+
+        return new Monto(is_string($valor) || is_int($valor) ? $valor : '0');
     }
 }

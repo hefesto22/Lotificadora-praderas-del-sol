@@ -132,8 +132,14 @@ class RoleSeeder extends Seeder
          * Anular un recibo NO va en el cruce y NO lo tiene el receptor: quien
          * cobra no debería poder borrar su propio cobro del estado de cuenta.
          * Un monto mal tecleado lo corrige la administradora, con motivo.
+         *
+         * Condonar la mora va al lado y por la misma razón: perdonarle el
+         * atraso a un cliente es plata que la lotificadora deja de cobrar, y
+         * quien está en la ventanilla con el cliente enfrente es exactamente
+         * quien no debería poder decidirlo solo. Va con motivo escrito, y
+         * queda en el recibo con el nombre de quien lo autorizó.
          */
-        $permisos = [...$permisos, ...$this->permisos(['Anular'], ['Recibo'])];
+        $permisos = [...$permisos, ...$this->permisos(['Anular', 'CondonarMora'], ['Recibo'])];
 
         $this->rol(Roles::ADMINISTRADORA)->syncPermissions($permisos);
     }
