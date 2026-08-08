@@ -11,6 +11,7 @@ use Spatie\Health\Checks\Checks\OptimizedAppCheck;
 use Spatie\Health\Checks\Checks\QueueCheck;
 use Spatie\Health\Checks\Checks\RedisCheck;
 use Spatie\Health\Checks\Checks\UsedDiskSpaceCheck;
+use Spatie\Health\Notifications\CheckFailedNotification;
 
 return [
 
@@ -34,9 +35,16 @@ return [
     | canal por defecto (vía LOG_STACK=daily,sentry).
     */
     'notifications' => [
-        'enabled'       => false,
+        /*
+         * Encendidas por defecto desde el 8-ago-2026. Estaban en `false` y
+         * eso hacía que /health pudiera estar en rojo por semanas —base
+         * caída, disco lleno, cron muerto— sin que nadie recibiera nada.
+         * Una alerta apagada es peor que no tenerla: da la sensación de que
+         * alguien está mirando.
+         */
+        'enabled'       => (bool) env('HEALTH_NOTIFICATIONS', true),
         'notifications' => [
-            // Spatie\Health\Notifications\CheckFailedNotification::class => ['mail'],
+            CheckFailedNotification::class => ['mail'],
         ],
         'mail' => [
             'to' => env('HEALTH_ALERT_EMAIL', 'admin@grupoolympo.com'),

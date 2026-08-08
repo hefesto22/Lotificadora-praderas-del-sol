@@ -20,7 +20,9 @@ use App\Models\Recibo;
 use App\Models\Reprogramacion;
 use App\Models\Venta;
 use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Radio;
@@ -29,6 +31,9 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Schemas\Components\Component;
+use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Collection as Cuotas;
@@ -107,27 +112,14 @@ class ViewVenta extends ViewRecord
             ->visible(fn (): bool => $this->venta()->getAttribute('estado') === EstadoVenta::Vigente
                 && auth()->user()?->can('create', Recibo::class) === true)
             ->modalHeading('Registrar un pago')
-            ->modalDescription('Se aplica a las cuotas más viejas primero, y queda su recibo con número.')
+            ->modalDescription('Marcá los lotes que viene a pagar. Se aplica a las cuotas más viejas primero de cada uno, y sale UN recibo con el desglose.')
             ->modalSubmitActionLabel('Cobrar y emitir el recibo')
             ->modalWidth('2xl')
-            ->fillForm(fn (): array => [
-                'compromiso_id' => $this->primerLoteConSaldo()?->getKey(),
-                'fecha'         => today()->toDateString(),
-                'forma_pago'    => FormaDePago::Efectivo->value,
-            ])
-            ->schema([
-                Select::make('compromiso_id')
-                    ->label('¿A qué lote?')
-                    ->options(fn (): array => $this->lotesConSaldo())
-                    ->required()
-                    ->live()
-                    ->native(false)
-                    ->helperText('Cada lote tiene su propio plan: un pago va contra uno.'),
-
-                MontoField::make('monto', 'Monto recibido')
-                    ->required()
-                    ->live(onBlur: true)
-                    ->helperText('Puede ser menos que la cuota: lo que falte se arrastra, sin recargo (R2).'),
+            ->fillForm(fn (): array => $this->cobroSugerido())
+            ->schema(fn (): array => [
+                Section::make('¿Qué viene a pagar?')
+                    ->description('Puede ser menos que la cuota: lo que falte se arrastra, sin recargo (R2).')
+                    ->schema($this->renglonesDeCobro()),
 
                 Select::make('forma_pago')
                     ->label('Forma de pago')
@@ -157,7 +149,28 @@ class ViewVenta extends ViewRecord
                     ->label('Fecha del pago')
                     ->required()
                     ->native(false)
-                    ->displayFormat('d/m/Y'),
+                    ->displayFormat('d/m/Y')
+                    /*
+                     * Acotada de los dos lados. Sin tope, un cobro se podía
+                     * fechar en 2019 —el clásico error de tipear el año— o el
+                     * mes que viene, dejando una cuota pagada antes de
+                     * haberse cobrado.
+                     *
+                     * ⚠️ `endOfDay()` y `startOfDay()`, no la fecha pelada.
+                     * Filament valida con `before_or_equal` contra el INSTANTE
+                     * exacto, y un tope en «hoy a medianoche» rechaza el
+                     * propio día de hoy según cómo venga hidratado el estado
+                     * —pasó, y solo en el caso en que la fecha sale del
+                     * `fillForm` en vez de tecleárse—. El borde de verdad es
+                     * `RegistroDePagos::verificarLaFecha()`, que sí es
+                     * estricto; acá alcanza con no dejar elegir OTRO día.
+                     */
+                    ->maxDate(today()->endOfDay())
+                    ->minDate(function (): ?CarbonInterface {
+                        $firma = $this->venta()->getAttribute('fecha_contrato');
+
+                        return $firma instanceof CarbonInterface ? $firma->startOfDay() : null;
+                    }),
 
                 Textarea::make('observaciones')
                     ->label('Observaciones')
@@ -165,11 +178,10 @@ class ViewVenta extends ViewRecord
             ])
             ->action(function (array $data): void {
                 try {
-                    $recibo = app(RegistroDePagos::class)->cobrarCuotas(
+                    $recibo = app(RegistroDePagos::class)->cobrarVariosLotes(
                         venta: $this->venta(),
-                        lote: Compromiso::query()->findOrFail($data['compromiso_id']),
                         cliente: $this->venta()->titular() ?? $this->venta()->clientes()->firstOrFail(),
-                        monto: new Monto((string) ($data['monto'] ?? '0')),
+                        renglones: $this->renglonesTecleados($data),
                         forma: FormaDePago::from((string) $data['forma_pago']),
                         referencia: is_string($data['referencia'] ?? null) ? $data['referencia'] : null,
                         fecha: CarbonImmutable::parse((string) $data['fecha']),
@@ -191,13 +203,18 @@ class ViewVenta extends ViewRecord
                  * Persistente por lo mismo: una notificación que se desvanece
                  * a los cinco segundos se lleva el botón con ella.
                  */
+                $cuotas = $recibo->aplicaciones()->count();
+                $lotes = count($recibo->codigosDeLotes());
+
                 Notification::make()
                     ->title("Recibo {$recibo->folio()}")
                     ->body(sprintf(
-                        '%s aplicados a %d %s.',
+                        '%s aplicados a %d %s de %d %s.',
                         $recibo->montoTotal()->formateado(),
-                        $recibo->aplicaciones()->count(),
-                        $recibo->aplicaciones()->count() === 1 ? 'cuota' : 'cuotas',
+                        $cuotas,
+                        $cuotas === 1 ? 'cuota' : 'cuotas',
+                        $lotes,
+                        $lotes === 1 ? 'lote' : 'lotes',
                     ))
                     ->success()
                     ->persistent()
@@ -285,7 +302,28 @@ class ViewVenta extends ViewRecord
                     ->label('Fecha del pago')
                     ->required()
                     ->native(false)
-                    ->displayFormat('d/m/Y'),
+                    ->displayFormat('d/m/Y')
+                    /*
+                     * Acotada de los dos lados. Sin tope, un cobro se podía
+                     * fechar en 2019 —el clásico error de tipear el año— o el
+                     * mes que viene, dejando una cuota pagada antes de
+                     * haberse cobrado.
+                     *
+                     * ⚠️ `endOfDay()` y `startOfDay()`, no la fecha pelada.
+                     * Filament valida con `before_or_equal` contra el INSTANTE
+                     * exacto, y un tope en «hoy a medianoche» rechaza el
+                     * propio día de hoy según cómo venga hidratado el estado
+                     * —pasó, y solo en el caso en que la fecha sale del
+                     * `fillForm` en vez de tecleárse—. El borde de verdad es
+                     * `RegistroDePagos::verificarLaFecha()`, que sí es
+                     * estricto; acá alcanza con no dejar elegir OTRO día.
+                     */
+                    ->maxDate(today()->endOfDay())
+                    ->minDate(function (): ?CarbonInterface {
+                        $firma = $this->venta()->getAttribute('fecha_contrato');
+
+                        return $firma instanceof CarbonInterface ? $firma->startOfDay() : null;
+                    }),
 
                 Textarea::make('motivo')
                     ->label('¿Por qué?')
@@ -359,6 +397,154 @@ class ViewVenta extends ViewRecord
         return $opciones;
     }
 
+    /**
+     * Los lotes del contrato que todavía deben algo, como objetos.
+     *
+     * `lotesConSaldo()` devuelve lo mismo armado para el Select del abono;
+     * esto devuelve los renglones, que es lo que necesita un cobro de varios.
+     *
+     * @return list<Compromiso>
+     */
+    private function lotesQueDeben(): array
+    {
+        $lotes = [];
+
+        foreach ($this->venta()->compromisos as $renglon) {
+            if (! $this->saldoDe($renglon)->esCero()) {
+                $lotes[] = $renglon;
+            }
+        }
+
+        return $lotes;
+    }
+
+    /**
+     * Un renglón por lote que debe: la casilla y su monto.
+     *
+     * ═══ POR QUE LOS CAMPOS SE LLAMAN `cobrar_12`, PLANO ═══
+     *
+     * Un nombre con puntos (`lotes.12.monto`) arma estado ANIDADO, y con
+     * claves numéricas Filament lo deshidrata como lista: el id 12 deja de ser
+     * el id 12 y pasa a ser «el treceavo». Plano no tiene ese problema, y
+     * leerlo de vuelta es recorrer estos mismos lotes.
+     *
+     * @return list<Component>
+     */
+    private function renglonesDeCobro(): array
+    {
+        $lotes = $this->lotesQueDeben();
+
+        if ($lotes === []) {
+            return [
+                Placeholder::make('sin_saldo')
+                    ->hiddenLabel()
+                    ->content('Este expediente no debe nada: todas las cuotas están pagadas.'),
+            ];
+        }
+
+        $renglones = [];
+
+        foreach ($lotes as $lote) {
+            $id = (int) $lote->getKey();
+
+            $renglones[] = Grid::make(12)->schema([
+                Checkbox::make("cobrar_{$id}")
+                    ->label(sprintf(
+                        '%s — debe %s',
+                        (string) $lote->lote?->getAttribute('codigo'),
+                        $this->saldoDe($lote)->formateado(),
+                    ))
+                    ->live()
+                    ->columnSpan(7),
+
+                MontoField::make("monto_{$id}", 'Monto')
+                    ->hiddenLabel()
+                    ->live(onBlur: true)
+                    ->visible(fn (Get $get): bool => $get("cobrar_{$id}") === true)
+                    ->columnSpan(5),
+            ]);
+        }
+
+        return $renglones;
+    }
+
+    /**
+     * Lo que el modal propone al abrirse: todo marcado, cada lote con su
+     * cuota del mes.
+     *
+     * Es el caso de todos los días —el cliente de un contrato de tres lotes
+     * viene a pagar el mes de los tres— y desmarcar dos es más rápido que
+     * teclear tres montos. Nada se cobra sin que el receptor vea el desglose
+     * con su total y apriete Cobrar.
+     *
+     * @return array<string, mixed>
+     */
+    private function cobroSugerido(): array
+    {
+        $datos = [
+            'fecha'      => today()->toDateString(),
+            'forma_pago' => FormaDePago::Efectivo->value,
+        ];
+
+        foreach ($this->lotesQueDeben() as $lote) {
+            $id = (int) $lote->getKey();
+
+            $datos["cobrar_{$id}"] = true;
+            $datos["monto_{$id}"] = $this->cuotaSugerida($lote)?->redondeado();
+        }
+
+        return $datos;
+    }
+
+    /**
+     * Lo que le toca a este lote este mes.
+     *
+     * Es lo que le FALTA a su cuota pendiente más vieja, no el monto de la
+     * cuota: si ya quedó pagada a medias, lo que se cobra es el resto (R19).
+     */
+    private function cuotaSugerida(Compromiso $lote): ?Monto
+    {
+        $primera = $this->pendientesDe($lote)->first();
+
+        return $primera instanceof Cuota ? $primera->saldo() : null;
+    }
+
+    /**
+     * Los renglones marcados, en el formato que pide el Service.
+     *
+     * El monto se valida con un `preg_match` antes de construir el `Monto`: la
+     * validación del formulario ya lo impide, pero el borde del dinero no se
+     * confía de la pantalla. Un «0» pasa a propósito — que lo rechace el
+     * dominio con su mensaje, y no un silencio acá.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return list<array{lote: Compromiso, monto: Monto}>
+     */
+    private function renglonesTecleados(array $data): array
+    {
+        $renglones = [];
+
+        foreach ($this->lotesQueDeben() as $lote) {
+            $id = (int) $lote->getKey();
+
+            if (($data["cobrar_{$id}"] ?? false) !== true) {
+                continue;
+            }
+
+            $crudo = $data["monto_{$id}"] ?? null;
+            $texto = is_string($crudo) ? trim($crudo) : '';
+
+            if (preg_match('/^\d+(\.\d{1,2})?$/', $texto) !== 1) {
+                continue;
+            }
+
+            $renglones[] = ['lote' => $lote, 'monto' => new Monto($texto)];
+        }
+
+        return $renglones;
+    }
+
     private function primerLoteConSaldo(): ?Compromiso
     {
         foreach ($this->venta()->compromisos as $renglon) {
@@ -371,7 +557,13 @@ class ViewVenta extends ViewRecord
     }
 
     /**
-     * Cómo caería este pago, con las mismas reglas que después persisten.
+     * Cómo caería este cobro, con las mismas reglas que después persisten.
+     *
+     * §10.8: «el usuario debe ver el número de cuota antes de confirmar, no
+     * después». Quien atiende tiene un cliente enfrente preguntando «¿y con
+     * esto qué me queda?». Con varios lotes marcados hace falta además el
+     * TOTAL: es el número que el cliente va a contar sobre el mostrador, y
+     * sumar tres cuotas de cabeza con alguien esperando es como se equivoca.
      *
      * Es un ESTIMADO. El que manda es el Service: relee las cuotas con
      * `FOR UPDATE` dentro de la transacción, porque entre que se pintó esta
@@ -379,15 +571,82 @@ class ViewVenta extends ViewRecord
      */
     private function repartoEstimado(Get $get): HtmlString
     {
-        $lote = Compromiso::query()->find($get('compromiso_id'));
-        $porRepartir = $this->montoTecleado($get);
+        $marcados = [];
 
-        if (! $lote instanceof Compromiso || ! $porRepartir instanceof Monto) {
-            return new HtmlString('<p class="olympo-vacio">Elegí el lote y escribí el monto.</p>');
+        foreach ($this->lotesQueDeben() as $lote) {
+            $id = (int) $lote->getKey();
+
+            if ($get("cobrar_{$id}") !== true) {
+                continue;
+            }
+
+            $monto = $this->montoTecleado($get, "monto_{$id}");
+
+            if ($monto instanceof Monto) {
+                $marcados[] = ['lote' => $lote, 'monto' => $monto];
+            }
         }
 
+        if ($marcados === []) {
+            return new HtmlString('<p class="olympo-vacio">Marcá al menos un lote y escribí el monto.</p>');
+        }
+
+        $html = '';
+        $total = Monto::cero();
+        $avisos = [];
+
+        foreach ($marcados as $marcado) {
+            $codigo = (string) $marcado['lote']->lote?->getAttribute('codigo');
+            $reparto = $this->repartoDeUnLote($marcado['lote'], $marcado['monto']);
+
+            if ($reparto['filas'] === '') {
+                $avisos[] = sprintf('El lote %s no debe nada.', $codigo);
+
+                continue;
+            }
+
+            $html .= '<p class="olympo-lote">'.e($codigo).'</p>'
+                .'<ul class="olympo-escalera">'.$reparto['filas'].'</ul>';
+
+            $total = $total->sumar($marcado['monto']->restar($reparto['sobra']));
+
+            if (! $reparto['sobra']->esCero()) {
+                $avisos[] = sprintf(
+                    'En %s sobran %s: el monto supera lo que debe ese lote y el cobro se va a rechazar.',
+                    $codigo,
+                    $reparto['sobra']->formateado(),
+                );
+            }
+        }
+
+        if ($html === '') {
+            return new HtmlString('<p class="olympo-vacio">'.e(implode(' ', $avisos)).'</p>');
+        }
+
+        $html .= sprintf(
+            '<div class="olympo-total"><span>Total a cobrar</span><span>%s</span></div>',
+            e($total->formateado()),
+        );
+
+        return new HtmlString($avisos === []
+            ? $html
+            : $html.'<p class="olympo-nota">'.e(implode(' ', $avisos)).'</p>');
+    }
+
+    /**
+     * El reparto de UN lote: un renglón por cuota que toca, y lo que sobra.
+     *
+     * Lo que sobra no se tira: es el aviso de que el monto supera lo que ese
+     * lote debe, y el Service lo va a rechazar. Verlo antes de apretar Cobrar
+     * es la diferencia entre corregir un número y explicarle a un cliente por
+     * qué no se le pudo cobrar.
+     *
+     * @return array{filas: string, sobra: Monto}
+     */
+    private function repartoDeUnLote(Compromiso $lote, Monto $monto): array
+    {
+        $porRepartir = $monto;
         $filas = '';
-        $tocadas = 0;
 
         foreach ($this->pendientesDe($lote) as $cuota) {
             if ($porRepartir->esCero()) {
@@ -397,7 +656,6 @@ class ViewVenta extends ViewRecord
             $falta = $cuota->saldo();
             $leToca = $porRepartir->mayorQue($falta) ? $falta : $porRepartir;
             $queda = $falta->restar($leToca);
-            $tocadas++;
 
             $filas .= sprintf(
                 '<li><span class="meses">Cuota %d — vence %s%s</span><span class="monto">%s</span></li>',
@@ -410,16 +668,7 @@ class ViewVenta extends ViewRecord
             $porRepartir = $porRepartir->restar($leToca);
         }
 
-        if ($tocadas === 0) {
-            return new HtmlString('<p class="olympo-vacio">Este lote no debe nada.</p>');
-        }
-
-        $sobra = $porRepartir->esCero()
-            ? ''
-            : '<p class="olympo-nota">Sobran '.e($porRepartir->formateado())
-                .': el pago supera lo que debe este lote y se va a rechazar. Cobrá el saldo exacto.</p>';
-
-        return new HtmlString('<ul class="olympo-escalera">'.$filas.'</ul>'.$sobra);
+        return ['filas' => $filas, 'sobra' => $porRepartir];
     }
 
     /**
@@ -612,9 +861,9 @@ class ViewVenta extends ViewRecord
      * con el cliente enfrente. Acá no hay nada que avisar: todavía no terminó
      * de escribir.
      */
-    private function montoTecleado(Get $get): ?Monto
+    private function montoTecleado(Get $get, string $campo = 'monto'): ?Monto
     {
-        $monto = $get('monto');
+        $monto = $get($campo);
 
         if (! is_string($monto) || preg_match('/^\d+(\.\d{1,2})?$/', trim($monto)) !== 1) {
             return null;

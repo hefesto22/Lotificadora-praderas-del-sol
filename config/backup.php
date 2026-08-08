@@ -83,10 +83,19 @@ return [
             | 's3' para producción (configurar AWS_* en .env).
             |------------------------------------------------------------------
             */
-            'disks' => [
-                'local',
-                // 's3', // descomentar cuando esté configurado AWS_BUCKET en .env
-            ],
+            /*
+             * Desde el .env, separados por coma: BACKUP_DISKS=local,s3
+             *
+             * Estaba cableado a `local` con el `s3` comentado, y eso es lo
+             * mismo que no tener respaldo: si el respaldo vive en el mismo
+             * disco que la base, el día que muera el disco se pierden los
+             * dos juntos. `olympo:verificar-produccion` se niega a dar por
+             * bueno un servidor cuyo único destino sea `local`.
+             */
+            'disks' => array_values(array_filter(array_map(
+                trim(...),
+                explode(',', (string) env('BACKUP_DISKS', 'local')),
+            ))),
         ],
 
         'temporary_directory' => storage_path('app/backup-temp'),

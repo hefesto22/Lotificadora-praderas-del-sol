@@ -203,3 +203,43 @@ describe('Lo que rechaza', function (): void {
             ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('300000.00');
     });
 });
+
+/*
+|--------------------------------------------------------------------------
+| Las guardas del cobro de varios lotes
+|--------------------------------------------------------------------------
+| El caso feliz —dos lotes, un recibo— se prueba desde la pantalla, que es
+| donde vive el trámite. Acá quedan las dos formas de armar mal la lista, que
+| ninguna pantalla debería producir y que igual no pueden llegar a la base.
+*/
+describe('Cobrar varios lotes', function (): void {
+    test('sin ningún lote marcado no se cobra nada', function (): void {
+        expect(fn () => $this->pagos->cobrarVariosLotes(
+            venta: $this->venta,
+            cliente: $this->cliente,
+            renglones: [],
+            forma: FormaDePago::Efectivo,
+        ))->toThrow(PagoInvalidoException::class, 'ningún lote marcado');
+
+        expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0);
+    });
+
+    /*
+    | Dos renglones del mismo lote sumarían en silencio y el recibo diría un
+    | total que nadie tecleó.
+    */
+    test('el mismo lote dos veces se rechaza', function (): void {
+        expect(fn () => $this->pagos->cobrarVariosLotes(
+            venta: $this->venta,
+            cliente: $this->cliente,
+            renglones: [
+                ['lote' => $this->renglon, 'monto' => new Monto('25000.00')],
+                ['lote' => $this->renglon, 'monto' => new Monto('25000.00')],
+            ],
+            forma: FormaDePago::Efectivo,
+        ))->toThrow(PagoInvalidoException::class, 'dos veces');
+
+        expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0)
+            ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('300000.00');
+    });
+});

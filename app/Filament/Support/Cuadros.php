@@ -64,11 +64,22 @@ final class Cuadros
             );
         }
 
+        /*
+         * ═══ POR QUE VA ADENTRO DE UN ENVOLTORIO CON SCROLL ═══
+         *
+         * Son siete columnas y las siete van `nowrap`: un valor partido en
+         * dos renglones no es un valor. Cuando no entran, la tarjeta de
+         * Filament NO ofrece scroll —RECORTA—, y «L. 54,166.67» se lee
+         * «L. 54,1» sin que nada avise. Pasó en la ficha del expediente, y
+         * el mismo cuadro se ve en el modal del plano, que es más angosto.
+         *
+         * Que se corra de lado es feo. Que un número mienta, no se puede.
+         */
         return new HtmlString(
-            '<table class="olympo-tabla"><thead><tr>'
+            '<div class="olympo-scroll"><table class="olympo-tabla"><thead><tr>'
             .'<th>Lote</th><th>vr²</th><th>Precio vr²</th><th>Plazo</th>'
             .'<th>Valor</th><th>Prima</th><th>Cuota</th>'
-            .'</tr></thead><tbody>'.$filas.'</tbody></table>'
+            .'</tr></thead><tbody>'.$filas.'</tbody></table></div>'
         );
     }
 

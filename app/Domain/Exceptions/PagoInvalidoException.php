@@ -59,6 +59,114 @@ final class PagoInvalidoException extends GrupoOlympoException
         );
     }
 
+    /**
+     * Nadie marcó un lote.
+     *
+     * Pasa cuando se desmarcan los tres renglones y se aprieta Cobrar. La
+     * pantalla no tiene por qué adivinar a cuál iba el dinero, y adivinar mal
+     * es un recibo contra el lote equivocado.
+     */
+    public static function porNoElegirNingunLote(): self
+    {
+        return new self(
+            'No hay ningún lote marcado. Marcá al menos uno y escribí cuánto se le cobra a cada uno.'
+        );
+    }
+
+    /**
+     * El mismo lote dos veces en un solo cobro.
+     *
+     * Sumar los dos renglones en silencio dejaría un recibo con un total que
+     * nadie tecleó. Un lote, un monto: el FIFO ya se encarga de repartirlo
+     * entre sus cuotas.
+     */
+    public static function porLoteRepetido(string $codigo): self
+    {
+        return new self(
+            "El lote {$codigo} viene dos veces en el mismo cobro. Dejá un solo monto por lote: ".
+            'el reparto se encarga de dividirlo entre sus cuotas.'
+        );
+    }
+
+    // ─── La fecha del pago ────────────────────────────────────────────
+
+    /**
+     * Un cobro con fecha futura.
+     *
+     * No es un capricho: el estado de cuenta ordena por fecha y los días de
+     * atraso se cuentan contra hoy. Un recibo fechado el mes que viene deja
+     * una cuota que figura pagada antes de haberse cobrado.
+     */
+    public static function porFechaFutura(string $fecha): self
+    {
+        return new self(
+            "La fecha del pago ({$fecha}) es posterior a hoy. Un recibo no se emite por adelantado: ".
+            'si el cliente paga hoy, la fecha es hoy.'
+        );
+    }
+
+    public static function porFechaAnteriorAlContrato(string $fecha, string $contrato): self
+    {
+        return new self(
+            "La fecha del pago ({$fecha}) es anterior a la firma del contrato ({$contrato}). ".
+            'Revisá si te equivocaste de año, que es lo que pasa casi siempre.'
+        );
+    }
+
+    // ─── Anular un recibo ─────────────────────────────────────────────
+
+    public static function porReciboYaAnulado(string $folio): self
+    {
+        return new self("El recibo {$folio} ya estaba anulado. No hay nada que revertir.");
+    }
+
+    /**
+     * R12: el motivo es obligatorio y la base también lo exige.
+     *
+     * Un recibo anulado sin motivo es dinero que desapareció del estado de
+     * cuenta sin que nadie tenga que explicarlo.
+     */
+    public static function porFaltarElMotivoDeLaAnulacion(): self
+    {
+        return new self(
+            'Anular un recibo borra un cobro del estado de cuenta del cliente, así que hace falta '.
+            'escribir por qué. Alcanza con una línea: dentro de seis meses alguien va a preguntar '.
+            'qué pasó con ese número.'
+        );
+    }
+
+    /**
+     * Solo se anulan los cobros de cuota.
+     *
+     * Una prima o una seña no son un cobro suelto: consumieron el correlativo
+     * del contrato o dejaron un lote apartado. Revertirlas es deshacer una
+     * venta o un apartado, que son otros trámites y tienen otro permiso.
+     */
+    public static function porConceptoQueNoSeAnulaAsi(string $concepto, string $folio): self
+    {
+        return new self(
+            "El recibo {$folio} es de {$concepto}, y eso no se anula desde acá: revertirlo significa ".
+            'deshacer la venta o el apartado del que salió. Es otro trámite.'
+        );
+    }
+
+    /**
+     * Un abono a capital reescribió el plan de cuotas.
+     *
+     * Deshacerlo no es devolver el dinero: es devolverle al lote las cuotas
+     * que ese abono borró, con sus fechas y sus montos. El plan viejo está
+     * guardado entero en `reprogramaciones.plan_anterior`, así que se puede —
+     * pero es un trámite propio y no una variante de este.
+     */
+    public static function porReciboQueReprogramo(string $folio): self
+    {
+        return new self(
+            "El recibo {$folio} es un abono a capital: reescribió el plan de cuotas del lote. ".
+            'Anularlo tendría que devolver las cuotas que borró, y eso todavía no está construido. '.
+            'Avisá antes de tocarlo.'
+        );
+    }
+
     // ─── Abono a capital (R21) ────────────────────────────────────────
 
     /**

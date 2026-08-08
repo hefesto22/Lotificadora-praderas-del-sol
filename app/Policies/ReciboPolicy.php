@@ -22,10 +22,13 @@ use Illuminate\Foundation\Auth\User as AuthUser;
  * del cliente diciendo una cosa y la base diciendo otra, que es exactamente el
  * problema que un correlativo (R12) viene a evitar.
  *
- * Lo que sí va a existir es ANULAR: una acción con nombre propio, con su
- * motivo, que devuelve el dinero a las cuotas y deja los dos recibos en la
- * historia. Cuando se construya tendrá su permiso `Anular:Recibo`, nombrado
- * uno por uno como manda el §9.E3 — no heredado de un `Update` genérico.
+ * ═══ ANULAR SI, Y SOLO LA ADMINISTRADORA (8-ago-2026) ═══
+ *
+ * Ya existe: acción con nombre propio, motivo obligatorio, que devuelve el
+ * dinero a las cuotas y deja las dos filas en la historia. Su permiso es
+ * `Anular:Recibo`, nombrado uno por uno como manda el §9.E3 — no heredado de
+ * un `Update` genérico, justamente para que el receptor NO lo reciba: quien
+ * cobra no debería poder borrar su propio cobro del estado de cuenta.
  */
 class ReciboPolicy
 {
@@ -49,6 +52,18 @@ class ReciboPolicy
     public function update(AuthUser $authUser, Recibo $recibo): bool
     {
         return false;
+    }
+
+    /**
+     * Anular un recibo mal emitido.
+     *
+     * El `estaAnulado()` va acá y no solo en el Service: sin él, la acción
+     * seguiría ofreciéndose sobre un recibo ya anulado y quien atiende
+     * descubriría que no se puede recién después de escribir el motivo.
+     */
+    public function anular(AuthUser $authUser, Recibo $recibo): bool
+    {
+        return $authUser->can('Anular:Recibo') && ! $recibo->estaAnulado();
     }
 
     public function delete(AuthUser $authUser, Recibo $recibo): bool

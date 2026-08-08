@@ -19,6 +19,7 @@ use App\Models\Recibo;
 use App\Models\Reprogramacion;
 use App\Models\Venta;
 use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -64,6 +65,10 @@ final readonly class RegistroDePagos
     /**
      * Cobrar cuotas de un lote.
      *
+     * El caso de un solo renglón de `cobrarVariosLotes()`, que es donde vive
+     * la lógica. Sigue existiendo porque «cobrarle a un lote» es una frase que
+     * el negocio dice todos los días y porque es lo que llama medio sistema.
+     *
      * @throws PagoInvalidoException
      */
     public function cobrarCuotas(
@@ -76,48 +81,246 @@ final readonly class RegistroDePagos
         ?CarbonImmutable $fecha = null,
         ?string $observaciones = null,
     ): Recibo {
-        $this->verificar($venta, $lote, $monto, $forma, $referencia);
+        return $this->cobrarVariosLotes(
+            venta: $venta,
+            cliente: $cliente,
+            renglones: [['lote' => $lote, 'monto' => $monto]],
+            forma: $forma,
+            referencia: $referencia,
+            fecha: $fecha,
+            observaciones: $observaciones,
+        );
+    }
 
-        $cuando = $fecha ?? CarbonImmutable::parse(today()->toDateString());
+    /**
+     * Cobrar cuotas de VARIOS lotes del mismo contrato, en un solo recibo.
+     *
+     * ═══ POR QUE UN SOLO PAPEL ═══
+     *
+     * Un contrato de tres lotes tiene tres planes. Hasta hoy, pagar el mes de
+     * los tres eran tres trámites y tres papeles, para un cliente que entregó
+     * un solo billete. El dinero se aplica igual que siempre —lote por lote,
+     * FIFO adentro de cada uno—; lo que cambia es que el documento es uno, con
+     * el desglose adentro. No hizo falta migrar nada: `aplicaciones_de_pago`
+     * cuelga de la CUOTA, no del lote, así que la base ya lo permitía.
+     *
+     * `compromiso_id` se sigue llenando cuando el cobro es de un solo lote. En
+     * la enorme mayoría de los recibos la columna dice lo mismo que antes y
+     * las pantallas que la leen no cambian. Con dos o más queda en NULL, que
+     * es la verdad —este recibo no es de un lote— y es lo que el CHECK
+     * `recibos_cuelgan_de_un_compromiso_chk` ya contemplaba: cuelga de la
+     * venta (R13).
+     *
+     * ═══ EL ORDEN DEL BLOQUEO NO ES CASUAL ═══
+     *
+     * Los renglones se ordenan por id ANTES de bloquear. Dos receptores
+     * cobrando los mismos dos lotes en orden distinto se traban el uno al otro
+     * —el deadlock clásico de dos transacciones que toman los mismos candados
+     * al revés—. Con un orden único para todo el sistema, el segundo espera y
+     * sigue.
+     *
+     * ═══ TODO O NADA ═══
+     *
+     * Se bloquea y se verifica TODO antes de emitir. Si el tercer renglón paga
+     * de más, el correlativo no llegó a moverse: medio recibo no existe.
+     *
+     * @param list<array{lote: Compromiso, monto: Monto}> $renglones
+     *
+     * @throws PagoInvalidoException
+     */
+    public function cobrarVariosLotes(
+        Venta $venta,
+        Cliente $cliente,
+        array $renglones,
+        FormaDePago $forma,
+        ?string $referencia = null,
+        ?CarbonImmutable $fecha = null,
+        ?string $observaciones = null,
+    ): Recibo {
+        if ($renglones === []) {
+            throw PagoInvalidoException::porNoElegirNingunLote();
+        }
+
+        $vistos = [];
+
+        foreach ($renglones as $renglon) {
+            $this->verificar($venta, $renglon['lote'], $renglon['monto'], $forma, $referencia);
+
+            $id = (int) $renglon['lote']->getKey();
+
+            if (in_array($id, $vistos, true)) {
+                throw PagoInvalidoException::porLoteRepetido($this->codigo($renglon['lote']));
+            }
+
+            $vistos[] = $id;
+        }
+
+        $cuandoSePago = $fecha ?? CarbonImmutable::parse(today()->toDateString());
+        $this->verificarLaFecha($venta, $cuandoSePago);
+
+        // El orden del bloqueo, igual para todos. Ver el docblock.
+        usort(
+            $renglones,
+            static fn (array $uno, array $otro): int => (int) $uno['lote']->getKey() <=> (int) $otro['lote']->getKey(),
+        );
+
+        $cuando = $cuandoSePago;
         $limpia = trim($referencia ?? '');
 
         return DB::transaction(function () use (
             $venta,
-            $lote,
             $cliente,
-            $monto,
+            $renglones,
             $forma,
             $limpia,
             $cuando,
             $observaciones
         ): Recibo {
-            // 1. Las cuotas del lote, bloqueadas y en orden.
-            $pendientes = $this->pendientesBloqueadas($lote);
+            $total = Monto::cero();
+            $tandas = [];
 
-            // 2. Lo que se debe, recién leído. La pantalla puede estar vieja.
-            $saldo = $this->saldoDe($pendientes);
+            /*
+             * 1 y 2. Las cuotas de cada lote, bloqueadas y en orden, y lo que
+             * cada uno debe recién leído. La pantalla puede estar vieja: entre
+             * que se pintó el modal y se apretó Guardar, el otro receptor pudo
+             * cobrar el mismo lote.
+             */
+            foreach ($renglones as $renglon) {
+                $lote = $renglon['lote'];
+                $monto = $renglon['monto'];
 
-            if ($monto->mayorQue($saldo)) {
-                throw PagoInvalidoException::porPagarDeMas($monto, $saldo, $this->codigo($lote));
+                $pendientes = $this->pendientesBloqueadas($lote);
+                $saldo = $this->saldoDe($pendientes);
+
+                if ($monto->mayorQue($saldo)) {
+                    throw PagoInvalidoException::porPagarDeMas($monto, $saldo, $this->codigo($lote));
+                }
+
+                $tandas[] = ['pendientes' => $pendientes, 'monto' => $monto];
+                $total = $total->sumar($monto);
             }
 
-            // 3. Recién ahora se quema un número (R12).
+            // 3. Recién ahora se quema un número (R12). Uno solo, para todo.
             $recibo = $this->emitir(
                 $venta,
-                $lote,
+                count($renglones) === 1 ? $renglones[0]['lote'] : null,
                 $cliente,
                 ConceptoDeRecibo::Cuota,
-                $monto,
+                $total,
                 $forma,
                 $limpia,
                 $cuando,
                 $observaciones,
             );
 
-            // 4. FIFO: la más vieja primero, hasta agotar el dinero.
-            $this->repartir($recibo, $pendientes, $monto);
+            // 4. FIFO adentro de cada lote, sobre el mismo recibo.
+            foreach ($tandas as $tanda) {
+                $this->repartir($recibo, $tanda['pendientes'], $tanda['monto']);
+            }
+
+            // 5. Si con esto terminó de pagar todo, el expediente se cierra.
+            $this->cerrarSiQuedoPagada($venta, $cuando);
 
             return $recibo;
+        });
+    }
+
+    /**
+     * Anular un recibo mal emitido.
+     *
+     * ═══ QUE HACE, EXACTAMENTE ═══
+     *
+     * Devuelve a las cuotas lo que ese recibo les había aplicado, marca el
+     * recibo con quién lo anuló y por qué, y —si la venta se había liquidado
+     * con ese cobro— la vuelve a abrir. El número NO se libera y la fila NO se
+     * borra: una serie con huecos deja de servir para decir «entre el 000120 y
+     * el 000130 no falta ninguno», que es lo único que hace serio a un recibo
+     * interno (R12).
+     *
+     * Las aplicaciones tampoco se borran: son la traza de a qué se había
+     * aplicado, y sin ellas «¿por qué la cuota 5 volvió a deber?» no tiene
+     * respuesta.
+     *
+     * ═══ QUE NO HACE ═══
+     *
+     * No devuelve dinero. Anular dice que el cobro no debió registrarse, no
+     * que haya que sacar plata de la caja — eso es un egreso, y no existe
+     * todavía. Si el cliente sí pagó y el error fue el monto, el camino es
+     * anular y volver a cobrar con el número nuevo.
+     *
+     * ═══ SOLO COBROS DE CUOTA ═══
+     *
+     * Una prima o una seña consumieron el correlativo de un contrato o dejaron
+     * un lote apartado; un abono a capital reescribió un plan. Los tres se
+     * rechazan con su motivo: revertirlos es deshacer otra cosa.
+     *
+     * @throws PagoInvalidoException
+     */
+    public function anular(Recibo $recibo, string $motivo): Recibo
+    {
+        $porQue = trim($motivo);
+
+        if ($porQue === '') {
+            throw PagoInvalidoException::porFaltarElMotivoDeLaAnulacion();
+        }
+
+        if ($recibo->estaAnulado()) {
+            throw PagoInvalidoException::porReciboYaAnulado($recibo->folio());
+        }
+
+        $concepto = $recibo->getAttribute('concepto');
+
+        if ($concepto !== ConceptoDeRecibo::Cuota) {
+            throw $concepto === ConceptoDeRecibo::AbonoCapital
+                ? PagoInvalidoException::porReciboQueReprogramo($recibo->folio())
+                : PagoInvalidoException::porConceptoQueNoSeAnulaAsi(
+                    $concepto instanceof ConceptoDeRecibo ? $concepto->etiqueta() : 'otro concepto',
+                    $recibo->folio(),
+                );
+        }
+
+        return DB::transaction(function () use ($recibo, $porQue): Recibo {
+            /*
+             * Se relee bloqueando. Dos personas anulando el mismo recibo al
+             * mismo tiempo devolverían el saldo dos veces, y la cuota quedaría
+             * debiendo más de lo que vale.
+             *
+             * ⚠️ `whereKey()->firstOrFail()` y NO `findOrFail()`: este último
+             * acepta también un arreglo de ids, así que PHPStan nivel 7 lo tipa
+             * `Recibo|Collection<int, Recibo>`, y a partir de ahí cada llamada
+             * sobre `$vivo` es «método indefinido en Collection». Seis errores
+             * salían de esta sola línea.
+             */
+            $vivo = Recibo::query()
+                ->whereKey($recibo->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($vivo->estaAnulado()) {
+                throw PagoInvalidoException::porReciboYaAnulado($vivo->folio());
+            }
+
+            foreach ($vivo->aplicaciones()->with('cuota')->get() as $aplicacion) {
+                $cuota = $aplicacion->cuota;
+
+                if (! $cuota instanceof Cuota) {
+                    continue;
+                }
+
+                $cuota->update([
+                    'monto_pagado' => $cuota->montoPagado()->restar($aplicacion->montoAplicado())->redondeado(),
+                ]);
+            }
+
+            $vivo->update([
+                'anulado_el'       => now(),
+                'anulado_por'      => auth()->id(),
+                'motivo_anulacion' => $porQue,
+            ]);
+
+            $this->reabrirSiVolvioADeber($vivo);
+
+            return $vivo;
         });
     }
 
@@ -169,6 +372,7 @@ final readonly class RegistroDePagos
         }
 
         $cuando = $fecha ?? CarbonImmutable::parse(today()->toDateString());
+        $this->verificarLaFecha($venta, $cuando);
         $limpia = trim($referencia ?? '');
 
         return DB::transaction(function () use (
@@ -221,6 +425,7 @@ final readonly class RegistroDePagos
                 );
 
                 $this->repartir($recibo, $pendientes, $monto);
+                $this->cerrarSiQuedoPagada($venta, $cuando);
 
                 return $recibo;
             }
@@ -265,6 +470,7 @@ final readonly class RegistroDePagos
             $this->reescribirElPlan($venta, $lote, $efecto, $plan);
             $this->asentarLaConstancia($venta, $lote, $recibo, $efecto, $plan, $porQue);
             $this->recalcularElResumen($venta);
+            $this->cerrarSiQuedoPagada($venta, $cuando);
 
             return $recibo;
         });
@@ -352,11 +558,102 @@ final readonly class RegistroDePagos
     }
 
     /**
+     * La fecha del pago tiene que ser creíble.
+     *
+     * ═══ POR QUE NO ALCANZA CON EL DATEPICKER ═══
+     *
+     * La pantalla lo limita, pero la pantalla no es el borde: el Service es la
+     * única puerta y lo llama también el import de la cartera vieja. Un cobro
+     * fechado el mes que viene deja una cuota que figura pagada antes de
+     * haberse cobrado, y uno fechado en 2019 —el clásico error de tipear el
+     * año— entra sin que nada chille.
+     *
+     * @throws PagoInvalidoException
+     */
+    private function verificarLaFecha(Venta $venta, CarbonImmutable $cuando): void
+    {
+        $hoy = CarbonImmutable::parse(today()->toDateString());
+
+        if ($cuando->greaterThan($hoy)) {
+            throw PagoInvalidoException::porFechaFutura($cuando->format('d/m/Y'));
+        }
+
+        $firma = $venta->getAttribute('fecha_contrato');
+
+        if ($firma instanceof CarbonInterface && $cuando->lessThan($firma->startOfDay())) {
+            throw PagoInvalidoException::porFechaAnteriorAlContrato(
+                $cuando->format('d/m/Y'),
+                $firma->format('d/m/Y'),
+            );
+        }
+    }
+
+    /**
+     * Un expediente que terminó de pagarse deja de estar vigente.
+     *
+     * ═══ POR QUE ACA Y NO EN UNA ACCION APARTE ═══
+     *
+     * `EstadoVenta::Liquidada` existía desde la primera migración y **nadie lo
+     * asignaba nunca**: una venta pagada al último centavo se quedaba
+     * «Vigente» para siempre, ofreciendo el botón de cobrar sobre un contrato
+     * que no debe nada. No es un trámite que alguien deba acordarse de hacer:
+     * es una consecuencia aritmética del último pago.
+     *
+     * El CHECK `ventas_cierre_segun_estado_chk` exige `cerrada_el` cuando el
+     * estado es uno de los cerrados, así que van juntos o no van.
+     */
+    private function cerrarSiQuedoPagada(Venta $venta, CarbonImmutable $cuando): void
+    {
+        if ($venta->getAttribute('estado') !== EstadoVenta::Vigente) {
+            return;
+        }
+
+        if (! $venta->saldoPendiente()->esCero()) {
+            return;
+        }
+
+        $venta->update([
+            'estado'     => EstadoVenta::Liquidada,
+            'cerrada_el' => $cuando->toDateString(),
+        ]);
+    }
+
+    /**
+     * Anular el cobro que la cerró la vuelve a abrir.
+     *
+     * Sin esto, anular el último recibo dejaría un expediente «Liquidado» que
+     * vuelve a deber dinero y sin botón para cobrarlo.
+     */
+    private function reabrirSiVolvioADeber(Recibo $recibo): void
+    {
+        $venta = $recibo->venta;
+
+        if (! $venta instanceof Venta || $venta->getAttribute('estado') !== EstadoVenta::Liquidada) {
+            return;
+        }
+
+        if ($venta->saldoPendiente()->esCero()) {
+            return;
+        }
+
+        $venta->update([
+            'estado'     => EstadoVenta::Vigente,
+            'cerrada_el' => null,
+        ]);
+    }
+
+    /**
      * El documento. Un solo lugar donde se quema un correlativo.
+     *
+     * `$lote` viene en null cuando el recibo cubre varios lotes del contrato:
+     * `compromiso_id` no puede decir «estos tres», y ponerle uno de los tres
+     * sería peor que dejarla vacía. El CHECK
+     * `recibos_cuelgan_de_un_compromiso_chk` la deja pasar porque `venta_id`
+     * está puesto — R13: todo pago cuelga de algo.
      */
     private function emitir(
         Venta $venta,
-        Compromiso $lote,
+        ?Compromiso $lote,
         Cliente $cliente,
         ConceptoDeRecibo $concepto,
         Monto $monto,
@@ -368,7 +665,7 @@ final readonly class RegistroDePagos
         return Recibo::query()->create([
             'numero'        => $this->correlativos->siguienteDeReciboInterno(),
             'venta_id'      => $venta->getKey(),
-            'compromiso_id' => $lote->getKey(),
+            'compromiso_id' => $lote?->getKey(),
             'cliente_id'    => $cliente->getKey(),
             'concepto'      => $concepto,
             'forma_pago'    => $forma,

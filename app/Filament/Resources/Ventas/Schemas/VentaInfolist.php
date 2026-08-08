@@ -70,10 +70,21 @@ class VentaInfolist
                  * el tercero a 48. El cuadro es el mismo que se ve en el plano
                  * antes de firmar —lo arma Cuadros—, para que el papel y la
                  * pantalla no puedan decir cosas distintas.
+                 *
+                 * ═══ POR QUE ESTA SECCION VA A TODO EL ANCHO ═══
+                 *
+                 * La página de un ViewRecord arma la ficha en DOS columnas
+                 * (`ViewRecord::infolist()`), así que sin este `columnSpanFull`
+                 * el cuadro cae en media pantalla. Son siete columnas de
+                 * dinero: no entran, y la tarjeta no las achica ni las manda
+                 * a scroll —las RECORTA—. La cuota del último lote se veía
+                 * «L. 54,1». De ahí para abajo la ficha va en una sola
+                 * columna: dejar «Dinero» en media dejaba media página vacía.
                  */
                 Section::make('Lotes')
                     ->icon('heroicon-o-map')
                     ->description('Área, precio, plazo y valor quedaron congelados al firmar.')
+                    ->columnSpanFull()
                     ->schema([
                         TextEntry::make('compromisos')
                             ->hiddenLabel()
@@ -100,6 +111,7 @@ class VentaInfolist
                 Section::make('Dinero')
                     ->icon('heroicon-o-banknotes')
                     ->columns(4)
+                    ->columnSpanFull()
                     ->schema([
                         TextEntry::make('valor_total')
                             ->label('Valor total')
@@ -148,6 +160,7 @@ class VentaInfolist
 
                 Section::make('Observaciones')
                     ->icon('heroicon-o-chat-bubble-bottom-center-text')
+                    ->columnSpanFull()
                     ->visible(static fn (Venta $record): bool => filled($record->getAttribute('observaciones')))
                     ->schema([
                         TextEntry::make('observaciones')

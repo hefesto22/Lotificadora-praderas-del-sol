@@ -56,16 +56,19 @@ final readonly class ImprimirReciboController
     {
         Gate::authorize('view', $recibo);
 
-        $recibo->load(['cliente', 'venta', 'compromiso.lote', 'aplicaciones.cuota']);
+        $recibo->load(['cliente', 'venta', 'compromiso.lote', 'aplicaciones.cuota.compromiso.lote']);
 
+        // `variosLotes`: con un solo lote el rótulo del papel va en singular
+        // y el detalle no repite el código en cada renglón.
         return view('documentos.recibo', [
-            'recibo'    => $recibo,
-            'impresion' => $this->impresiones->registrar($recibo),
-            'emisor'    => $this->emisor(),
-            'enLetras'  => MontoEnLetras::de($recibo->montoTotal()),
-            'aCapital'  => $recibo->montoACapital(),
-            'saldo'     => $this->saldoDelLote($recibo),
-            'logo'      => $this->logo(),
+            'recibo'      => $recibo,
+            'impresion'   => $this->impresiones->registrar($recibo),
+            'emisor'      => $this->emisor(),
+            'enLetras'    => MontoEnLetras::de($recibo->montoTotal()),
+            'aCapital'    => $recibo->montoACapital(),
+            'variosLotes' => $recibo->tocaVariosLotes(),
+            'saldo'       => $this->saldoDelLote($recibo),
+            'logo'        => $this->logo(),
         ]);
     }
 

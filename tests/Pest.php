@@ -131,6 +131,8 @@ function sembrarPermisosDeShield(): void
         // R14: prorrogar y marcar la devolucion de la seña de un apartado.
         'Prorrogar:Compromiso',
         'DevolverSenia:Compromiso',
+        // R12: anular un recibo mal emitido. Solo la administradora.
+        'Anular:Recibo',
     ] as $permiso) {
         Permission::query()->firstOrCreate(['name' => $permiso], ['guard_name' => 'web']);
     }

@@ -128,6 +128,13 @@ class RoleSeeder extends Seeder
          */
         $permisos = [...$permisos, ...$this->permisos(['Prorrogar', 'DevolverSenia'], ['Compromiso'])];
 
+        /*
+         * Anular un recibo NO va en el cruce y NO lo tiene el receptor: quien
+         * cobra no debería poder borrar su propio cobro del estado de cuenta.
+         * Un monto mal tecleado lo corrige la administradora, con motivo.
+         */
+        $permisos = [...$permisos, ...$this->permisos(['Anular'], ['Recibo'])];
+
         $this->rol(Roles::ADMINISTRADORA)->syncPermissions($permisos);
     }
 

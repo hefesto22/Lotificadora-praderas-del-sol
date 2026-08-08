@@ -13,6 +13,7 @@ use Spatie\Health\Checks\Checks\EnvironmentCheck;
 use Spatie\Health\Checks\Checks\OptimizedAppCheck;
 use Spatie\Health\Checks\Checks\QueueCheck;
 use Spatie\Health\Checks\Checks\RedisCheck;
+use Spatie\Health\Checks\Checks\ScheduleCheck;
 use Spatie\Health\Checks\Checks\UsedDiskSpaceCheck;
 use Spatie\Health\Facades\Health;
 
@@ -63,6 +64,24 @@ class HealthServiceProvider extends ServiceProvider
             // ── Queue (workers procesando jobs) ─────────────────────
             QueueCheck::new()
                 ->onQueue('default'),
+
+            /*
+             * ── El cron del servidor ────────────────────────────────
+             *
+             * `health:schedule-check-heartbeat` ya escribía el latido cada
+             * minuto, pero NADIE lo miraba: el latido se guardaba y ahí
+             * quedaba. Este check es el que lo lee.
+             *
+             * Sin él, un cron que nunca se instaló se ve exactamente igual
+             * que uno sano —en silencio— y con el cron caído no hay
+             * respaldo, ni limpieza, ni monitoreo. Con él, /health lo grita
+             * y `olympo:verificar-produccion` no deja entregar el servidor.
+             *
+             * Cinco minutos y no uno: un servidor cargado puede atrasar un
+             * `schedule:run` sin estar roto.
+             */
+            ScheduleCheck::new()
+                ->heartbeatMaxAgeInMinutes(5),
 
             // ── Disco ───────────────────────────────────────────────
             UsedDiskSpaceCheck::new()

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Domain\Enums\ConceptoDeRecibo;
+use App\Domain\Enums\EstadoVenta;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\ModalidadDeReprogramacion;
 use App\Domain\Exceptions\PagoInvalidoException;
@@ -342,11 +343,71 @@ describe('Lo que rechaza', function (): void {
             ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('300000.00');
     });
 
-    test('un lote que no debe nada', function (): void {
+    /*
+    | Desde el 8-ago-2026 pagar todo el saldo LIQUIDA el expediente, así que
+    | con un solo lote este caso cambió de motivo: el abono se rechaza antes,
+    | por venta cerrada. Es más estricto y es correcto — un contrato liquidado
+    | no recibe nada.
+    */
+    test('un expediente liquidado no recibe abonos', function (): void {
         ($this->cobrar)('300000.00');
 
         expect(fn () => ($this->abonar)('10000.00'))
-            ->toThrow(PagoInvalidoException::class, 'no debe nada');
+            ->toThrow(PagoInvalidoException::class, 'liquidada');
+    });
+
+    /*
+    | Y «el lote no debe nada» sigue vivo donde de verdad ocurre: en un
+    | contrato de varios lotes, cuando se salda UNO y el otro sigue debiendo,
+    | así que la venta no se liquida. Se prueba acá para no perder la guarda
+    | de `pendientesBloqueadas()`.
+    */
+    test('un lote saldado, con el contrato todavía vigente', function (): void {
+        $proyecto = Proyecto::query()->firstOrFail();
+        $bloque = Bloque::query()->firstOrFail();
+
+        $venta = app(RegistroDeVentas::class)->activar(
+            proyecto: $proyecto,
+            lotes: [
+                Lote::factory()->enBloque($bloque)->conMedidas('250.0000', '1400.00')->create(['numero' => '10']),
+                Lote::factory()->enBloque($bloque)->conMedidas('250.0000', '1400.00')->create(['numero' => '11']),
+            ],
+            clientes: [$this->cliente],
+            prima: new Monto('100000.00'),
+            plazoMeses: 12,
+            diaPago: 5,
+        );
+
+        $saldado = $venta->compromisos()->orderBy('lote_id')->firstOrFail();
+
+        // El saldo se SUMA en vez de escribirlo: así el test no depende de
+        // cómo `activar()` reparta la prima entre los dos lotes.
+        $suSaldo = Monto::cero();
+
+        foreach ($saldado->cuotas()->get() as $cuota) {
+            $suSaldo = $suSaldo->sumar($cuota->saldo());
+        }
+
+        $this->pagos->cobrarCuotas(
+            venta: $venta,
+            lote: $saldado,
+            cliente: $this->cliente,
+            monto: $suSaldo,
+            forma: FormaDePago::Efectivo,
+        );
+
+        // La venta NO se liquidó: el otro lote sigue debiendo.
+        expect($venta->refresh()->getAttribute('estado'))->toBe(EstadoVenta::Vigente);
+
+        expect(fn () => $this->pagos->abonarACapital(
+            venta: $venta,
+            lote: $saldado,
+            cliente: $this->cliente,
+            monto: new Monto('10000.00'),
+            modalidad: ModalidadDeReprogramacion::AcortarPlazo,
+            motivo: 'Abono a capital solicitado por el cliente',
+            forma: FormaDePago::Efectivo,
+        ))->toThrow(PagoInvalidoException::class, 'no debe nada');
     });
 });
 

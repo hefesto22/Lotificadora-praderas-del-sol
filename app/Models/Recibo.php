@@ -43,6 +43,9 @@ use Spatie\Activitylog\Support\LogOptions;
     'monto',
     'fecha',
     'observaciones',
+    'anulado_el',
+    'anulado_por',
+    'motivo_anulacion',
 ])]
 class Recibo extends Model
 {
@@ -62,13 +65,15 @@ class Recibo extends Model
             'concepto'   => ConceptoDeRecibo::class,
             'forma_pago' => FormaDePago::class,
             'fecha'      => 'date',
+            'anulado_el' => 'datetime',
         ];
     }
 
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['numero', 'concepto', 'forma_pago', 'referencia', 'monto', 'fecha', 'cliente_id'])
+            ->logOnly(['numero', 'concepto', 'forma_pago', 'referencia', 'monto', 'fecha', 'cliente_id',
+                'anulado_el', 'anulado_por', 'motivo_anulacion'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges()
             ->setDescriptionForEvent(fn (string $evento): string => "Recibo {$evento}");
@@ -95,6 +100,16 @@ class Recibo extends Model
     public function compromiso(): BelongsTo
     {
         return $this->belongsTo(Compromiso::class);
+    }
+
+    /**
+     * Quién anuló este recibo.
+     *
+     * @return BelongsTo<User, $this>
+     */
+    public function anuladoPor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'anulado_por');
     }
 
     /**
@@ -154,6 +169,76 @@ class Recibo extends Model
     public function reprogramacion(): HasOne
     {
         return $this->hasOne(Reprogramacion::class);
+    }
+
+    // ─── Anulación ────────────────────────────────────────────────────
+
+    /**
+     * ¿Este recibo dejó de valer?
+     *
+     * Un recibo anulado NO desaparece: conserva su número —la serie no puede
+     * tener huecos (R12)— y conserva sus aplicaciones, que son la traza de a
+     * qué se había aplicado. Lo que se revierte es `cuotas.monto_pagado`, que
+     * es de donde sale el saldo.
+     *
+     * ⚠️ Todo lo que sume DINERO desde `recibos` —un corte de caja, un
+     * reporte de cobros— tiene que filtrar `anulado_el IS NULL`. El saldo del
+     * cliente no hace falta que lo filtre, porque no se calcula desde acá.
+     */
+    public function estaAnulado(): bool
+    {
+        return $this->getAttribute('anulado_el') !== null;
+    }
+
+    // ─── Los lotes ────────────────────────────────────────────────────
+
+    /**
+     * Los lotes que este recibo tocó, por código y sin repetir.
+     *
+     * `compromiso_id` es la respuesta rápida, y es lo que hay en la enorme
+     * mayoría de los recibos. Cuando está en NULL el cobro fue de varios lotes
+     * del mismo contrato, y entonces la verdad son las aplicaciones: cada una
+     * apunta a una cuota, y cada cuota a su lote.
+     *
+     * Un recibo de prima no toca ninguno y devuelve la lista vacía — la
+     * pantalla muestra su guion.
+     *
+     * @return list<string>
+     */
+    public function codigosDeLotes(): array
+    {
+        $delRecibo = $this->compromiso?->lote?->getAttribute('codigo');
+
+        if (is_string($delRecibo)) {
+            return [$delRecibo];
+        }
+
+        $codigos = [];
+
+        foreach ($this->aplicaciones as $aplicacion) {
+            $codigo = $aplicacion->cuota?->compromiso?->lote?->getAttribute('codigo');
+
+            if (is_string($codigo) && ! in_array($codigo, $codigos, true)) {
+                $codigos[] = $codigo;
+            }
+        }
+
+        return $codigos;
+    }
+
+    /**
+     * Los lotes como se leen en el papel.
+     */
+    public function rotuloDeLotes(): string
+    {
+        $codigos = $this->codigosDeLotes();
+
+        return $codigos === [] ? '—' : implode(' · ', $codigos);
+    }
+
+    public function tocaVariosLotes(): bool
+    {
+        return count($this->codigosDeLotes()) > 1;
     }
 
     // ─── Dinero ───────────────────────────────────────────────────────

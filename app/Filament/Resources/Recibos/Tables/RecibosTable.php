@@ -6,12 +6,19 @@ namespace App\Filament\Resources\Recibos\Tables;
 
 use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\FormaDePago;
+use App\Domain\Exceptions\GrupoOlympoException;
+use App\Domain\Pagos\RegistroDePagos;
 use App\Filament\Support\ImprimirRecibo;
 use App\Models\Recibo;
+use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\ViewAction;
+use Filament\Forms\Components\Textarea;
+use Filament\Notifications\Notification;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -28,7 +35,7 @@ class RecibosTable
     {
         return $table
             ->modifyQueryUsing(static fn (Builder $query): Builder => $query->with([
-                'cliente', 'venta', 'compromiso.lote',
+                'cliente', 'venta', 'compromiso.lote', 'aplicaciones.cuota.compromiso.lote',
             ])->withCount('impresiones'))
             ->columns([
                 TextColumn::make('numero')
@@ -37,6 +44,23 @@ class RecibosTable
                     ->searchable()
                     ->sortable()
                     ->formatStateUsing(static fn (Recibo $record): string => $record->folio()),
+
+                /*
+                 * Un recibo anulado NO se esconde de la lista: su número sigue
+                 * en la serie y el papel sigue en la mano de alguien. Buscar
+                 * el 000123 y no encontrarlo sería peor que verlo tachado.
+                 */
+                TextColumn::make('anulado_el')
+                    ->label('Estado')
+                    ->badge()
+                    ->color('danger')
+                    ->state(static fn (Recibo $record): ?string => $record->estaAnulado() ? 'ANULADO' : null)
+                    ->tooltip(static function (Recibo $record): ?string {
+                        $motivo = $record->getAttribute('motivo_anulacion');
+
+                        return is_string($motivo) ? $motivo : null;
+                    })
+                    ->placeholder(''),
 
                 TextColumn::make('fecha')
                     ->label('Fecha')
@@ -54,10 +78,16 @@ class RecibosTable
                     ->searchable()
                     ->placeholder('—'),
 
-                TextColumn::make('compromiso.lote.codigo')
+                /*
+                 * Un cobro de varios lotes deja `compromiso_id` en NULL —ese
+                 * recibo no es de un lote—, así que la columna sale de las
+                 * cuotas que tocó: un badge por lote.
+                 */
+                TextColumn::make('lotes')
                     ->label('Lote')
                     ->badge()
                     ->color('gray')
+                    ->state(static fn (Recibo $record): array => $record->codigosDeLotes())
                     ->placeholder('—'),
 
                 TextColumn::make('concepto')
@@ -115,17 +145,93 @@ class RecibosTable
                 SelectFilter::make('forma_pago')
                     ->label('Forma de pago')
                     ->options(static fn (): array => self::opciones(FormaDePago::cases())),
+
+                // Sin filtro se ven TODOS, anulados incluidos: la búsqueda es
+                // por número y quien llega con el papel tiene que encontrarlo.
+                TernaryFilter::make('anulado_el')
+                    ->label('Anulados')
+                    ->placeholder('Todos')
+                    ->trueLabel('Solo los anulados')
+                    ->falseLabel('Sin los anulados')
+                    ->queries(
+                        true: static fn (Builder $query): Builder => $query->whereNotNull('anulado_el'),
+                        false: static fn (Builder $query): Builder => $query->whereNull('anulado_el'),
+                        blank: static fn (Builder $query): Builder => $query,
+                    ),
             ])
             ->recordActions([
                 ActionGroup::make([
                     ViewAction::make(),
                     ImprimirRecibo::accion(),
+                    self::anular(),
                 ]),
             ])
             ->defaultSort('numero', 'desc')
             ->emptyStateHeading('Todavía no se ha cobrado nada')
             ->emptyStateDescription('Los recibos nacen al registrar un pago desde el expediente.')
             ->emptyStateIcon('heroicon-o-receipt-percent');
+    }
+
+    /**
+     * Anular un recibo mal emitido (R12).
+     *
+     * ═══ POR QUE ES UNA ACCION Y NO UN BOTON DE BORRAR ═══
+     *
+     * El número no se libera y la fila no se borra: una serie con huecos deja
+     * de servir para decir «entre el 000120 y el 000130 no falta ninguno», que
+     * es lo único que hace serio a un recibo interno. Se marca, y lo que ese
+     * recibo aplicaba vuelve a deberse.
+     *
+     * El motivo es obligatorio en los tres lados —acá, en el Service y en un
+     * CHECK de la base—, porque un recibo anulado sin motivo es dinero que
+     * desapareció del estado de cuenta sin que nadie tenga que explicarlo.
+     *
+     * Solo la administradora: `Anular:Recibo` no se le da al receptor. Quien
+     * cobra no debería poder borrar su propio cobro.
+     */
+    private static function anular(): Action
+    {
+        return Action::make('anular')
+            ->label('Anular')
+            ->icon(Heroicon::OutlinedNoSymbol)
+            ->color('danger')
+            ->visible(static fn (Recibo $record): bool => auth()->user()?->can('anular', $record) === true)
+            ->modalHeading(static fn (Recibo $record): string => "Anular el recibo {$record->folio()}")
+            ->modalDescription('El número se queda en la serie y la fila no se borra: se marca. '
+                .'Lo que este recibo aplicó vuelve a deberse. No devuelve dinero.')
+            ->modalSubmitActionLabel('Anular el recibo')
+            ->modalWidth('lg')
+            ->schema([
+                Textarea::make('motivo')
+                    ->label('¿Por qué?')
+                    ->required()
+                    ->rows(3)
+                    ->maxLength(500)
+                    ->placeholder('Se tecleó L 5,000.00 en vez de L 500.00')
+                    ->helperText('Queda con tu usuario y la fecha. Dentro de seis meses alguien va a '
+                        .'preguntar qué pasó con este número.'),
+            ])
+            ->action(function (Recibo $record, array $data): void {
+                try {
+                    app(RegistroDePagos::class)->anular($record, (string) ($data['motivo'] ?? ''));
+                } catch (GrupoOlympoException $error) {
+                    // El mensaje del dominio ya está escrito para quien atiende.
+                    Notification::make()
+                        ->title('No se anuló')
+                        ->body($error->getMessage())
+                        ->danger()
+                        ->persistent()
+                        ->send();
+
+                    return;
+                }
+
+                Notification::make()
+                    ->title("Recibo {$record->folio()} anulado")
+                    ->body('Lo que aplicaba volvió a deberse y el número queda en la serie, marcado.')
+                    ->success()
+                    ->send();
+            });
     }
 
     /**

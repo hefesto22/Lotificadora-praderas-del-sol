@@ -53,10 +53,13 @@ class ReciboInfolist
                             ->label('Contrato')
                             ->placeholder('—'),
 
-                        TextEntry::make('compromiso.lote.codigo')
+                        // NULL cuando el recibo cubre varios lotes: el
+                        // código sale de las cuotas que tocó.
+                        TextEntry::make('lotes')
                             ->label('Lote')
                             ->badge()
                             ->color('gray')
+                            ->state(static fn (Recibo $record): array => $record->codigosDeLotes())
                             ->placeholder('—'),
 
                         TextEntry::make('forma_pago')

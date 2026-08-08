@@ -84,6 +84,20 @@
             color: #dc2626; font-size: 10px; font-weight: 700; letter-spacing: .1em;
         }
 
+        /* Un recibo anulado se puede seguir imprimiendo —hace falta para
+           mostrar que ese número no vale— pero el papel tiene que gritarlo,
+           no susurrarlo en una esquina. */
+        .anulado {
+            display: block; margin-top: .5rem;
+            padding: .35rem .6rem; border: 2px solid #dc2626; border-radius: .375rem;
+            background: #fef2f2; color: #b91c1c;
+            font-size: 13px; font-weight: 800; letter-spacing: .12em; text-align: center;
+        }
+        .anulado small {
+            display: block; margin-top: .2rem;
+            font-size: 9px; font-weight: 500; letter-spacing: 0; color: #7f1d1d;
+        }
+
         hr { border: 0; border-top: 1px solid #e4e4e7; margin: 1.125rem 0; }
 
         /* ── Datos ── */
@@ -164,6 +178,12 @@
             <div class="rotulo">Recibo de {{ $recibo->concepto?->etiqueta() ?? 'pago' }}</div>
             <div class="numero">N.º {{ $recibo->folio() }}</div>
             <div class="fecha">{{ $recibo->fecha?->format('d/m/Y') }}</div>
+            @if ($recibo->estaAnulado())
+                <div class="anulado">
+                    ANULADO
+                    <small>{{ $recibo->anulado_el?->format('d/m/Y') }} · {{ $recibo->getAttribute('motivo_anulacion') }}</small>
+                </div>
+            @endif
             @if ($impresion->esCopia())
                 {{-- Dos papeles con el mismo número no pueden pasar por dos cobros. --}}
                 <div class="copia">COPIA · {{ $impresion->numero_de_impresion }}.ª impresión</div>
@@ -183,8 +203,8 @@
             <div class="valor">{{ $recibo->venta?->getAttribute('numero_contrato') ?? '—' }}</div>
         </div>
         <div class="dato">
-            <div class="rotulo">Lote</div>
-            <div class="valor">{{ $recibo->compromiso?->lote?->getAttribute('codigo') ?? '—' }}</div>
+            <div class="rotulo">{{ $variosLotes ? 'Lotes' : 'Lote' }}</div>
+            <div class="valor">{{ $recibo->rotuloDeLotes() }}</div>
         </div>
         <div class="dato">
             <div class="rotulo">Forma de pago</div>
@@ -211,7 +231,9 @@
             <tbody>
                 @foreach ($recibo->aplicaciones as $aplicacion)
                     <tr>
-                        <td>Cuota {{ $aplicacion->cuota?->getAttribute('numero') }}</td>
+                        {{-- Con varios lotes, «Cuota 1» tres veces no dice nada:
+                             cada plan numera desde 1. El código va adelante. --}}
+                        <td>@if ($variosLotes){{ $aplicacion->cuota?->compromiso?->lote?->getAttribute('codigo') ?? '—' }} · @endif Cuota {{ $aplicacion->cuota?->getAttribute('numero') }}</td>
                         <td>{{ $aplicacion->cuota?->getAttribute('fecha_vencimiento')?->format('d/m/Y') ?? '—' }}</td>
                         <td>{{ $aplicacion->montoAplicado()->formateado() }}</td>
                     </tr>

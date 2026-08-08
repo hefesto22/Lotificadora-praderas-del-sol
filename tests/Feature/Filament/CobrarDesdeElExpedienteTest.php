@@ -63,6 +63,20 @@ beforeEach(function (): void {
     );
 
     $this->primerLote = $this->venta->compromisos()->orderBy('lote_id')->firstOrFail();
+    $this->segundoLote = $this->venta->compromisos()->orderByDesc('lote_id')->firstOrFail();
+
+    /*
+     * El modal abre con los DOS lotes marcados y la cuota del mes de cada uno
+     * ya escrita. Para cobrar uno solo hay que desmarcar el otro, igual que en
+     * la ventanilla — por eso los tests de un lote mandan el `false`.
+     */
+    $this->soloElPrimero = fn (string $monto, array $mas = []): array => array_merge([
+        'cobrar_'.$this->primerLote->getKey()  => true,
+        'monto_'.$this->primerLote->getKey()   => $monto,
+        'cobrar_'.$this->segundoLote->getKey() => false,
+        'forma_pago'                           => FormaDePago::Efectivo->value,
+        'fecha'                                => today()->toDateString(),
+    ], $mas);
 
     $this->expediente = fn (): object => Livewire::test(
         ViewVenta::class,
@@ -72,12 +86,7 @@ beforeEach(function (): void {
 
 test('el pago entra por la pantalla y se reparte FIFO', function (): void {
     ($this->expediente)()
-        ->callAction('cobrar', [
-            'compromiso_id' => $this->primerLote->getKey(),
-            'monto'         => '60000.00',
-            'forma_pago'    => FormaDePago::Efectivo->value,
-            'fecha'         => today()->toDateString(),
-        ])
+        ->callAction('cobrar', ($this->soloElPrimero)('60000.00'))
         ->assertHasNoActionErrors();
 
     $pagadas = Cuota::query()
@@ -100,12 +109,9 @@ test('el pago entra por la pantalla y se reparte FIFO', function (): void {
 */
 test('una transferencia sin referencia no pasa del formulario', function (): void {
     ($this->expediente)()
-        ->callAction('cobrar', [
-            'compromiso_id' => $this->primerLote->getKey(),
-            'monto'         => '25000.00',
-            'forma_pago'    => FormaDePago::Transferencia->value,
-            'fecha'         => today()->toDateString(),
-        ])
+        ->callAction('cobrar', ($this->soloElPrimero)('25000.00', [
+            'forma_pago' => FormaDePago::Transferencia->value,
+        ]))
         ->assertHasActionErrors(['referencia']);
 
     expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0);
@@ -113,13 +119,10 @@ test('una transferencia sin referencia no pasa del formulario', function (): voi
 
 test('con referencia, la transferencia se registra', function (): void {
     ($this->expediente)()
-        ->callAction('cobrar', [
-            'compromiso_id' => $this->primerLote->getKey(),
-            'monto'         => '25000.00',
-            'forma_pago'    => FormaDePago::Transferencia->value,
-            'referencia'    => 'TRF-88120',
-            'fecha'         => today()->toDateString(),
-        ])
+        ->callAction('cobrar', ($this->soloElPrimero)('25000.00', [
+            'forma_pago' => FormaDePago::Transferencia->value,
+            'referencia' => 'TRF-88120',
+        ]))
         ->assertHasNoActionErrors();
 
     expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->firstOrFail()->getAttribute('referencia'))->toBe('TRF-88120');
@@ -132,15 +135,69 @@ test('con referencia, la transferencia se registra', function (): void {
 */
 test('un pago mayor a lo que se debe no rompe la pantalla', function (): void {
     ($this->expediente)()
+        ->callAction('cobrar', ($this->soloElPrimero)('999999.00'))
+        ->assertHasNoActionErrors();
+
+    expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0)
+        ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('600000.00');
+});
+
+/*
+| Lo que pidió Mauricio el 8-ago-2026: un contrato de varios lotes se pagaba
+| lote por lote, y eran tres trámites y tres papeles para un cliente que
+| entregó un solo billete. El modal abre con todo marcado y la cuota del mes
+| de cada lote ya escrita, así que el caso de todos los días es abrir y
+| confirmar.
+*/
+test('el modal propone el mes de los dos lotes y sale UN recibo', function (): void {
+    ($this->expediente)()
+        ->callAction('cobrar')
+        ->assertHasNoActionErrors();
+
+    $recibo = Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->sole();
+
+    // 25,000 del lote a 12 meses + 12,500 del lote a 24.
+    expect($recibo->montoTotal())->toBeMonto('37500.00')
+        ->and($recibo->aplicaciones()->count())->toBe(2)
+        // Un recibo de varios lotes no es de ninguno: la columna queda vacía
+        // y el desglose es el que lo dice.
+        ->and($recibo->getAttribute('compromiso_id'))->toBeNull()
+        ->and($recibo->codigosDeLotes())->toHaveCount(2);
+});
+
+/*
+| Un solo lote marcado sigue llenando `compromiso_id`. Es la enorme mayoría de
+| los recibos, y las pantallas que leen esa columna no cambian.
+*/
+test('con un solo lote marcado, el recibo sigue apuntando a ese lote', function (): void {
+    ($this->expediente)()
+        ->callAction('cobrar', ($this->soloElPrimero)('25000.00'))
+        ->assertHasNoActionErrors();
+
+    $recibo = Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->sole();
+
+    expect($recibo->getAttribute('compromiso_id'))->toBe($this->primerLote->getKey())
+        ->and($recibo->tocaVariosLotes())->toBeFalse();
+});
+
+/*
+| Todo o nada. Si el segundo renglón paga de más, el primero TAMPOCO se cobra
+| y el correlativo no se movió: medio recibo no existe.
+*/
+test('si un lote paga de más, no se cobra ninguno', function (): void {
+    ($this->expediente)()
         ->callAction('cobrar', [
-            'compromiso_id' => $this->primerLote->getKey(),
-            'monto'         => '999999.00',
-            'forma_pago'    => FormaDePago::Efectivo->value,
-            'fecha'         => today()->toDateString(),
+            'cobrar_'.$this->primerLote->getKey()  => true,
+            'monto_'.$this->primerLote->getKey()   => '25000.00',
+            'cobrar_'.$this->segundoLote->getKey() => true,
+            'monto_'.$this->segundoLote->getKey()  => '999999.00',
+            'forma_pago'                           => FormaDePago::Efectivo->value,
+            'fecha'                                => today()->toDateString(),
         ])
         ->assertHasNoActionErrors();
 
     expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0)
+        ->and(Cuota::query()->where('compromiso_id', $this->primerLote->getKey())->sum('monto_pagado'))->toBe('0.00')
         ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('600000.00');
 });
 

@@ -28,6 +28,18 @@
        El modal de Filament se monta al final del <body>, pero de ESTA
        página: estas reglas lo alcanzan igual.
     */
+    /*
+       ── El envoltorio que impide que un número quede recortado ──
+
+       La tarjeta de Filament no ofrece scroll: recorta. Con siete columnas
+       `nowrap`, en cuanto la tarjeta se angosta —el modal del plano, una
+       pantalla chica, el panel en dos columnas— el último valor se ve
+       «L. 54,1» y no hay forma de darse cuenta desde el código.
+
+       `auto`, no `scroll`: cuando entra —que es lo normal— no se ve nada.
+    */
+    .olympo-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+
     .olympo-tabla { width: 100%; border-collapse: collapse; font-size: .8125rem; }
     .olympo-tabla th {
         padding: 0 .625rem .5rem; text-align: right; white-space: nowrap;
@@ -58,7 +70,10 @@
     .olympo-pill.contado { background: rgba(22, 163, 74, .12); color: #15803d; }
     .dark .olympo-pill.contado { background: rgba(22, 163, 74, .22); color: #86efac; }
 
-    .olympo-escalera { display: grid; gap: .3125rem; }
+    /* El tope de ancho es para leerla: son dos datos por renglón, uno a cada
+       orilla, y estirados a lo ancho de la página el ojo pierde el par. En
+       los modales —2xl, 3xl— no llega a aplicar. */
+    .olympo-escalera { display: grid; gap: .3125rem; max-width: 42rem; }
     .olympo-escalera li {
         display: flex; align-items: baseline; justify-content: space-between; gap: 1.5rem;
         padding: .5rem .75rem; border-radius: .5rem; font-size: .875rem;
@@ -73,6 +88,24 @@
     .dark .olympo-escalera .meses { color: rgb(212 212 216); }
     .olympo-escalera .monto { font-weight: 700; font-variant-numeric: tabular-nums; color: rgb(9 9 11); }
     .dark .olympo-escalera .monto { color: #fff; }
+
+    /* El encabezado de cada lote adentro del desglose de un cobro, y el
+       total de abajo. Sin el total, quien atiende tendría que sumar tres
+       cuotas de cabeza con el cliente enfrente. */
+    .olympo-lote {
+        margin: .75rem 0 .3125rem; font-size: .6875rem; font-weight: 700;
+        letter-spacing: .04em; text-transform: uppercase; color: rgb(113 113 122);
+    }
+    .olympo-lote:first-child { margin-top: 0; }
+    .dark .olympo-lote { color: rgb(161 161 170); }
+
+    .olympo-total {
+        display: flex; align-items: baseline; justify-content: space-between; gap: 1.5rem;
+        max-width: 42rem; margin-top: .625rem; padding-top: .625rem;
+        font-size: .9375rem; font-weight: 700; font-variant-numeric: tabular-nums;
+        color: rgb(9 9 11); border-top: 2px solid rgb(228 228 231);
+    }
+    .dark .olympo-total { color: #fff; border-top-color: rgba(255, 255, 255, .18); }
 
     .olympo-nota { margin-top: .5rem; font-size: .75rem; line-height: 1.65; color: rgb(113 113 122); }
     .dark .olympo-nota { color: rgb(161 161 170); }

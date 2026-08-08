@@ -1,4 +1,4 @@
-# Continuar acá — 6-ago-2026, cierre del día
+# Continuar acá — 8-ago-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `bash storage/app/verificar-pagos.sh`: **nada se da por bueno sin eso en verde.**
@@ -34,10 +34,12 @@ Cuatro drops, los tres primeros verdes y pusheados:
 ## ⚠️ Lo primero al retomar
 
 ```bash
-bash storage/app/verificar-pagos.sh
+herd composer ci && bash storage/app/verificar-pagos.sh
 ```
 
-El drop 4 nunca pasó por la puerta. Todo lo demás está commiteado y pusheado.
+**Lo del 8-ago no pasó por la puerta todavía, y trae una migración nueva**
+(`2026_08_08_100000_agregar_tarjeta_a_formas_de_pago.php`), así que va
+`herd php artisan migrate` antes. El drop 4 del 6-ago quedó commiteado.
 
 ## Lo que entró en el drop 4
 
@@ -75,22 +77,141 @@ Auditoría contra la Cláusula Segunda, no contra el traspaso. Faltaban cuatro:
 Los **respaldos diarios ya estaban agendados** en `routes/console.php` con retención de 30 días.
 Casi los duplico por leer solo las primeras 30 líneas del archivo — el `assert` lo atajó.
 
-## 🟡 La decisión que espera a Mauricio: el CAI
+## Lo que se construyó el 8-ago
 
-**El contrato y la contratante se contradicen, y nadie lo había notado.**
+### Cobrar varios lotes en UN recibo
 
-- **Cláusula Segunda, módulo g-ii**, Etapa 1: «documentos con **CAI**: registro de CAI vigente,
-  rangos, fecha límite, control de talonario manual y **alertas de agotamiento**» → tablas
-  `cais`, `rangos_cai`.
-- **R10** (contestada por la contratante el 3-ago): **no se usa CAI**, los recibos son internos.
+Lo pidió Mauricio mirando el modal: «si quiere pagar la cuota de dos o de los tres sería
+uno por uno, no lo veo factible». Eran tres trámites y tres papeles para un cliente que
+entregó un solo billete.
 
-Hoy no hay ni una línea de eso, y **no se construyó a propósito**: R10 es una respuesta explícita
-de la clienta y levantar un módulo de CAI sobre una regla contradicha sería inventar. Pero el
-contrato es el documento que obliga.
+- **`RegistroDePagos::cobrarVariosLotes()`** — bloquea las cuotas de cada lote **ordenando
+  por id antes de bloquear** (sin ese orden fijo, dos receptores cobrando los mismos dos
+  lotes al revés se traban entre sí), verifica todos los renglones y **recién entonces**
+  quema un correlativo. `cobrarCuotas()` pasó a ser el caso de un renglón y delega.
+- **Sin migración.** `aplicaciones_de_pago` cuelga de la CUOTA, no del lote, y
+  `recibos_cuelgan_de_un_compromiso_chk` solo pide venta O compromiso.
+- **`compromiso_id` se llena con un lote y queda NULL con dos o más.** Las pantallas leen
+  `Recibo::codigosDeLotes()`, que cae a las aplicaciones cuando la columna está vacía.
+- **El modal abre con todo marcado** y la cuota del mes de cada lote ya escrita. El
+  desglose muestra cuota por cuota agrupado por lote, con el **total** abajo (§10.8).
 
-**Con 14 días encima esto es lo primero que hay que resolver.** Las salidas posibles:
-que la contratante ratifique R10 por escrito y quede como alcance reducido, o que el CAI entre
-y haya que hacerle lugar en el calendario.
+### Tarjeta, cuarta forma de pago
+
+R11 contestó tres y descartó cheque; tarjeta ni se preguntó. La agregó Mauricio pensando
+en **las demás lotificadoras que van a usar el sistema**. El recibo sale por el monto
+entero: **la comisión del POS no se calcula ni se imprime**, y esa fue la decisión.
+
+⚠️ Agregar un `case` a `FormaDePago` **no alcanza**: la lista también vive en el CHECK
+`recibos_forma_valida_chk`. La migración del 8-ago es el molde para la próxima.
+
+### El cuadro de lotes de la ficha ya no recorta números
+
+La tarjeta de Filament no ofrece scroll: **recorta**. Con siete columnas `nowrap` en media
+pantalla, «L. 54,166.67» se leía «L. 54,1». Van las dos cosas juntas: `columnSpanFull()` en
+la Section y el envoltorio `.olympo-scroll`.
+
+### Que el servidor no pueda fallar en silencio
+
+La auditoría encontró **tres fallas que solas son medias y juntas son graves**: el respaldo
+no salía del servidor (`s3` comentado), el cron había que instalarlo a mano y nadie avisaba
+si faltaba, y `MAIL_MAILER=log` hacía que la alerta de «el respaldo falló» no llegara a
+nadie. Lo peligroso no es que existan: es que **se ven exactamente igual que un servidor
+sano**.
+
+- **`php artisan olympo:verificar-produccion`** — la puerta. Trece revisiones: entorno,
+  depuración, llave, https, cookie segura, correo real, alertas encendidas, **el latido del
+  cron**, el respaldo saliendo del servidor, respaldo cifrado, contraseñas de base y Redis,
+  **que nadie haya quedado con «12345678»** (comprobado contra el HASH, no contra el `.env`,
+  porque con la config cacheada `env()` devuelve null), cachés y enlace de storage. Devuelve
+  código ≠ 0 si falta algo grave. `--estricto` falla también con los avisos.
+  **No se agrega a `composer ci`**: en local falla casi todo, y está bien.
+- **`ScheduleCheck` registrado** en `HealthServiceProvider`. `health:schedule-check-heartbeat`
+  ya escribía el latido cada minuto y **nadie lo leía**. Ahora `/health` lo reporta.
+- **`config/health.php`: notificaciones encendidas** (`HEALTH_NOTIFICATIONS`, por defecto
+  `true`) y `CheckFailedNotification` registrada. Estaban en `false`.
+- **`config/backup.php`: los destinos salen del `.env`** (`BACKUP_DISKS=local,s3`). Estaba
+  cableado a `local` con el `s3` comentado.
+- **`.env.production.example`** — la plantilla del servidor, separada de la de desarrollo.
+- **`docs/DESPLIEGUE.md`** — el runbook, con la línea del crontab y la lista de lo que hay
+  que verificar antes de entregar la llave.
+
+⚠️ El prefijo del comando nuevo es **`olympo:`**, no `praderas:`. Es del producto, no del
+primer cliente. `praderas:exportar-todo` se llama así por herencia y habrá que renombrarlo.
+
+### Anular · liquidar · la fecha del pago
+
+Los tres huecos de ventanilla que la auditoría marcó como «lo que va a doler la primera
+semana». Migración `2026_08_08_110000_anular_recibos.php`.
+
+- **`RegistroDePagos::anular($recibo, $motivo)`** — devuelve a las cuotas lo que ese recibo
+  aplicó, marca quién y por qué, y reabre la venta si ese cobro la había liquidado. **El
+  número no se libera y la fila no se borra**: una serie con huecos deja de servir para decir
+  «entre el 000120 y el 000130 no falta ninguno». Las aplicaciones tampoco se borran — son la
+  traza de «¿por qué la cuota 3 volvió a deber?».
+  Solo cobros de **cuota**: una prima o una seña consumieron un correlativo de contrato o
+  dejaron un lote apartado, y un abono a capital reescribió un plan. Los tres se rechazan con
+  su motivo.
+  **No devuelve dinero**: anular dice que el cobro no debió registrarse, no que haya que sacar
+  plata de la caja. Eso es un egreso y sigue sin existir.
+- **Permiso `Anular:Recibo`, solo administradora.** Nombrado uno por uno (§9.E3) y
+  deliberadamente fuera del receptor: quien cobra no debería poder borrar su propio cobro del
+  estado de cuenta.
+- **`EstadoVenta::Liquidada` por fin se asigna.** Estaba definido desde la primera migración y
+  **nadie lo escribía nunca**: una venta pagada al último centavo se quedaba «Vigente» para
+  siempre. Ahora `cerrarSiQuedoPagada()` la cierra al terminar de repartir —en el cobro y en
+  el abono— y `reabrirSiVolvioADeber()` la reabre si se anula el cobro que la cerró.
+- **La fecha del pago se valida en el Service**, no solo en el DatePicker: el Service es la
+  única puerta y lo va a llamar también el import de la cartera vieja. Nada futuro, nada
+  anterior a la firma del contrato (el clásico error de tipear el año).
+- El recibo impreso de un anulado sale con el sello **ANULADO**, su fecha y su motivo. La
+  lista lo muestra con badge rojo y el motivo en el tooltip; el filtro nuevo deja verlos
+  todos por defecto, porque quien llega con el papel busca por número y tiene que encontrarlo.
+
+## 🟢 El sistema es un PRODUCTO, no un trabajo a medida
+
+Mauricio, 8-ago: «hay que agregarle cosas para que sea lo más profesional posible ya que lo
+venderemos a más personas, no solo a esa lotificadora».
+
+Cambia el criterio con que se cierra una discusión: **las reglas de la contratante pasan a
+ser el mínimo, no el techo.** Lo que se agregue de más va detrás de configuración, no
+cableado. La fecha del **20-ago es de Praderas del Sol**; el trabajo de producto va después,
+salvo lo que sea más barato ahora — tocar el esquema del dinero no cuesta lo mismo hoy, sin
+datos de producción, que en octubre.
+
+### 🟡 Pendiente que salió de acá: el pago mixto
+
+Parte en efectivo, parte en transferencia, parte con tarjeta. **Hoy no se puede**:
+`recibos.forma_pago` y `recibos.referencia` son columnas simples con CHECK.
+
+Forma propuesta, la misma que se usó con los lotes: tabla `formas_del_recibo`
+(recibo_id, forma, referencia, monto) + CHECK de que la suma cuadre con `recibos.monto`;
+`forma_pago` se sigue llenando cuando hay una sola. De regalo, la referencia pasa a ser
+**por instrumento**, que es lo que R11 quiere para cruzar contra el banco. ~15 archivos,
+un día. Quedó detrás del 20-ago.
+
+## ✅ El CAI: resuelto el 6-ago, y el motivo importa
+
+El contrato (Cláusula Segunda, g-ii) pide CAI en Etapa 1 y R10 dice que no se usa. **Lo
+resolvió Mauricio el mismo 6-ago:**
+
+> «Se dejará lo de facturas con CAI, pero se usará solo recibo interno por el momento ya que
+> **no están afiliados al SAR**, pero se dejará para un futuro emitir facturas con CAI.»
+
+R10 no era una preferencia: es un hecho de la situación fiscal del cliente. Praderas del Sol
+no puede emitir un documento con CAI hoy aunque el sistema se lo permitiera, así que
+construir el módulo ahora sería construir algo inusable. **Y por eso el día que se afilien,
+hace falta: es alcance diferido, no descartado.**
+
+La puerta ya está abierta y no cuesta nada mantenerla: `recibos.tipo_documento` existe con un
+solo valor en la práctica, y `correlativos` maneja series por tipo, así que una serie de
+facturas con CAI no chocaría con la de recibos internos (R12). **No hay tablas `cais` ni
+`rangos_cai`, y está bien que no las haya.**
+
+🟡 **Lo único que sigue abierto: la constancia por escrito.** Un módulo contratado que no se
+entrega debería tener un WhatsApp o correo de Rosa Elena confirmando que no están afiliados al
+SAR. No es desconfianza — dentro de un año nadie se va a acordar de esta conversación y el
+contrato va a seguir diciendo que el CAI era Etapa 1. **Mauricio no confirmó si lo pidió.**
 
 ## Lo que queda, contra el contrato
 
@@ -100,7 +221,7 @@ y haya que hacerle lugar en el calendario.
 | e Promesa de venta | 1 | ✅ `documentos` + relation manager |
 | f Apartados con recibo y control de vigencia | 1 | ✅ (drop 4) |
 | g-i Recibo interno correlativo | 1 | ✅ |
-| **g-ii CAI** | 1 | 🟡 **decisión pendiente, ver arriba** |
+| **g-ii CAI** | 1 | ⏸️ **diferido**: el cliente no está afiliado al SAR (6-ago) |
 | h Balance y estado de cuenta | 1 | ✅ |
 | i Registro del receptor | 1 | ✅ `recibos.created_by` (el arqueo es Etapa 2) |
 | m Usuarios, roles y bitácora | Base | ✅ |
@@ -135,10 +256,14 @@ El traspaso viejo decía «lo próximo es R22» y contra el contrato no lo era.
 
 ## Pendientes de decisión (no de código)
 
-1. **El CAI** — ver arriba. Es el que corre.
-2. Si los 301 lotes ya tienen sus **precios reales**, y si la cartera vendida vieja se va a
+1. 🔴 **El sistema sigue sin desplegar**, pero ya no falta el CÓMO: está
+   `docs/DESPLIEGUE.md` con el runbook, `.env.production.example` con la plantilla y
+   `olympo:verificar-produccion` como puerta. Lo que falta es el servidor, el dominio con
+   TLS, el SMTP y el bucket del respaldo — todo eso necesita las credenciales de Mauricio.
+2. 🔴 Si los 301 lotes ya tienen sus **precios reales**, y si la cartera vendida vieja se va a
    cargar (R15). Los 3 vendidos y 1 apartado de la captura son pruebas nuestras.
-3. Si el receptor puede subir documentos o solo verlos (hoy solo ve).
+3. La **constancia por escrito** de que no están afiliados al SAR (ver el CAI, arriba).
+4. Si el receptor puede subir documentos o solo verlos (hoy solo ve).
 4. El tamaño de papel del recibo no se consultó con la contratante.
 5. `APP_DEBUG=true` — en local está bien; antes de salir a un servidor tiene que ser `false`,
    o un error cualquiera le muestra la consulta con datos del cliente a quien esté mirando.
