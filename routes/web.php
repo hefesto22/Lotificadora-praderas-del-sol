@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use App\Http\Controllers\EstadoDeCuentaController;
 use App\Http\Controllers\ImprimirReciboController;
+use App\Http\Controllers\PlanoPublicoController;
+use App\Http\Controllers\RegistrarInteresController;
 use App\Http\Middleware\SuspensionPorMora;
 use App\Http\Middleware\UsuarioActivoDelPanel;
 use Illuminate\Support\Facades\Route;
@@ -45,4 +47,33 @@ Route::middleware(UsuarioActivoDelPanel::class, SuspensionPorMora::class)
     ->group(function (): void {
         Route::get('recibo/{recibo}', ImprimirReciboController::class)->name('recibo');
         Route::get('estado-de-cuenta/{venta}', EstadoDeCuentaController::class)->name('estado-de-cuenta');
+    });
+
+/*
+|--------------------------------------------------------------------------
+| El plano que se le manda al cliente
+|--------------------------------------------------------------------------
+|
+| SIN autenticación: son las dos únicas rutas de este sistema que abre gente
+| que no conocemos. Van bajo /plano, que ningún Resource de Filament ocupa.
+|
+| `SuspensionPorMora` SÍ se aplica (Cl. Séptima). Si la lotificadora deja de
+| pagarle a Olympo se le corta el panel, y su vidriera pública es parte del
+| mismo servicio: dejarla viva sería seguir prestando el servicio suspendido.
+|
+| ⚠️ `UsuarioActivoDelPanel` NO va acá, obviamente. Y el límite del POST no es
+| decorativo: un formulario abierto a internet sin freno es una tabla con diez
+| mil filas basura a la semana. Seis por minuto y por IP alcanza de sobra para
+| una persona que escribe de verdad.
+|
+*/
+Route::middleware(SuspensionPorMora::class)
+    ->prefix('plano')
+    ->name('plano.')
+    ->group(function (): void {
+        Route::get('{slug}', PlanoPublicoController::class)->name('publico');
+
+        Route::post('{slug}/interes', RegistrarInteresController::class)
+            ->middleware('throttle:6,1')
+            ->name('interes');
     });

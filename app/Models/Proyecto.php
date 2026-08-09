@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Override;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
@@ -34,6 +35,10 @@ use Spatie\Activitylog\Support\LogOptions;
     'direccion',
     'activo',
     'plano_esquematico',
+    'slug',
+    'plano_publico',
+    'whatsapp',
+    'servicios',
     'observaciones',
 ])]
 class Proyecto extends Model
@@ -44,6 +49,15 @@ class Proyecto extends Model
     use HasFactory;
 
     use LogsActivity;
+
+    /**
+     * Cuanto del nombre entra en el slug.
+     *
+     * `proyectos.slug` mide 80; los 11 que sobran son para el guion y el
+     * codigo del proyecto, que es lo que desempata cuando dos desarrollos se
+     * llaman parecido.
+     */
+    private const int SLUG_BASE = 69;
 
     /**
      * Valor inicial de `plano_esquematico` en memoria, no solo en la base.
@@ -83,6 +97,37 @@ class Proyecto extends Model
     #[Override]
     protected static function booted(): void
     {
+        /*
+         * 🔴 El slug se rellena solo, y por eso el formulario no lo exige.
+         *
+         * Es la direccion con la que el proyecto vive en internet. Cuando se
+         * agrego la columna quedo NOT NULL y el campo del panel `required()`,
+         * y eso volteo 418 tests de una sola vez: cada `Proyecto::factory()`
+         * del sistema inserta sin slug. La leccion no fue «arreglá los
+         * factories» — fue que un dato que se deriva del nombre no hay por
+         * que pedirselo a nadie.
+         *
+         * `saving` y no `creating`: si alguien borra el campo en el panel y
+         * guarda, la alternativa seria un 500 contra el CHECK de la base.
+         *
+         * ⚠️ Solo cuando esta VACIO. Un slug que se recalcula porque alguien
+         * corrigio una tilde del nombre rompe todos los links ya mandados por
+         * WhatsApp, y nadie relaciona una cosa con la otra.
+         */
+        static::saving(function (Proyecto $proyecto): void {
+            $slug = $proyecto->getAttribute('slug');
+
+            if (is_string($slug) && trim($slug) !== '') {
+                return;
+            }
+
+            $proyecto->setAttribute('slug', self::slugPara(
+                (string) $proyecto->getAttribute('nombre'),
+                (string) $proyecto->getAttribute('codigo'),
+                $proyecto->exists ? $proyecto->getKey() : null,
+            ));
+        });
+
         static::deleting(function (Proyecto $proyecto): void {
             $ocupados = $proyecto->lotesConMovimiento();
 
@@ -108,6 +153,53 @@ class Proyecto extends Model
     }
 
     /**
+     * La direccion libre para un proyecto, sacada de su nombre.
+     *
+     * `Str::slug()` y no un `strtolower(str_replace(...))`: sabe de tildes y
+     * de la ñ. «LA CAÑADA» tiene que dar `la-canada` y no romperse.
+     *
+     * Cuando la base ya esta tomada desempata con el codigo del proyecto, que
+     * es unico — dos desarrollos pueden llamarse parecido. Y si hasta eso
+     * choca, numera. El recorte deja lugar al sufijo dentro de los 80 de la
+     * columna, y el `trim` saca el guion que el corte pudo dejar colgando: el
+     * CHECK de la base no acepta uno al final.
+     */
+    public static function slugPara(string $nombre, string $codigo, mixed $exceptoId = null): string
+    {
+        $base = trim(Str::limit(Str::slug($nombre), self::SLUG_BASE, ''), '-');
+
+        if ($base === '') {
+            $base = trim(Str::limit(Str::slug($codigo), self::SLUG_BASE, ''), '-');
+        }
+
+        if ($base === '') {
+            $base = 'proyecto';
+        }
+
+        $desempate = trim(Str::slug($codigo), '-');
+        $candidato = $base;
+        $vuelta = 0;
+
+        while (true) {
+            $consulta = self::query()->where('slug', $candidato);
+
+            if ($exceptoId !== null) {
+                $consulta->whereKeyNot($exceptoId);
+            }
+
+            if (! $consulta->exists()) {
+                return $candidato;
+            }
+
+            $vuelta++;
+
+            $candidato = $vuelta === 1 && $desempate !== ''
+                ? $base.'-'.$desempate
+                : $base.'-'.$vuelta;
+        }
+    }
+
+    /**
      * @return array<string, string>
      */
     #[Override]
@@ -116,6 +208,8 @@ class Proyecto extends Model
         return [
             'activo'            => 'boolean',
             'plano_esquematico' => 'boolean',
+            'plano_publico'     => 'boolean',
+            'servicios'         => 'array',
         ];
     }
 

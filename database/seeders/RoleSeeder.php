@@ -141,6 +141,18 @@ class RoleSeeder extends Seeder
          */
         $permisos = [...$permisos, ...$this->permisos(['Anular', 'CondonarMora'], ['Recibo'])];
 
+        /*
+         * Los prospectos del plano público: nombre y teléfono de gente que
+         * NO es cliente. No van al cruce y el receptor no los ve — son datos
+         * personales de terceros, y quien atiende el mostrador no necesita
+         * la lista de a quién está por llamar la administración.
+         *
+         * `Create` y `Delete` no existen a propósito: un prospecto nace en el
+         * formulario público y borrarlo falsearía la única medida que dice si
+         * el plano público sirve. Lo dice también `ProspectoPolicy`.
+         */
+        $permisos = [...$permisos, ...$this->permisos(['ViewAny', 'View', 'Update'], ['Prospecto'])];
+
         $this->rol(Roles::ADMINISTRADORA)->syncPermissions($permisos);
     }
 

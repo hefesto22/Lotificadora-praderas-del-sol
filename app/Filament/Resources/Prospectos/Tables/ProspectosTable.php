@@ -1,0 +1,128 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Filament\Resources\Prospectos\Tables;
+
+use App\Models\Prospecto;
+use Filament\Actions\Action;
+use Filament\Forms\Components\Textarea;
+use Filament\Schemas\Schema;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+
+/**
+ * La lista de a quién llamar.
+ *
+ * ═══ EL TELEFONO ES LA COLUMNA, NO UN DETALLE ═══
+ *
+ * Es lo único que hay que hacer con esta pantalla: marcar el número. Va
+ * grande, copiable de un toque, y con enlace `tel:` para que desde una
+ * tablet o un teléfono se llame sin transcribirlo — que es donde se
+ * equivoca un dígito y se pierde el contacto.
+ */
+final class ProspectosTable
+{
+    public static function configure(Table $table): Table
+    {
+        return $table
+            ->columns([
+                TextColumn::make('created_at')
+                    ->label('Escribió')
+                    ->dateTime('d/m/Y H:i')
+                    ->description(fn (Prospecto $record): string => $record->estaAtendido() ? 'Atendido' : 'Sin atender')
+                    ->sortable(),
+
+                TextColumn::make('nombre')
+                    ->label('Nombre')
+                    ->searchable()
+                    ->weight('bold')
+                    ->wrap(),
+
+                TextColumn::make('telefono')
+                    ->label('Teléfono')
+                    ->searchable()
+                    ->copyable()
+                    ->copyMessage('Teléfono copiado')
+                    ->url(fn (Prospecto $record): string => 'tel:'.$record->getAttribute('telefono')),
+
+                TextColumn::make('lote.codigo')
+                    ->label('Lote')
+                    ->badge()
+                    ->color('info')
+                    ->placeholder('Sin lote')
+                    ->searchable(),
+
+                TextColumn::make('plazo_meses')
+                    ->label('Miraba')
+                    ->formatStateUsing(fn (Prospecto $record): string => $record->plazoEnPalabras())
+                    ->color('gray'),
+
+                TextColumn::make('proyecto.nombre')
+                    ->label('Proyecto')
+                    ->toggleable(isToggledHiddenByDefault: true),
+
+                TextColumn::make('atendidoPor.name')
+                    ->label('Lo llamó')
+                    ->placeholder('—')
+                    ->toggleable(),
+
+                TextColumn::make('nota')
+                    ->label('Nota')
+                    ->wrap()
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+            ])
+            ->filters([
+                Filter::make('sin_atender')
+                    ->label('Solo los que esperan llamada')
+                    ->query(fn (Builder $query): Builder => $query->whereNull('atendido_el'))
+                    ->default(),
+
+                SelectFilter::make('proyecto_id')
+                    ->label('Proyecto')
+                    ->relationship('proyecto', 'nombre'),
+            ])
+            ->recordActions([
+                Action::make('atender')
+                    ->label('Ya lo llamé')
+                    ->icon('heroicon-o-phone')
+                    ->color('success')
+                    ->visible(fn (Prospecto $record): bool => ! $record->estaAtendido())
+                    ->schema(fn (Schema $schema): Schema => $schema->components([
+                        Textarea::make('nota')
+                            ->label('¿Qué dijo?')
+                            ->rows(3)
+                            ->maxLength(500)
+                            ->helperText('Opcional, pero es lo que va a leer quien lo atienda la próxima vez.'),
+                    ]))
+                    ->action(function (Prospecto $record, array $data): void {
+                        /*
+                         * Los dos campos van juntos: el CHECK
+                         * `prospectos_atencion_completa_chk` no admite una
+                         * fila marcada como atendida sin decir quién.
+                         */
+                        $record->update([
+                            'atendido_el'  => now(),
+                            'atendido_por' => auth()->id(),
+                            'nota'         => is_string($data['nota'] ?? null) && trim($data['nota']) !== ''
+                                ? trim($data['nota'])
+                                : null,
+                        ]);
+                    }),
+            ])
+            /*
+             * Los que esperan primero, y entre ellos el más viejo arriba: un
+             * contacto de hace tres días se enfría más rápido que el de hace
+             * tres minutos.
+             */
+            ->defaultSort('created_at', 'desc')
+            ->paginationPageOptions([25, 50, 100])
+            ->emptyStateHeading('Todavía nadie escribió')
+            ->emptyStateDescription('Acá van a aparecer las personas que dejen su teléfono en el plano público. Si el plano está apagado, nadie puede escribir.')
+            ->emptyStateIcon('heroicon-o-user-plus');
+    }
+}

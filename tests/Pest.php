@@ -133,6 +133,13 @@ function sembrarPermisosDeShield(): void
         'DevolverSenia:Compromiso',
         // R12: anular un recibo mal emitido. Solo la administradora.
         'Anular:Recibo',
+        // Perdonar la mora de un atraso: plata que se deja de cobrar.
+        'CondonarMora:Recibo',
+        // Los prospectos del plano publico. Sin Create ni Delete: nacen en
+        // el formulario publico y borrarlos falsearia la medicion.
+        'ViewAny:Prospecto',
+        'View:Prospecto',
+        'Update:Prospecto',
     ] as $permiso) {
         Permission::query()->firstOrCreate(['name' => $permiso], ['guard_name' => 'web']);
     }
