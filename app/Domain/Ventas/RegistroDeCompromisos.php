@@ -259,6 +259,8 @@ final readonly class RegistroDeCompromisos
         ?Monto $prima = null,
         ?TasaDeInteres $tasa = null,
         ?CondicionesDeMora $mora = null,
+        ?TasaDeInteres $tasaLista = null,
+        ?string $motivoTasa = null,
     ): Compromiso {
         $estado = $this->estadoDe($lote);
         $codigo = $this->codigoDe($lote);
@@ -303,6 +305,20 @@ final readonly class RegistroDeCompromisos
             throw CompromisoInvalidoException::porDescuentoSinMotivo($codigo, $lista, $pactado);
         }
 
+        /*
+         * Y lo mismo con el precio del dinero. La tasa de lista puede venir
+         * de afuera —es la del PLAZO elegido, igual que el precio— y cuando
+         * no viene, la pactada ES la de lista: sin plan cargado no hay contra
+         * que comparar, y no hay descuento que justificar.
+         */
+        $tasaPactada = $tasa ?? TasaDeInteres::cero();
+        $tasaDeLista = $tasaLista ?? $tasaPactada;
+        $porQueBajo = trim($motivoTasa ?? '');
+
+        if (PrecioPactado::exigeMotivoDeTasa($tasaDeLista, $tasaPactada, $porQueBajo)) {
+            throw CompromisoInvalidoException::porTasaSinMotivo($codigo, $tasaDeLista, $tasaPactada);
+        }
+
         return DB::transaction(function () use (
             $lote,
             $cliente,
@@ -314,7 +330,9 @@ final readonly class RegistroDeCompromisos
             $motivo,
             $plazoMeses,
             $prima,
-            $tasa,
+            $tasaPactada,
+            $tasaDeLista,
+            $porQueBajo,
             $mora
         ): Compromiso {
             /*
@@ -358,7 +376,9 @@ final readonly class RegistroDeCompromisos
                  * nombres, asi que van todas o no va ninguna: una modalidad
                  * sin su monto no pasa el CHECK de coherencia.
                  */
-                'tasa_interes_anual' => ($tasa ?? TasaDeInteres::cero())->paraBase(),
+                'tasa_interes_anual' => $tasaPactada->paraBase(),
+                'tasa_interes_lista' => $tasaDeLista->paraBase(),
+                'motivo_tasa'        => $porQueBajo === '' ? null : $porQueBajo,
                 ...($mora ?? CondicionesDeMora::ninguna())->paraBase(),
             ]);
 

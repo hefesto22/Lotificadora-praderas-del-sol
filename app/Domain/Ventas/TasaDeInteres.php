@@ -205,6 +205,18 @@ final readonly class TasaDeInteres implements Stringable
         return bccomp($this->anual, $otra->anual, self::ESCALA) === 0;
     }
 
+    /**
+     * ¿Esta tasa es mas baja que la otra?
+     *
+     * Se compara a escala 20 y no a los tres decimales que se muestran: dos
+     * tasas que se ven iguales en pantalla pueden no serlo, y de esta
+     * comparacion depende si el sistema pide un motivo escrito (R4).
+     */
+    public function menorQue(self $otra): bool
+    {
+        return bccomp($this->anual, $otra->anual, self::ESCALA) < 0;
+    }
+
     // ─── Interno ──────────────────────────────────────────────────────
 
     /**

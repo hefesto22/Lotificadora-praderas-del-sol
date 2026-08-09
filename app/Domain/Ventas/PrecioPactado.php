@@ -52,6 +52,21 @@ final readonly class PrecioPactado
          */
         public ?int $plazoMeses = null,
         public ?Monto $prima = null,
+
+        /*
+         * ═══ EL PRECIO DEL DINERO TAMBIEN SE NEGOCIA ═══
+         *
+         * El vendedor sentado frente al cliente baja medio punto para
+         * cerrar, igual que baja el precio de la vara². Null significa «la
+         * del plan del plazo elegido», que es el caso normal.
+         *
+         * Y como bajarla es regalar plata igual que bajar el precio, lleva su
+         * propio motivo: no se reusa `motivo`, porque «descuento por pago
+         * adelantado de la prima» explica el precio del terreno y no tiene
+         * por que explicar el del dinero.
+         */
+        public ?TasaDeInteres $tasa = null,
+        public ?string $motivoTasa = null,
     ) {}
 
     /**
@@ -66,11 +81,26 @@ final readonly class PrecioPactado
     }
 
     /**
+     * Lo mismo, para la tasa. Subirla no necesita justificarse ante nadie.
+     */
+    public static function exigeMotivoDeTasa(TasaDeInteres $lista, TasaDeInteres $pactada, ?string $motivo): bool
+    {
+        return $pactada->menorQue($lista) && trim($motivo ?? '') === '';
+    }
+
+    /**
      * El motivo limpio, o null si lo que vino eran espacios.
      */
     public function motivoLimpio(): ?string
     {
         $motivo = trim($this->motivo ?? '');
+
+        return $motivo === '' ? null : $motivo;
+    }
+
+    public function motivoDeTasaLimpio(): ?string
+    {
+        $motivo = trim($this->motivoTasa ?? '');
 
         return $motivo === '' ? null : $motivo;
     }

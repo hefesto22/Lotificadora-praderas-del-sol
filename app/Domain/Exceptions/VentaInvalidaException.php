@@ -6,6 +6,7 @@ namespace App\Domain\Exceptions;
 
 use App\Domain\Enums\FormaDePago;
 use App\Domain\ValueObjects\Monto;
+use App\Domain\Ventas\TasaDeInteres;
 
 /**
  * Esa venta no se puede registrar asi.
@@ -90,6 +91,20 @@ final class VentaInvalidaException extends GrupoOlympoException
             "El lote {$codigo} se esta vendiendo a {$pactado->formateado()} la vara² cuando "
             ."el precio de lista es {$lista->formateado()}. Un precio menor se puede registrar, "
             .'pero hay que escribir el motivo del descuento: queda anotado con el usuario y la fecha.'
+        );
+    }
+
+    /**
+     * R4, aplicado al precio del dinero. Ver la gemela en
+     * `CompromisoInvalidoException`: la regla es una sola y cada Service
+     * tira la excepcion que le sirve a quien esta atendiendo.
+     */
+    public static function porTasaSinMotivo(string $codigo, TasaDeInteres $lista, TasaDeInteres $pactada): self
+    {
+        return new self(
+            "El lote {$codigo} se esta vendiendo con un interes de {$pactada->formateada()} anual "
+            ."cuando el plan de ese plazo ofrece {$lista->formateada()}. Una tasa menor se puede "
+            .'registrar, pero hay que escribir el motivo: queda anotado con el usuario y la fecha.'
         );
     }
 

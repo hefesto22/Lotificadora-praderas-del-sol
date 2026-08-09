@@ -124,10 +124,15 @@ describe('Lo que llega al plano', function (): void {
             ->viewData('planes');
 
         // El orden importa: es el que lee el vendedor de arriba hacia abajo.
+        /*
+         * La TASA viaja con el precio desde el 9-ago-2026. No es un campo de
+         * adorno: con el la pantalla le pide al servidor la cuota de verdad,
+         * en vez de dividir el valor entre los meses como hacia antes.
+         */
         expect($planes)->toBe([
-            ['meses' => 0,  'etiqueta' => 'Contado',  'precioVara' => '1300.00'],
-            ['meses' => 12, 'etiqueta' => '12 meses', 'precioVara' => '1500.00'],
-            ['meses' => 48, 'etiqueta' => '48 meses', 'precioVara' => '1800.00'],
+            ['meses' => 0,  'etiqueta' => 'Contado',  'precioVara' => '1300.00', 'tasa' => '0.000'],
+            ['meses' => 12, 'etiqueta' => '12 meses', 'precioVara' => '1500.00', 'tasa' => '0.000'],
+            ['meses' => 48, 'etiqueta' => '48 meses', 'precioVara' => '1800.00', 'tasa' => '0.000'],
         ]);
     });
 

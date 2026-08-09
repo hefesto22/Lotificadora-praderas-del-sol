@@ -14,12 +14,14 @@ use App\Domain\Plano\Dxf\UnidadDxf;
 use App\Domain\Plano\ParametrosDeAcomodo;
 use App\Domain\Plano\PlanoDelProyecto;
 use App\Domain\ValueObjects\Monto;
+use App\Domain\Ventas\CotizacionDelLote;
 use App\Domain\Ventas\ListaDePrecios;
 use App\Domain\Ventas\PlanDeCuotas;
 use App\Domain\Ventas\PlanDelContrato;
 use App\Domain\Ventas\PrecioPactado;
 use App\Domain\Ventas\RegistroDeCompromisos;
 use App\Domain\Ventas\RegistroDeVentas;
+use App\Domain\Ventas\TasaDeInteres;
 use App\Filament\Resources\Proyectos\ProyectoResource;
 use App\Filament\Schemas\Components\DNIField;
 use App\Filament\Schemas\Components\MayusculasField;
@@ -498,6 +500,32 @@ class VerPlano extends Page
                             ->native(false)
                             ->displayFormat('d/m/Y'),
 
+                        /*
+                         * El precio del DINERO, al lado del precio del
+                         * terreno y con la misma regla. Vive fuera del cuadro
+                         * cotizado por lo mismo que `motivo_descuento`: es uno
+                         * por contrato, y el Service lo aplica a cada renglon.
+                         */
+                        TextInput::make('tasa_interes_anual')
+                            ->label('Interés anual')
+                            ->numeric()
+                            ->minValue(0)
+                            ->maxValue(TasaDeInteres::MAXIMA)
+                            ->step('0.001')
+                            ->suffix('%')
+                            ->live(onBlur: true)
+                            ->visible(fn (Get $get): bool => ! $get('cotizado'))
+                            ->dehydratedWhenHidden()
+                            ->helperText('Vacío o 0 es sin interés. Si baja de la del plan, hay que escribir por qué.'),
+
+                        TextInput::make('motivo_tasa')
+                            ->label('Motivo de la tasa')
+                            ->maxLength(200)
+                            ->columnSpanFull()
+                            ->visible(fn (Get $get): bool => $this->hayRebajaDeTasa($get))
+                            ->required(fn (Get $get): bool => $this->hayRebajaDeTasa($get))
+                            ->helperText('El interés va por debajo del que ofrece el plan. R4: queda con tu usuario y la fecha.'),
+
                         TextInput::make('motivo_descuento')
                             ->label('Motivo del descuento')
                             ->maxLength(200)
@@ -553,6 +581,7 @@ class VerPlano extends Page
                     $condiciones = $this->condicionesDelFormulario($data, $lote);
                     $lotes = $this->lotesDelContrato((int) $lote->getKey(), array_column($condiciones, 'lote'));
                     $motivo = $this->texto($data, 'motivo_descuento', '') ?: null;
+                    $motivoTasa = $this->texto($data, 'motivo_tasa', '') ?: null;
 
                     $porLote = [];
 
@@ -574,6 +603,10 @@ class VerPlano extends Page
                             motivo: $motivo,
                             plazoMeses: $suyo['plazo'] ?? 0,
                             prima: $prima,
+                            // Null es «la del plan de ese plazo»: el Service
+                            // la resuelve y la congela junto al precio.
+                            tasa: $this->tasaTecleada($suyo['tasa'] ?? null),
+                            motivoTasa: $motivoTasa,
                         );
                     }
 
@@ -633,10 +666,143 @@ class VerPlano extends Page
      * compromete al cliente. Si no hay ninguno, manda el precio propio del
      * lote, que es lo que habia antes de que existiera la lista por plazo.
      *
-     * @param array<string, mixed> $arguments
      *
      * @return array<string, mixed>
      */
+    /**
+     * El cuadro de plazos de un lote, con el motor que firma el contrato.
+     *
+     * 🔴 Lo llama Alpine con `$wire.cotizar(...)` cada vez que cambia la
+     * prima, un precio o una tasa. Antes se calculaba en el navegador y por
+     * eso mostraba L 54,166.67 donde el contrato decia L 57,751.71: dividia
+     * el valor entre los meses sin mirar el interes. Ver el docblock de
+     * `CotizacionDelLote` — ahi esta la historia entera.
+     *
+     * ⚠️ Es un metodo PUBLICO de Livewire, o sea que lo puede llamar el
+     * navegador con el id de lote que se le ocurra. Por eso el lote se busca
+     * acotado al proyecto de ESTA pantalla.
+     *
+     * @param array<string, mixed> $datos
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function cotizar(array $datos): array
+    {
+        /** @var Proyecto $proyecto */
+        $proyecto = $this->getRecord();
+
+        $lote = Lote::query()
+            ->whereKey(is_numeric($datos['lote'] ?? null) ? (int) $datos['lote'] : 0)
+            ->where('proyecto_id', $proyecto->getKey())
+            ->first();
+
+        if (! $lote instanceof Lote) {
+            return [];
+        }
+
+        $precios = is_array($datos['precios'] ?? null) ? $datos['precios'] : [];
+        $tasas = is_array($datos['tasas'] ?? null) ? $datos['tasas'] : [];
+
+        $planes = [];
+
+        foreach ($this->planesVigentes() as $plan) {
+            $meses = (int) $plan->getAttribute('meses');
+            $precioLista = $plan->montoPrecioVara();
+            $tasaLista = $plan->tasaDeInteres();
+
+            $planes[] = [
+                'meses'       => $meses,
+                'etiqueta'    => $plan->nombre(),
+                'precio'      => $this->montoTecleado($precios[$meses] ?? null) ?? $precioLista,
+                'precioLista' => $precioLista,
+                'tasa'        => $this->tasaTecleada($tasas[$meses] ?? null) ?? $tasaLista,
+                'tasaLista'   => $tasaLista,
+            ];
+        }
+
+        return new CotizacionDelLote()->para(
+            (string) $lote->getAttribute('area_varas'),
+            $this->montoTecleado($datos['prima'] ?? null) ?? Monto::cero(),
+            $planes,
+            CarbonImmutable::parse(today()->toDateString()),
+            $this->configEntero('lotificadora.ventas.dia_pago_default', 5),
+        );
+    }
+
+    /**
+     * Un numero tecleado, como texto plano.
+     *
+     * ═══ 🔴 EL FLOAT NO SE PUEDE IGNORAR, POR MAS QUE EL §8.3.1 LO PROHIBA ═══
+     *
+     * Un `TextInput` con `->numeric()` hace que Livewire hidrate el campo como
+     * NUMERO: lo que llega del formulario es un float, no la cadena que se
+     * tecleo. La primera version de estos ayudantes solo aceptaba string o int
+     * y devolvia null ante cualquier otra cosa.
+     *
+     * Null aca significa «no lo tocaron», asi que el efecto no fue un error:
+     * fue que la tasa negociada al 6 % se descartaba y el compromiso se
+     * congelaba con el 12 % del plan, sin una sola linea roja en pantalla. Lo
+     * agarro un test; a un cliente le habria llegado un contrato con una tasa
+     * que nadie le dijo.
+     *
+     * La conversion es con decimales fijos y NO con un cast: `(string) $float`
+     * escribe notacion cientifica en los extremos y bcmath la rechaza. De aca
+     * en adelante todo el camino vuelve a ser string.
+     */
+    private function comoTexto(mixed $valor, int $decimales): ?string
+    {
+        if (is_string($valor)) {
+            $texto = trim($valor);
+
+            return $texto === '' || ! is_numeric($texto) ? null : $texto;
+        }
+
+        if (is_int($valor)) {
+            return (string) $valor;
+        }
+
+        return is_float($valor) && is_finite($valor)
+            ? number_format($valor, $decimales, '.', '')
+            : null;
+    }
+
+    /**
+     * Lo que se tecleo en una casilla de dinero, o null si no sirve.
+     *
+     * Null significa «no lo tocaron»: quien llama pone el de lista. Por eso
+     * NO se devuelve cero ante un texto invalido — cero es un precio, y de
+     * los que piden motivo escrito.
+     */
+    private function montoTecleado(mixed $valor): ?Monto
+    {
+        // Dos, que es la escala de toda columna de dinero del sistema.
+        // `Monto::DECIMALES` es privada y no vale la pena abrirla por esto.
+        $texto = $this->comoTexto($valor, 2);
+
+        return $texto === null || (float) $texto < 0 ? null : new Monto($texto);
+    }
+
+    /**
+     * Lo mismo para una tasa. Null es «la del plan», y por eso un cero
+     * escrito a mano SI vale: es una venta sin interes, que es una decision.
+     */
+    private function tasaTecleada(mixed $valor): ?TasaDeInteres
+    {
+        $texto = $this->comoTexto($valor, TasaDeInteres::DECIMALES);
+
+        if ($texto === null) {
+            return null;
+        }
+
+        $numero = (float) $texto;
+
+        // Fuera de rango se ignora: el CHECK de la base lo rechazaria igual,
+        // y aca la consecuencia seria un cuadro en blanco sin explicacion.
+        return $numero < 0 || $numero > (float) TasaDeInteres::MAXIMA
+            ? null
+            : new TasaDeInteres($texto);
+    }
+
     private function datosInicialesDeVenta(array $arguments): array
     {
         $lote = Lote::query()->find($this->entero($arguments, 'lote', 0));
@@ -684,8 +850,17 @@ class VerPlano extends Page
 
             'plazo_meses' => $plazoFinal,
             'precio_vara' => $precioFinal,
-            'prima'       => $this->primaInicial($arguments, $lote, $extra, $plazoFinal, $precioFinal),
-            'dia_pago'    => $this->configEntero('lotificadora.ventas.dia_pago_default', 5),
+
+            /*
+             * La tasa que se cotizo en el modal, o la del plan de ese plazo.
+             * Llegar al formulario con esto en blanco seria pedirlo dos veces
+             * — y peor: guardarlo en cero sin que nadie lo haya decidido.
+             */
+            'tasa_interes_anual' => $this->texto($arguments, 'tasa', '') !== ''
+                ? $this->texto($arguments, 'tasa', '')
+                : $this->tasaDelPlazo($plazoFinal)->redondeada(),
+            'prima'    => $this->primaInicial($arguments, $lote, $extra, $plazoFinal, $precioFinal),
+            'dia_pago' => $this->configEntero('lotificadora.ventas.dia_pago_default', 5),
 
             /*
              * Al estado, no a $arguments: los closures de un componente del
@@ -891,7 +1066,7 @@ class VerPlano extends Page
      *
      * @param array<string, mixed> $data
      *
-     * @return list<array{lote: int, plazo: int, precio: string, prima: string}>
+     * @return list<array{lote: int, plazo: int, precio: string, prima: string, tasa: string|null}>
      */
     private function condicionesDelFormulario(array $data, ?Lote $lote = null): array
     {
@@ -906,11 +1081,12 @@ class VerPlano extends Page
             'plazo'  => $this->entero($data, 'plazo_meses', 0),
             'precio' => $this->texto($data, 'precio_vara', '0'),
             'prima'  => $this->texto($data, 'prima', '0'),
+            'tasa'   => $this->tasaCruda($data['tasa_interes_anual'] ?? null),
         ]];
     }
 
     /**
-     * @return list<array{lote: int, plazo: int, precio: string, prima: string}>
+     * @return list<array{lote: int, plazo: int, precio: string, prima: string, tasa: string|null}>
      */
     private function condicionesDe(mixed $crudo): array
     {
@@ -955,6 +1131,14 @@ class VerPlano extends Page
                 'plazo'  => is_numeric($fila['plazo'] ?? null) ? (int) $fila['plazo'] : 0,
                 'precio' => $this->decimalDe($fila['precio'] ?? null),
                 'prima'  => $this->decimalDe($fila['prima'] ?? null),
+                /*
+                 * ⚠️ Null y NO '0' cuando no viene. `decimalDe()` devuelve
+                 * cero ante lo que sea, y un cero en la tasa no es un vacio:
+                 * es una venta sin interes, que baja de la de lista y pide
+                 * motivo escrito. El vacio tiene que seguir significando
+                 * «la del plan».
+                 */
+                'tasa' => $this->tasaCruda($fila['tasa'] ?? null),
             ];
         }
 
@@ -964,6 +1148,59 @@ class VerPlano extends Page
     private function decimalDe(mixed $valor): string
     {
         return is_string($valor) || is_int($valor) ? (string) $valor : '0';
+    }
+
+    /**
+     * La tasa tal como vino, o null si no vino. Ver el comentario de arriba.
+     */
+    private function tasaCruda(mixed $valor): ?string
+    {
+        return $this->comoTexto($valor, TasaDeInteres::DECIMALES);
+    }
+
+    /**
+     * La tasa que ofrece el plan de ese plazo hoy. Cero si no hay plan
+     * cargado, que es lo que hacia el sistema antes de que el interes
+     * existiera (R1, R2).
+     */
+    private function tasaDelPlazo(int $meses): TasaDeInteres
+    {
+        $plan = $this->planDelPlazo($meses);
+
+        return $plan instanceof PlanDePago ? $plan->tasaDeInteres() : TasaDeInteres::cero();
+    }
+
+    /**
+     * ¿La tasa tecleada baja de la que ofrece el plan de alguno de los lotes?
+     *
+     * Es R4 aplicado al precio del dinero: alcanza con que uno baje para
+     * tener que escribir el motivo. El Service vuelve a mirarlos uno por uno
+     * y dice cual falla.
+     */
+    private function hayRebajaDeTasa(Get $get): bool
+    {
+        /*
+         * ⚠️ Se mira el CUADRO COTIZADO cuando lo hay, y no el campo del
+         * formulario. Con un contrato cotizado desde el plano ese campo esta
+         * escondido y cada lote lleva SU tasa: preguntarle al campo diria que
+         * no hubo rebaja, el motivo no se pediria, y el Service reventaria
+         * con un mensaje sobre un lote que la pantalla ni menciona.
+         */
+        $condiciones = $this->condicionesDe($get('condiciones'));
+
+        if ($condiciones !== []) {
+            return array_any(
+                $condiciones,
+                fn (array $renglon): bool => ($this->tasaTecleada($renglon['tasa']) ?? $this->tasaDelPlazo($renglon['plazo']))
+                    ->menorQue($this->tasaDelPlazo($renglon['plazo'])),
+            );
+        }
+
+        $tecleada = $this->tasaTecleada($get('tasa_interes_anual'));
+        $plazo = $get('plazo_meses');
+
+        return $tecleada instanceof TasaDeInteres
+            && $tecleada->menorQue($this->tasaDelPlazo(is_numeric($plazo) ? (int) $plazo : 0));
     }
 
     /**
@@ -1878,6 +2115,7 @@ class VerPlano extends Page
                     'meses'      => (int) $plan->getAttribute('meses'),
                     'etiqueta'   => $plan->nombre(),
                     'precioVara' => $plan->montoPrecioVara()->redondeado(),
+                    'tasa'       => $plan->tasaDeInteres()->redondeada(),
                 ])
                 ->all(),
         ];

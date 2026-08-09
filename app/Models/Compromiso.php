@@ -54,11 +54,13 @@ use Spatie\Activitylog\Support\LogOptions;
     'plazo_meses',
     'prima',
     'tasa_interes_anual',
+    'tasa_interes_lista',
     'mora_modalidad',
     'mora_monto',
     'mora_porcentaje',
     'mora_dias_gracia',
     'motivo_descuento',
+    'motivo_tasa',
     'monto_senia',
     'fecha',
     'vence_el',
@@ -413,6 +415,26 @@ class Compromiso extends Model
     public function tasaDeInteres(): TasaDeInteres
     {
         return TasaDeInteres::deBase($this->getAttribute('tasa_interes_anual'));
+    }
+
+    /**
+     * La que ofrecia el plan de ese plazo el dia que se firmo.
+     *
+     * Se guarda por lo mismo que `precio_vara_lista`: sin ella, «¿cuanto
+     * interes se resigno este mes?» no se puede contestar sin adivinar,
+     * porque la tasa del plan cambia con el tiempo.
+     */
+    public function tasaDeLista(): TasaDeInteres
+    {
+        return TasaDeInteres::deBase($this->getAttribute('tasa_interes_lista'));
+    }
+
+    /**
+     * ¿Se firmo por debajo de la tasa que ofrecia el plan?
+     */
+    public function huboRebajaDeTasa(): bool
+    {
+        return $this->tasaDeInteres()->menorQue($this->tasaDeLista());
     }
 
     /**

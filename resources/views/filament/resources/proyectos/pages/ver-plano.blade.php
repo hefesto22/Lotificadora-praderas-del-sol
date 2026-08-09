@@ -231,6 +231,10 @@
         .plano-tabla td { padding: .5rem .375rem; border-bottom: 1px solid rgb(250 250 250); text-align: right; color: rgb(9 9 11); white-space: nowrap; }
         .dark .plano-tabla td { border-bottom-color: rgba(255, 255, 255, .06); color: rgb(228 228 231); }
         .plano-tabla td.cuota { font-weight: 600; }
+        .plano-tabla td.cuota small {
+            display: block; font-weight: 400; font-size: .6875rem;
+            color: rgb(161 161 170); letter-spacing: 0; line-height: 1.35;
+        }
         .plano-planes-nota { margin-top: .625rem; font-size: .75rem; line-height: 1.6; color: rgb(161 161 170); }
 
         /* El mismo conmutador que las pestañas de la ficha del proyecto. */
@@ -397,6 +401,14 @@
                    el plazo elegido y, si se toco, el precio de esa fila. */
                 plazoElegido: null,
                 preciosTocados: {},
+                tasasTocadas: {},
+
+                /* El cuadro de plazos, tal como lo devolvio el servidor.
+                   Ya no se calcula aca: ver el comentario de recalcular(). */
+                filas: [],
+                cotizando: false,
+                pedido: 0,
+                reloj: null,
 
                 /* El contrato en armado: los lotes marcados para firmarse
                    JUNTOS, en un solo expediente. Se guarda lo minimo que la
@@ -585,6 +597,12 @@
                     this.preciosTocados = marcado && marcado.precio !== null
                         ? { [marcado.plazo]: marcado.precio }
                         : {};
+                    this.tasasTocadas = marcado && marcado.tasa
+                        ? { [marcado.plazo]: marcado.tasa }
+                        : {};
+
+                    this.filas = [];
+                    this.recalcular();
 
                     /* La seña y el vencimiento SI son del tramite entero: los
                        tres los fijo la contratante y son iguales para todos
@@ -630,6 +648,9 @@
                         plazo: this.plazoElegido,
                         etiqueta: plan ? (plan.etiqueta || (plan.meses > 0 ? `${plan.meses} meses` : 'Contado')) : '—',
                         precio: plan ? this.precioDe(plan).toFixed(2) : null,
+                        /* Vacio es «la del plan»: se guarda solo lo que se
+                           negocio, no lo que ya estaba. */
+                        tasa: plan ? this.tasaDe(plan) : '',
                         prima: this.prima || '',
                     });
 
@@ -973,39 +994,57 @@
                 },
 
                 /*
-                   El cuadro de plazos. Se calcula EN EL MOMENTO y con
-                   centavos enteros, no con decimales de punto flotante.
+                   🔴 EL CUADRO DE PLAZOS LO CALCULA EL SERVIDOR.
 
-                   Es un estimado para cotizar de pie frente al cliente: el
-                   plan que se firma lo arma PlanDeCuotas del lado del
-                   servidor, que es el que reparte el residuo del redondeo
-                   en la ultima cuota.
+                   Hasta el 9-ago-2026 se calculaba aca: valor dividido entre
+                   los meses. Mientras ningun plan cobraba interes daba el
+                   numero correcto y nadie lo noto. El dia que un plan de
+                   Praderas quedo al 12 % anual, esta pantalla —la que el
+                   vendedor le muestra al cliente— decia L 54,166.67 donde el
+                   contrato iba a decir L 57,751.71.
+
+                   Y no se arregla escribiendo la formula francesa aca: en
+                   JavaScript solo hay float, que es lo que el §8.3.1 prohibe
+                   en el camino del dinero.
+
+                   Cuesta un ida y vuelta corto por cada tecla. Vale la pena:
+                   el numero que se dice en voz alta es el que sale impreso.
+
+                   `pedido` descarta las respuestas viejas. Escribiendo rapido
+                   salen varias consultas y no vuelven en orden; sin esto, la
+                   respuesta de «26» puede pisar a la de «2600».
                 */
-                get planesCalculados() {
-                    const lote = this.seleccionado;
+                async recalcular() {
+                    if (! this.seleccionado || this.planes.length === 0) {
+                        this.filas = [];
+                        return;
+                    }
 
-                    if (! lote || this.planes.length === 0) return [];
+                    const mio = ++this.pedido;
+                    this.cotizando = true;
 
-                    const area = Number(String(lote.areaVaras).replace(/,/g, ''));
+                    try {
+                        const filas = await $wire.cotizar({
+                            lote: this.seleccionado.id,
+                            prima: this.prima,
+                            precios: this.preciosTocados,
+                            tasas: this.tasasTocadas,
+                        });
 
-                    if (! Number.isFinite(area) || area <= 0) return [];
+                        if (mio === this.pedido) { this.filas = filas; }
+                    } catch (e) {
+                        /* Sin conexion el cuadro queda como estaba, que es
+                           mejor que vaciarse sin decir por que. */
+                    } finally {
+                        if (mio === this.pedido) { this.cotizando = false; }
+                    }
+                },
 
-                    const prima = Math.max(0, Math.round((Number(this.prima) || 0) * 100));
-
-                    return this.planes.map((plan) => {
-                        const precio = this.precioDe(plan);
-                        const total = Math.round(area * precio * 100);
-                        const saldo = Math.max(total - prima, 0);
-
-                        return {
-                            meses: plan.meses,
-                            etiqueta: plan.etiqueta || (plan.meses > 0 ? `${plan.meses} meses` : 'Contado'),
-                            precioVara: precio,
-                            deLista: Number(plan.precioVara),
-                            total: this.lempiras(total),
-                            cuota: plan.meses > 0 ? this.lempiras(Math.round(saldo / plan.meses)) : '—',
-                        };
-                    });
+                /* Se espera a que deje de escribir. Un pedido por tecla
+                   sobre una casilla de precio son seis viajes para nada. */
+                recalcularPronto() {
+                    clearTimeout(this.reloj);
+                    this.reloj = setTimeout(() => this.recalcular(), 350);
                 },
 
                 /* Dos decimales y separador de miles, para todo lo que se
@@ -1049,18 +1088,34 @@
                     const precio = plan ? this.precioDe(plan).toFixed(2) : null;
                     const enMano = Number.isFinite(prima) && prima > 0 ? prima.toFixed(2) : '0.00';
 
+                    /* La tasa NEGOCIADA, o vacio si no se toco. Vacio
+                       significa «la del plan»: mandar la de lista igual
+                       serviria, pero el dia que la administracion la cambie
+                       entre cotizar y firmar, el formulario llegaria con la
+                       vieja y sin que nadie lo pidiera. */
+                    const tasa = plan ? this.tasaDe(plan) : '';
+
                     return {
                         lote: this.seleccionado.id,
                         plazo: this.plazoElegido,
                         precio,
                         prima: enMano,
+                        tasa,
                         condiciones: [{
                             lote: this.seleccionado.id,
                             plazo: this.plazoElegido,
                             precio,
                             prima: enMano,
+                            tasa,
                         }],
                     };
+                },
+
+                /* Lo que se tecleo en la fila de la tasa, o vacio. */
+                tasaDe(plan) {
+                    const tocada = String(this.tasasTocadas[plan.meses] ?? '').trim();
+
+                    return tocada !== '' && Number.isFinite(Number(tocada)) ? tocada : '';
                 },
 
                 get areaFormateada() {
@@ -1433,7 +1488,8 @@
                                                     <div>
                                                         <label class="plano-prima">
                                                             Prima
-                                                            <input type="number" min="0" step="0.01" placeholder="0.00" x-model="prima">
+                                                            <input type="number" min="0" step="0.01" placeholder="0.00"
+                                                                   x-model="prima" x-on:input="recalcularPronto()">
                                                             L
                                                         </label>
 
@@ -1441,57 +1497,87 @@
                                                              acá: lo que quede marcado viaja al formulario de
                                                              venta ya puesto. El servidor lo revalida igual —
                                                              esto es el arranque, no la última palabra. --}}
-                                                        <table class="plano-tabla">
+                                                        <table class="plano-tabla" :style="cotizando ? 'opacity:.55' : ''">
                                                             <thead>
                                                                 <tr>
                                                                     <th></th>
                                                                     <th>Plazo</th>
                                                                     <th>Precio v²</th>
+                                                                    <th>Interés</th>
                                                                     <th>Valor</th>
                                                                     <th>Cuota</th>
                                                                 </tr>
                                                             </thead>
                                                             <tbody>
-                                                                <template x-for="plan in planesCalculados" :key="plan.meses">
+                                                                <template x-for="fila in filas" :key="fila.meses">
                                                                     <tr
                                                                         class="plano-fila-plan"
-                                                                        :class="plan.meses === plazoElegido ? 'elegido' : ''"
-                                                                        x-on:click="plazoElegido = plan.meses"
+                                                                        :class="fila.meses === plazoElegido ? 'elegido' : ''"
+                                                                        x-on:click="plazoElegido = fila.meses"
                                                                     >
                                                                         <td>
                                                                             <input
                                                                                 type="radio"
-                                                                                :value="plan.meses"
-                                                                                :checked="plan.meses === plazoElegido"
-                                                                                x-on:change="plazoElegido = plan.meses"
+                                                                                :value="fila.meses"
+                                                                                :checked="fila.meses === plazoElegido"
+                                                                                x-on:change="plazoElegido = fila.meses"
                                                                             >
                                                                         </td>
-                                                                        <td x-text="plan.etiqueta"></td>
+                                                                        <td x-text="fila.etiqueta"></td>
                                                                         <td>
                                                                             <input
                                                                                 type="number"
                                                                                 min="0"
                                                                                 step="0.01"
                                                                                 class="plano-precio"
-                                                                                :class="plan.precioVara !== plan.deLista ? 'tocado' : ''"
-                                                                                :placeholder="numero(plan.deLista)"
-                                                                                :value="preciosTocados[plan.meses] ?? ''"
+                                                                                :class="fila.rebajado ? 'tocado' : ''"
+                                                                                :placeholder="fila.precioLista"
+                                                                                :value="preciosTocados[fila.meses] ?? ''"
                                                                                 x-on:click.stop
-                                                                                x-on:input="preciosTocados[plan.meses] = $event.target.value"
+                                                                                x-on:input="preciosTocados[fila.meses] = $event.target.value; recalcularPronto()"
                                                                             >
                                                                         </td>
-                                                                        <td x-text="plan.total"></td>
-                                                                        <td class="cuota" x-text="plan.cuota"></td>
+                                                                        {{-- El precio del DINERO, editable igual que el del
+                                                                             terreno. De contado no hay interés que cobrar. --}}
+                                                                        <td>
+                                                                            <template x-if="fila.meses > 0">
+                                                                                <input
+                                                                                    type="number"
+                                                                                    min="0"
+                                                                                    step="0.001"
+                                                                                    class="plano-precio"
+                                                                                    :class="fila.rebajada ? 'tocado' : ''"
+                                                                                    :placeholder="fila.tasaLista"
+                                                                                    :value="tasasTocadas[fila.meses] ?? ''"
+                                                                                    x-on:click.stop
+                                                                                    x-on:input="tasasTocadas[fila.meses] = $event.target.value; recalcularPronto()"
+                                                                                >
+                                                                            </template>
+                                                                            <template x-if="fila.meses === 0">
+                                                                                <span style="color:rgb(161 161 170)">—</span>
+                                                                            </template>
+                                                                        </td>
+                                                                        <td x-text="fila.valor"></td>
+                                                                        <td class="cuota">
+                                                                            <span x-text="fila.cuota ?? '—'"></span>
+                                                                            <template x-if="fila.interes">
+                                                                                <small x-text="'+' + fila.interes + ' de intereses'"></small>
+                                                                            </template>
+                                                                            <template x-if="fila.error">
+                                                                                <small x-text="fila.error"></small>
+                                                                            </template>
+                                                                        </td>
                                                                     </tr>
                                                                 </template>
                                                             </tbody>
                                                         </table>
 
                                                         <p class="plano-planes-nota">
-                                                            Marcá el plazo con el que se va a vender. El precio se puede
-                                                            cambiar acá mismo; vacío es el de lista. El plan definitivo
-                                                            se arma al registrar la venta, y ahí el residuo del redondeo
-                                                            va a la última cuota.
+                                                            Marcá el plazo con el que se va a vender. El precio y el
+                                                            interés se pueden cambiar acá mismo; vacío es lo que ofrece
+                                                            el plan, y si bajás alguno de los dos el sistema va a pedir
+                                                            el motivo por escrito. La cuota sale del mismo motor que
+                                                            firma el contrato: es la que va a salir impresa.
                                                         </p>
                                                     </div>
                                                 </template>

@@ -230,6 +230,8 @@ final readonly class RegistroDeVentas
                     prima: $renglon['prima'],
                     tasa: $renglon['tasa'],
                     mora: $renglon['mora'],
+                    tasaLista: $renglon['tasaLista'],
+                    motivoTasa: $renglon['motivoTasa'],
                 );
 
                 // 8. El plan congelado (§9.D6), el de ESTE lote.
@@ -491,7 +493,7 @@ final readonly class RegistroDeVentas
      * @param list<Lote> $lotes
      * @param array<int, PrecioPactado> $pactados por id de lote
      *
-     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, mora: CondicionesDeMora}>
+     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora}>
      *
      * @throws VentaInvalidaException
      */
@@ -531,6 +533,23 @@ final readonly class RegistroDeVentas
             $plazo = $acuerdo->plazoMeses ?? $plazoMeses;
             $delPlazo = $this->lista->planParaPlazo($proyecto, $plazo);
 
+            /*
+             * ═══ Y EL PRECIO DEL DINERO, con la misma regla ═══
+             *
+             * La tasa de LISTA es la del plan de ese plazo; la pactada es la
+             * que el vendedor negocio, o la misma si no negocio nada. Bajarla
+             * regala plata igual que bajar el precio del terreno —mas de
+             * L 40,000 en un lote de 250 vr² a 12 meses— asi que R4 vale para
+             * las dos, y falla ACA, antes de quemar un correlativo.
+             */
+            $tasaLista = $delPlazo instanceof PlanDePago ? $delPlazo->tasaDeInteres() : TasaDeInteres::cero();
+            $tasa = $acuerdo->tasa ?? $tasaLista;
+            $motivoTasa = $acuerdo?->motivoDeTasaLimpio();
+
+            if (PrecioPactado::exigeMotivoDeTasa($tasaLista, $tasa, $motivoTasa)) {
+                throw VentaInvalidaException::porTasaSinMotivo($this->codigo($lote), $tasaLista, $tasa);
+            }
+
             $renglones[] = [
                 'lote'   => $lote,
                 'lista'  => $lista,
@@ -548,8 +567,10 @@ final readonly class RegistroDeVentas
                  * cero y sin mora, que es exactamente lo que hacia el sistema
                  * antes de que el interes existiera (R1, R2).
                  */
-                'tasa' => $delPlazo instanceof PlanDePago ? $delPlazo->tasaDeInteres() : TasaDeInteres::cero(),
-                'mora' => $delPlazo instanceof PlanDePago ? $delPlazo->condicionesDeMora() : CondicionesDeMora::ninguna(),
+                'tasa'       => $tasa,
+                'tasaLista'  => $tasaLista,
+                'motivoTasa' => $motivoTasa,
+                'mora'       => $delPlazo instanceof PlanDePago ? $delPlazo->condicionesDeMora() : CondicionesDeMora::ninguna(),
             ];
         }
 
@@ -579,10 +600,10 @@ final readonly class RegistroDeVentas
      * dejaria, con muchos lotes y una prima chica, una ultima parte negativa
      * — y Monto rechaza negativos, con razon.
      *
-     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, mora: CondicionesDeMora}> $renglones
+     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora}> $renglones
      * @param array<int, PrecioPactado> $pactados
      *
-     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, mora: CondicionesDeMora, prima: Monto}>
+     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora, prima: Monto}>
      *
      * @throws VentaInvalidaException
      */
@@ -658,15 +679,17 @@ final readonly class RegistroDeVentas
 
         foreach ($renglones as $indice => $renglon) {
             $conPrima[] = [
-                'lote'   => $renglon['lote'],
-                'lista'  => $renglon['lista'],
-                'precio' => $renglon['precio'],
-                'motivo' => $renglon['motivo'],
-                'plazo'  => $renglon['plazo'],
-                'valor'  => $renglon['valor'],
-                'tasa'   => $renglon['tasa'],
-                'mora'   => $renglon['mora'],
-                'prima'  => $suyas[$indice] ?? Monto::cero(),
+                'lote'       => $renglon['lote'],
+                'lista'      => $renglon['lista'],
+                'precio'     => $renglon['precio'],
+                'motivo'     => $renglon['motivo'],
+                'plazo'      => $renglon['plazo'],
+                'valor'      => $renglon['valor'],
+                'tasa'       => $renglon['tasa'],
+                'tasaLista'  => $renglon['tasaLista'],
+                'motivoTasa' => $renglon['motivoTasa'],
+                'mora'       => $renglon['mora'],
+                'prima'      => $suyas[$indice] ?? Monto::cero(),
             ];
         }
 
@@ -680,9 +703,9 @@ final readonly class RegistroDeVentas
      * lote: con tres plazos distintos, «el saldo es demasiado chico para 60
      * meses» obliga a adivinar cual de los tres es.
      *
-     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, mora: CondicionesDeMora, prima: Monto}> $renglones
+     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora, prima: Monto}> $renglones
      *
-     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, mora: CondicionesDeMora, prima: Monto, plan: PlanDeCuotas}>
+     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora, prima: Monto, plan: PlanDeCuotas}>
      *
      * @throws VentaInvalidaException
      */
@@ -709,16 +732,18 @@ final readonly class RegistroDeVentas
             }
 
             $conPlan[] = [
-                'lote'   => $renglon['lote'],
-                'lista'  => $renglon['lista'],
-                'precio' => $renglon['precio'],
-                'motivo' => $renglon['motivo'],
-                'plazo'  => $renglon['plazo'],
-                'valor'  => $renglon['valor'],
-                'tasa'   => $renglon['tasa'],
-                'mora'   => $renglon['mora'],
-                'prima'  => $renglon['prima'],
-                'plan'   => $plan,
+                'lote'       => $renglon['lote'],
+                'lista'      => $renglon['lista'],
+                'precio'     => $renglon['precio'],
+                'motivo'     => $renglon['motivo'],
+                'plazo'      => $renglon['plazo'],
+                'valor'      => $renglon['valor'],
+                'tasa'       => $renglon['tasa'],
+                'tasaLista'  => $renglon['tasaLista'],
+                'motivoTasa' => $renglon['motivoTasa'],
+                'mora'       => $renglon['mora'],
+                'prima'      => $renglon['prima'],
+                'plan'       => $plan,
             ];
         }
 

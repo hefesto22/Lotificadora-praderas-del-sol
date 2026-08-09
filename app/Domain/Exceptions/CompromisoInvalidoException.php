@@ -6,6 +6,7 @@ namespace App\Domain\Exceptions;
 
 use App\Domain\Enums\FormaDePago;
 use App\Domain\ValueObjects\Monto;
+use App\Domain\Ventas\TasaDeInteres;
 
 /**
  * No se puede comprometer ese lote de esa manera.
@@ -86,6 +87,22 @@ final class CompromisoInvalidoException extends GrupoOlympoException
             "El lote {$codigo} se esta vendiendo a {$pactado->formateado()} la vara² cuando ".
             "el precio de lista es {$lista->formateado()}. Un precio menor se puede registrar, ".
             'pero hay que escribir el motivo: queda anotado con el usuario y la fecha.'
+        );
+    }
+
+    /**
+     * R4, aplicado al precio del dinero.
+     *
+     * Bajar la tasa regala plata igual que bajar el precio: en un lote de
+     * 250 vr² a 12 meses son mas de L 40,000 de intereses. Se puede hacer,
+     * pero se escribe por que.
+     */
+    public static function porTasaSinMotivo(string $codigo, TasaDeInteres $lista, TasaDeInteres $pactada): self
+    {
+        return new self(
+            "El lote {$codigo} se esta vendiendo con un interes de {$pactada->formateada()} anual ".
+            "cuando el plan de ese plazo ofrece {$lista->formateada()}. Una tasa menor se puede ".
+            'registrar, pero hay que escribir el motivo: queda anotado con el usuario y la fecha.'
         );
     }
 

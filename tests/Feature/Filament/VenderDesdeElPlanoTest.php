@@ -113,6 +113,83 @@ describe('La cotizacion del modal', function (): void {
     });
 
     /*
+    | ═══ 🔴 EL TEST QUE JUSTIFICA HABER MOVIDO EL CALCULO AL SERVIDOR ═══
+    |
+    | El cuadro del modal se calculaba en el navegador: valor dividido entre
+    | los meses. Mientras ningun plan cobraba interes daba el numero correcto
+    | y nadie lo noto. El dia que un plan quedo al 12 % anual, la pantalla que
+    | el vendedor le muestra al cliente decia L 54,166.67 donde el contrato
+    | iba a decir L 57,751.71 — tres mil quinientos ochenta y cinco lempiras
+    | por mes, dichos en voz alta, con el cliente enfrente.
+    |
+    | Ahora las dos puntas salen del mismo `PlanDeCuotas`, y esto las compara.
+    | Si alguna vez dejan de coincidir, no se ajusta el numero esperado: se
+    | busca cual de las dos empezo a mentir.
+    */
+    test('la cuota que el modal cotiza es exactamente la que se firma', function (): void {
+        PlanDePago::query()->where('meses', 12)->firstOrFail()->update(['tasa_interes_anual' => '12.000']);
+
+        $lote = ($this->lote)('7');
+
+        $cuadro = Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->instance()
+            ->cotizar(['lote' => $lote->getKey(), 'prima' => '0']);
+
+        $doceMeses = ['cuota' => null, 'interes' => null];
+
+        foreach ($cuadro as $fila) {
+            if ($fila['meses'] === 12) {
+                $doceMeses = $fila;
+            }
+        }
+
+        ($this->vender)(
+            ['cliente_id' => $this->rosa->getKey()],
+            ['lote' => $lote->getKey(), 'plazo' => 12, 'precio' => '1500.00', 'prima' => '0.00'],
+        )->assertHasNoActionErrors();
+
+        $venta = Venta::query()->firstOrFail();
+
+        expect($doceMeses['cuota'])->toBe($venta->montoCuotaMensual()?->formateado())
+            // Y el interes que la pantalla anuncia existe de verdad: sin esto,
+            // dos ceros iguales harian pasar el test sin probar nada.
+            ->and($doceMeses['interes'])->not->toBeNull();
+    });
+
+    /*
+    | R4 aplicado al precio del dinero. Bajar la tasa regala plata igual que
+    | bajar el precio del terreno, asi que se guardan LAS DOS —la pactada y
+    | la que ofrecia el plan— y el motivo escrito. Sin la de lista no se puede
+    | contestar «¿cuanto interes se resigno?» sin adivinar.
+    */
+    test('el interes negociado se congela con su motivo y con la tasa de lista', function (): void {
+        PlanDePago::query()->where('meses', 12)->firstOrFail()->update(['tasa_interes_anual' => '12.000']);
+
+        $lote = ($this->lote)('9');
+
+        ($this->vender)(
+            [
+                'cliente_id'  => $this->rosa->getKey(),
+                'motivo_tasa' => 'Cliente recomendado por la administracion',
+            ],
+            [
+                'lote'   => $lote->getKey(),
+                'plazo'  => 12,
+                'precio' => '1500.00',
+                'prima'  => '0.00',
+                'tasa'   => '6.000',
+            ],
+        )->assertHasNoActionErrors();
+
+        $compromiso = Compromiso::query()->where('tipo', TipoCompromiso::Venta)->firstOrFail();
+
+        expect($compromiso->tasaDeInteres()->redondeada())->toBe('6.000')
+            ->and($compromiso->tasaDeLista()->redondeada())->toBe('12.000')
+            ->and($compromiso->huboRebajaDeTasa())->toBeTrue()
+            ->and($compromiso->getAttribute('motivo_tasa'))->toBe('Cliente recomendado por la administracion');
+    });
+
+    /*
     | El precio de lista es EL DEL PLAZO. De contado la vara vale L 1,300 y
     | el lote tiene L 1,400 en su ficha: vender de contado a 1,300 es el
     | precio oficial, no un descuento, y no puede pedir motivo.
