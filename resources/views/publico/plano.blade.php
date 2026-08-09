@@ -833,9 +833,21 @@
                 '<tr' + (plan.meses === 0 ? ' class="contado"' : '') + '>' +
                 '<td>' + plan.nombre + (plan.tasa ? '<br><small style="font-weight:400;color:var(--suave)">' + plan.tasa + '</small>' : '') + '</td>' +
                 '<td>' + p.valor + '</td>' +
-                '<td class="cuota">' + (p.cuota ? p.cuota : '—') +
-                (p.interes ? '<small>+' + p.interes + ' de intereses</small>' : '') +
-                '</td></tr>';
+                /*
+                 * ⚠️ El interes NO se desglosa en la vidriera, y no es un
+                 * olvido: «L 43,020.56 de intereses» al lado de la cuota
+                 * asusta a quien todavia no decidio nada, aunque sea el mismo
+                 * dinero que ya esta adentro de la cuota que si se muestra.
+                 *
+                 * Que va incluido lo dice la nota de abajo, con todas las
+                 * letras, y la tasa anual aparece debajo del plazo: quien
+                 * quiere hacer la cuenta tiene con que, y quien solo quiere
+                 * saber cuanto paga por mes ve un numero y no dos.
+                 *
+                 * Adentro del panel SI se desglosa. Ahi lo mira la
+                 * administracion, que necesita ese numero para decidir.
+                 */
+                '<td class="cuota">' + (p.cuota ? p.cuota : '—') + '</td></tr>';
         });
 
         caja.innerHTML =

@@ -1118,6 +1118,24 @@
                     return tocada !== '' && Number.isFinite(Number(tocada)) ? tocada : '';
                 },
 
+                /* ¿Hay algo que cobrar en concepto de interés?
+
+                   Praderas vende hoy los cinco plazos sin interés, y una columna con
+                   cinco ceros no es información: es una casilla vacía que el vendedor
+                   tiene que descartar con la vista cada vez que abre el cuadro, con el
+                   cliente enfrente. Si ningún plazo cobra, la columna no está.
+
+                   No se pierde nada: la columna existe para NEGOCIAR HACIA ABAJO, y
+                   desde cero no hay para dónde bajar. El día que la administración le
+                   ponga tasa a un plan, la columna vuelve sola.
+
+                   Se miran las dos tasas —la de lista y la tecleada— y no solo la de
+                   lista: un lote que ya está en el carrito con una tasa pactada la
+                   restaura al reabrirlo, y esa tasa hay que poder verla. */
+get hayInteres() {
+                    return this.filas.some((f) => Number(f.tasa) > 0 || Number(f.tasaLista) > 0);
+                },
+
                 get areaFormateada() {
                     const crudo = String(this.seleccionado?.areaVaras ?? '').replace(/,/g, '');
                     const area = Number(crudo);
@@ -1389,6 +1407,7 @@
                                      grande: el parser baja los atributos a
                                      minusculas y 'viewbox' no existe en SVG. --}}
                                 <svg
+                                    wire:ignore
                                     class="plano-modal-dibujo"
                                     preserveAspectRatio="xMidYMid meet"
                                     x-effect="$el.setAttribute('viewBox', figura ? figura.viewBox : '0 0 100 100')"
@@ -1503,7 +1522,7 @@
                                                                     <th></th>
                                                                     <th>Plazo</th>
                                                                     <th>Precio v²</th>
-                                                                    <th>Interés</th>
+                                                                    <th x-show="hayInteres">Interés</th>
                                                                     <th>Valor</th>
                                                                     <th>Cuota</th>
                                                                 </tr>
@@ -1539,7 +1558,7 @@
                                                                         </td>
                                                                         {{-- El precio del DINERO, editable igual que el del
                                                                              terreno. De contado no hay interés que cobrar. --}}
-                                                                        <td>
+                                                                        <td x-show="hayInteres">
                                                                             <template x-if="fila.meses > 0">
                                                                                 <input
                                                                                     type="number"
@@ -1560,9 +1579,13 @@
                                                                         <td x-text="fila.valor"></td>
                                                                         <td class="cuota">
                                                                             <span x-text="fila.cuota ?? '—'"></span>
-                                                                            <template x-if="fila.interes">
-                                                                                <small x-text="'+' + fila.interes + ' de intereses'"></small>
-                                                                            </template>
+                                                                            {{-- El desglose del interés NO va acá, y no es un olvido.
+                                                                                 «+L 43,020.56 de intereses» al lado de la cuota es el mismo
+                                                                                 dinero que ya está adentro de la cuota, dicho dos veces, y la
+                                                                                 segunda vez asusta: al cliente que mira la pantalla por encima
+                                                                                 del hombro, y al vendedor que tiene que explicarlo de pie. El
+                                                                                 total con intereses vive en el plan de cuotas del contrato, que
+                                                                                 es donde se firma. --}}
                                                                             <template x-if="fila.error">
                                                                                 <small x-text="fila.error"></small>
                                                                             </template>
@@ -1573,11 +1596,15 @@
                                                         </table>
 
                                                         <p class="plano-planes-nota">
-                                                            Marcá el plazo con el que se va a vender. El precio y el
-                                                            interés se pueden cambiar acá mismo; vacío es lo que ofrece
-                                                            el plan, y si bajás alguno de los dos el sistema va a pedir
-                                                            el motivo por escrito. La cuota sale del mismo motor que
-                                                            firma el contrato: es la que va a salir impresa.
+                                                            Marcá el plazo con el que se va a vender.
+                                                            <span x-show="hayInteres">El precio y el interés se pueden cambiar
+                                                                acá mismo; vacío es lo que ofrece el plan, y si bajás alguno de
+                                                                los dos el sistema va a pedir el motivo por escrito.</span>
+                                                            <span x-show="! hayInteres">El precio se puede cambiar acá mismo;
+                                                                vacío es lo que ofrece el plan, y si lo bajás el sistema va a
+                                                                pedir el motivo por escrito.</span>
+                                                            La cuota sale del mismo motor que firma el contrato: es la que va a
+                                                            salir impresa.
                                                         </p>
                                                     </div>
                                                 </template>
