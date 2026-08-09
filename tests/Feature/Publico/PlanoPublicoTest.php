@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\TipoCompromiso;
 use App\Domain\Plano\PlanoPublico;
+use App\Domain\Plano\SelloDelPlano;
 use App\Http\Controllers\PlanoImagenController;
 use App\Models\Bloque;
 use App\Models\Cliente;
@@ -14,6 +15,7 @@ use App\Models\PlanDePago;
 use App\Models\Prospecto;
 use App\Models\Proyecto;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Cache;
 
 /*
 |--------------------------------------------------------------------------
@@ -201,6 +203,84 @@ describe('Plano público — quién puede abrirlo', function (): void {
         $this->proyecto->update(['activo' => false]);
 
         $this->get(route('plano.publico', ['slug' => 'praderas-del-sol']))->assertNotFound();
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| La vidriera se cachea, pero no se queda vieja
+|--------------------------------------------------------------------------
+|
+| 🔴 La clave de la caché era el `updated_at` del PROYECTO, y vender un lote
+| no toca esa fila. Cambiar el precio de un plan tampoco. Así que la
+| administradora vendía un lote, abría el link para comprobar, y seguía
+| viendo el lote verde. Cinco minutos.
+|
+| Cinco minutos no suenan a nada hasta que alguien le manda el link a un
+| cliente en ese rato.
+|
+| El arreglo NO fue sacar la caché —es la única URL que abre gente que no
+| conocemos, y un link en un grupo de WhatsApp son cien aperturas en un
+| minuto—: fue que la clave mire de verdad lo que la página muestra. Eso es
+| `SelloDelPlano`.
+|
+| ⚠️ ESTOS DOS TESTS CORREN DENTRO DEL MISMO SEGUNDO, Y ES A PROPÓSITO.
+|
+| El primer intento de arreglo miraba `MAX(updated_at)` de `lotes` y de
+| `planes_de_pago`, y fallaba acá mismo. El motivo no se ve leyendo el
+| código: `$table->timestamps()` usa `Blueprint::defaultTimePrecision()`, que
+| vale 0, así que en Postgres la columna es `timestamp(0)` — **segundos
+| enteros**. Armar la página y vender el lote en el mismo segundo deja el
+| `MAX` clavado y la caché vieja se sirve los cinco minutos completos.
+|
+| Por eso la huella se saca del CONTENIDO y no del reloj. Y por eso, si algún
+| día esto falla, el arreglo NO es meterle un `travel()->seconds(1)` al test:
+| eso esconde exactamente el segundo que hay que cubrir.
+|
+*/
+describe('Plano público — se actualiza al instante', function (): void {
+    test('vender un lote se ve en la página sin esperar la caché', function (): void {
+        $url = route('plano.publico', ['slug' => 'praderas-del-sol']);
+
+        // 250 vr² × L 1,400.00 del plan a 12 meses. Está libre: se cotiza.
+        $this->get($url)->assertOk()->assertSee('350,000.00', escape: false);
+
+        /*
+         * Exactamente lo que hace una venta: cambia el estado del LOTE. La
+         * fila del proyecto no se toca — y esa era toda la clave vieja.
+         */
+        $this->libre->update(['estado' => EstadoLote::Vendido]);
+
+        // Un lote vendido deja de cotizarse, así que su medida ya no tiene
+        // precio publicado. Antes de `SelloDelPlano` seguía ahí.
+        $this->get($url)->assertOk()->assertDontSee('350,000.00', escape: false);
+    });
+
+    test('cambiar el precio de la vara² se ve en la página sin esperar la caché', function (): void {
+        $url = route('plano.publico', ['slug' => 'praderas-del-sol']);
+
+        $this->get($url)->assertOk()->assertSee('350,000.00', escape: false);
+
+        PlanDePago::query()
+            ->where('proyecto_id', $this->proyecto->getKey())
+            ->update(['precio_vara' => '1500.00']);
+
+        // 250 vr² × L 1,500.00.
+        $this->get($url)->assertOk()->assertSee('375,000.00', escape: false);
+    });
+
+    /*
+    | ⚠️ El contrapeso, y no es de adorno: los dos tests de arriba pasarían
+    | igual de bien con la caché borrada de raíz, que es justo lo que no hay
+    | que hacer. Sin este, el día que alguno falle el arreglo fácil es sacar
+    | el `Cache::remember` y dejar la página armando 301 lotes por visita.
+    */
+    test('y la caché sigue puesta, que para eso está', function (): void {
+        $this->get(route('plano.publico', ['slug' => 'praderas-del-sol']))->assertOk();
+
+        $sello = resolve(SelloDelPlano::class)->para($this->proyecto);
+
+        expect(Cache::has('plano-publico:'.$this->proyecto->getKey().':'.$sello))->toBeTrue();
     });
 });
 

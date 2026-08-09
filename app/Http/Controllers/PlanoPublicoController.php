@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Domain\Plano\PlanoPublico;
+use App\Domain\Plano\SelloDelPlano;
 use App\Models\BrandingSetting;
 use App\Models\Proyecto;
-use DateTimeInterface;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
@@ -30,10 +30,10 @@ use Illuminate\Support\Facades\Storage;
  * en un minuto. Sin caché, cada una arma el plano de 301 lotes y cotiza cada
  * medida contra cada plan.
  *
- * Cinco minutos: un lote que se vende deja de estar disponible en la pagina
- * como maximo cinco minutos despues, y eso es mas que suficiente para una
- * vidriera. La clave incluye el `updated_at` del proyecto, asi que encender o
- * apagar el plano se ve al instante.
+ * Cinco minutos, pero como red y no como demora: la clave la arma
+ * `SelloDelPlano` con el proyecto, sus lotes y sus planes de pago, asi que
+ * vender un lote o cambiar un precio se ve **al instante**. Los cinco minutos
+ * quedan por si algun dia cambia algo que ninguna de esas tres tablas registra.
  *
  * ⚠️ Lo que se cachea es SOLO el arreglo de `PlanoPublico`, que ya pasó por
  * la lista blanca. Nunca modelos: el §Redis del catálogo — un modelo Eloquent
@@ -44,7 +44,7 @@ final class PlanoPublicoController
     /** Lo que dura el plano en caché. Ver el docblock. */
     private const int MINUTOS = 5;
 
-    public function __invoke(PlanoPublico $plano, string $slug): View
+    public function __invoke(PlanoPublico $plano, SelloDelPlano $sello, string $slug): View
     {
         $proyecto = Proyecto::query()
             ->where('slug', $slug)
@@ -57,21 +57,13 @@ final class PlanoPublicoController
         }
 
         /*
-         * El sello que invalida la caché cuando el proyecto cambia.
+         * La huella de todo lo que la página muestra — ver `SelloDelPlano`.
          *
-         * `format()` y no `(string) $sello`: el cast anda en runtime —el
-         * modelo castea `updated_at` a Carbon— pero `getAttribute()` devuelve
-         * `mixed`, y PHPStan tiene razón en no dejarlo pasar. El día que
-         * alguien saque ese cast del modelo, un cast a string revienta con
-         * «could not be converted to string» justo acá: la única página que
-         * abre gente de afuera, y sin nadie del equipo mirando.
-         *
-         * Con microsegundos a propósito: dos guardadas dentro del mismo
-         * segundo tienen que dar claves distintas, o la segunda se sirve de
-         * la caché de la primera y el cambio no se ve.
+         * La clave era solo `proyectos.updated_at`, y **vender un lote no toca
+         * esa fila**: la administradora vendía, abría el link para comprobar,
+         * y seguía viendo el lote verde hasta cinco minutos después.
          */
-        $sello = $proyecto->getAttribute('updated_at');
-        $marca = $sello instanceof DateTimeInterface ? $sello->format('YmdHisu') : 'x';
+        $marca = $sello->para($proyecto);
 
         /** @var array<string, mixed> $datos */
         $datos = Cache::remember(

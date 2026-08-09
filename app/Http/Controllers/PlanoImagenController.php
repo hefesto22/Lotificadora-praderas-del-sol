@@ -6,8 +6,8 @@ namespace App\Http\Controllers;
 
 use App\Domain\Enums\EstadoLote;
 use App\Domain\Plano\PlanoPublico;
+use App\Domain\Plano\SelloDelPlano;
 use App\Models\Proyecto;
-use DateTimeInterface;
 use GdImage;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
@@ -48,7 +48,7 @@ use Illuminate\Support\Facades\Cache;
  *
  * ═══ SEIS HORAS DE CACHE ═══
  *
- * Mas que las cinco cintas de la pagina, y no por descuido: WhatsApp cachea la
+ * Mas que los cinco minutos de la pagina, y no por descuido: WhatsApp cachea la
  * vista previa de un link por su cuenta y por bastante mas que eso. Regenerar
  * el PNG cada cinco minutos seria trabajo que nadie llega a ver.
  */
@@ -79,7 +79,7 @@ final class PlanoImagenController
         return extension_loaded('gd') && function_exists('imagecreatetruecolor');
     }
 
-    public function __invoke(PlanoPublico $plano, string $slug): Response
+    public function __invoke(PlanoPublico $plano, SelloDelPlano $sello, string $slug): Response
     {
         if (! self::disponible()) {
             abort(404);
@@ -95,8 +95,7 @@ final class PlanoImagenController
             abort(404);
         }
 
-        $sello = $proyecto->getAttribute('updated_at');
-        $marca = $sello instanceof DateTimeInterface ? $sello->format('YmdHisu') : 'x';
+        $marca = $sello->para($proyecto);
 
         $clave = 'plano-publico-imagen:'.$proyecto->getKey().':'.$marca;
         $png = Cache::get($clave);
@@ -115,10 +114,12 @@ final class PlanoImagenController
                 : '';
 
             /*
-             * Solo se cachea lo que sirve. Guardar el vacio dejaria a un
-             * proyecto sin tarjeta durante seis horas despues de dibujarlo,
-             * y dibujar los lotes no toca el `updated_at` del proyecto — o
-             * sea que la clave no cambiaria y nadie entenderia por que.
+             * Solo se cachea lo que sirve. Antes era imprescindible: la clave
+             * era el `updated_at` del proyecto, dibujar los lotes no lo tocaba,
+             * y el vacio se quedaba pegado seis horas. Hoy `SelloDelPlano` mira
+             * tambien `lotes` y la clave cambia sola — el guardia se queda
+             * igual, porque «no guardar un fracaso» sigue siendo cierto sin
+             * depender de como se arme la clave.
              */
             if ($png !== '') {
                 Cache::put($clave, $png, now()->addHours(self::HORAS));
