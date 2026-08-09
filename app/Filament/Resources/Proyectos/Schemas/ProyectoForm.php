@@ -168,6 +168,41 @@ class ProyectoForm
                                                 'número, la página se ve igual pero no muestra el botón — que '.
                                                 'es mejor que mandar al cliente a un chat que nadie lee.'
                                             ),
+
+                                        /*
+                                         * Despues del precio, la segunda
+                                         * pregunta que hace todo el mundo es
+                                         * donde queda. Con estos dos numeros
+                                         * la pagina muestra botones que
+                                         * arrancan Google Maps y Waze.
+                                         *
+                                         * `requiredWith` cruzado repite el
+                                         * CHECK de la base: media coordenada
+                                         * cae en el Golfo de Guinea.
+                                         */
+                                        TextInput::make('latitud')
+                                            ->label('Latitud')
+                                            ->numeric()
+                                            ->minValue(-90)
+                                            ->maxValue(90)
+                                            ->step('0.0000001')
+                                            ->requiredWith('longitud')
+                                            ->placeholder('14.5896412')
+                                            ->helperText(
+                                                'En Google Maps, mantené el dedo sobre la entrada del '.
+                                                'proyecto hasta que aparezca el pin: abajo salen dos '.
+                                                'números separados por coma. El primero va acá.'
+                                            ),
+
+                                        TextInput::make('longitud')
+                                            ->label('Longitud')
+                                            ->numeric()
+                                            ->minValue(-180)
+                                            ->maxValue(180)
+                                            ->step('0.0000001')
+                                            ->requiredWith('latitud')
+                                            ->placeholder('-88.9302517')
+                                            ->helperText('El segundo número. En Honduras siempre es negativo.'),
                                     ])
                                     ->columns(1),
 

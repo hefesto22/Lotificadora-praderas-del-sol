@@ -53,6 +53,8 @@ final readonly class PlanoPublico
     /**
      * @return array{
      *     servicios: list<array{etiqueta: string, trazo: string}>,
+     *     colores: list<array{estado: string, etiqueta: string, relleno: string, borde: string, enLeyenda: bool}>,
+     *     ubicacion: array{lat: string, lng: string, googleMaps: string, waze: string}|null,
      *     proyecto: array{nombre: string, municipio: string|null, departamento: string|null},
      *     viewBox: string,
      *     calco: string|null,
@@ -110,6 +112,8 @@ final readonly class PlanoPublico
 
         return [
             'servicios' => $this->serviciosDe($proyecto),
+            'colores'   => $this->colores(),
+            'ubicacion' => $this->ubicacionDe($proyecto),
             'proyecto'  => [
                 'nombre'       => (string) $proyecto->getAttribute('nombre'),
                 'municipio'    => $this->textoOpcional($proyecto->getAttribute('municipio')),
@@ -147,6 +151,61 @@ final readonly class PlanoPublico
         }
 
         return ($texto === '' ? '0' : $texto).' vr²';
+    }
+
+    /**
+     * Los cuatro estados con sus dos colores, para que la pagina no los
+     * escriba a mano.
+     *
+     * Antes vivian en el CSS de la plantilla Y en la leyenda Y en el PNG de
+     * WhatsApp. Tres listas que tienen que coincidir terminan no coincidiendo:
+     * ahora salen del enum, que es donde se decide.
+     *
+     * @return list<array{estado: string, etiqueta: string, relleno: string, borde: string, enLeyenda: bool}>
+     */
+    private function colores(): array
+    {
+        return array_map(static fn (EstadoLote $estado): array => [
+            'estado'    => $estado->value,
+            'etiqueta'  => $estado->etiqueta(),
+            'relleno'   => $estado->relleno(),
+            'borde'     => $estado->borde(),
+            'enLeyenda' => $estado->enLeyendaPublica(),
+        ], EstadoLote::cases());
+    }
+
+    /**
+     * Donde queda, en las dos formas que abren la aplicacion y no el sitio.
+     *
+     * Los formatos son los que documenta cada una. Pegar en su lugar un link
+     * copiado de la barra del navegador —de esos que empiezan con
+     * `maps.app.goo.gl`— abre la PAGINA de Google Maps adentro del navegador
+     * del telefono, que es exactamente lo que no se quiere: lo que sirve es
+     * que arranque la app con la ruta puesta.
+     *
+     * Null cuando no hay coordenadas cargadas, y entonces la seccion entera no
+     * aparece. Mandar a alguien a un punto equivocado es peor que no decirle
+     * como llegar.
+     *
+     * @return array{lat: string, lng: string, googleMaps: string, waze: string}|null
+     */
+    private function ubicacionDe(Proyecto $proyecto): ?array
+    {
+        $lat = $proyecto->getAttribute('latitud');
+        $lng = $proyecto->getAttribute('longitud');
+
+        if (! is_numeric($lat) || ! is_numeric($lng)) {
+            return null;
+        }
+
+        $par = $lat.','.$lng;
+
+        return [
+            'lat'        => (string) $lat,
+            'lng'        => (string) $lng,
+            'googleMaps' => 'https://www.google.com/maps/search/?api=1&query='.rawurlencode($par),
+            'waze'       => 'https://waze.com/ul?ll='.rawurlencode($par).'&navigate=yes',
+        ];
     }
 
     /**

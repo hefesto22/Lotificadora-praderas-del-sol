@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\TipoCompromiso;
 use App\Domain\Plano\PlanoPublico;
+use App\Http\Controllers\PlanoImagenController;
 use App\Models\Bloque;
 use App\Models\Cliente;
 use App\Models\Compromiso;
@@ -12,6 +13,7 @@ use App\Models\Lote;
 use App\Models\PlanDePago;
 use App\Models\Prospecto;
 use App\Models\Proyecto;
+use Illuminate\Database\QueryException;
 
 /*
 |--------------------------------------------------------------------------
@@ -325,5 +327,123 @@ describe('Plano público — la dirección de la página', function (): void {
         // El mismo regex que el CHECK `proyectos_slug_con_forma_chk`.
         expect($this->proyecto->refresh()->getAttribute('slug'))
             ->toMatch('/^[a-z0-9]+(-[a-z0-9]+)*$/');
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| La tarjeta que llega por WhatsApp
+|--------------------------------------------------------------------------
+|
+| Es lo unico de esta pagina cuyo trabajo es que alguien haga clic. Un link
+| sin `og:image` llega a un grupo de WhatsApp como una linea de texto azul y
+| no lo abre nadie.
+|
+*/
+describe('Plano público — la tarjeta de WhatsApp', function (): void {
+    test('la página publica su miniatura', function (): void {
+        $this->get(route('plano.publico', ['slug' => 'praderas-del-sol']))
+            ->assertOk()
+            ->assertSee('og:image', escape: false)
+            ->assertSee(route('plano.imagen', ['slug' => 'praderas-del-sol']), escape: false);
+    })->skip(! PlanoImagenController::disponible(), 'Este servidor no tiene GD.');
+
+    test('la miniatura es un PNG de 1200×630', function (): void {
+        $respuesta = $this->get(route('plano.imagen', ['slug' => 'praderas-del-sol']));
+
+        $respuesta->assertOk();
+
+        expect($respuesta->headers->get('Content-Type'))->toBe('image/png');
+
+        $medidas = getimagesizefromstring((string) $respuesta->getContent());
+
+        expect($medidas)->toBeArray();
+
+        // El ternario y no un `@var`: `getimagesizefromstring()` ya viene
+        // tipada, y un docblock que la contradice es una promesa que PHPStan
+        // no puede verificar — y con razón.
+        expect(is_array($medidas) ? [$medidas[0], $medidas[1], $medidas['mime']] : null)
+            ->toBe([1200, 630, 'image/png']);
+    })->skip(! PlanoImagenController::disponible(), 'Este servidor no tiene GD.');
+
+    /*
+    | La miniatura sale del MISMO armador con lista blanca que la pagina. El
+    | dia que alguien la dibuje desde `PlanoDelProyecto` para escribirle
+    | encima «68 disponibles», tendria el nombre del comprador a mano.
+    */
+    test('con el plano apagado la miniatura tampoco se sirve', function (): void {
+        $this->proyecto->update(['plano_publico' => false]);
+
+        $this->get(route('plano.imagen', ['slug' => 'praderas-del-sol']))->assertNotFound();
+    })->skip(! PlanoImagenController::disponible(), 'Este servidor no tiene GD.');
+
+    /*
+    | Un proyecto cargado pero sin dibujar daria un rectangulo vacio, y una
+    | tarjeta con un rectangulo blanco adentro se ve peor que una tarjeta sin
+    | imagen. Por eso el `og:image` ni se emite.
+    */
+    test('un proyecto sin dibujar no promete una miniatura que no tiene', function (): void {
+        $pelado = Proyecto::factory()->create([
+            'codigo'        => 'SND',
+            'slug'          => 'sin-dibujar',
+            'plano_publico' => true,
+        ]);
+
+        Bloque::factory()->create(['proyecto_id' => $pelado->getKey(), 'nombre' => 'A']);
+
+        $this->get(route('plano.publico', ['slug' => 'sin-dibujar']))
+            ->assertOk()
+            ->assertDontSee(route('plano.imagen', ['slug' => 'sin-dibujar']), escape: false);
+
+        $this->get(route('plano.imagen', ['slug' => 'sin-dibujar']))->assertNotFound();
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| Cómo llegar
+|--------------------------------------------------------------------------
+|
+| La segunda pregunta que hace todo el mundo después del precio.
+|
+*/
+describe('Plano público — cómo llegar', function (): void {
+    test('con coordenadas aparecen los dos botones', function (): void {
+        $this->proyecto->update(['latitud' => '14.5896412', 'longitud' => '-88.9302517']);
+
+        $this->get(route('plano.publico', ['slug' => 'praderas-del-sol']))
+            ->assertOk()
+            ->assertSee('Cómo llegar', escape: false)
+            /*
+             * Los formatos que arrancan la APLICACION. Un link de los que
+             * empiezan con `maps.app.goo.gl` abre la pagina de Google Maps
+             * adentro del navegador del telefono, que no es lo mismo.
+             */
+            ->assertSee('google.com/maps/search/?api=1', escape: false)
+            ->assertSee('waze.com/ul?ll=', escape: false)
+            ->assertSee('14.5896412', escape: false);
+    });
+
+    test('sin coordenadas la sección no existe', function (): void {
+        /*
+         * Se busca el MARCADO y no el texto «Cómo llegar»: el CSS de la
+         * página lleva comentarios, y un `assertDontSee` sobre una frase
+         * suelta se rompe el día que alguien la escribe adentro de uno.
+         */
+        $this->get(route('plano.publico', ['slug' => 'praderas-del-sol']))
+            ->assertOk()
+            ->assertDontSee('<section class="llegar">', escape: false)
+            ->assertDontSee('waze.com', escape: false)
+            ->assertDontSee('google.com/maps', escape: false);
+    });
+
+    /*
+    | Media coordenada no apunta «casi» al proyecto: una latitud sin longitud
+    | cae en el meridiano cero, y el (0, 0) del mundo está en el Golfo de
+    | Guinea. El formulario lo avisa; la base lo impide.
+    */
+    test('media coordenada no entra ni por tinker', function (): void {
+        expect(fn (): bool => $this->proyecto->update(['latitud' => '14.5896412']))
+            ->toThrow(QueryException::class);
     });
 });

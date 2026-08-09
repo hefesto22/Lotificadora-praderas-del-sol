@@ -45,7 +45,22 @@
     <meta property="og:title" content="{{ $plano['proyecto']['nombre'] }}">
     <meta property="og:description" content="{{ $plano['disponibles'] }} lotes disponibles. Mirá el plano, las medidas y los precios.">
     <meta property="og:url" content="{{ url()->current() }}">
-    @if ($logo)
+    <meta property="og:site_name" content="{{ $empresa['nombre'] ?? $plano['proyecto']['nombre'] }}">
+
+    {{-- La miniatura de la tarjeta. Es lo unico de esta pagina cuyo trabajo
+         es que alguien haga clic: en WhatsApp un link sin imagen llega como
+         una linea de texto azul y no lo abre nadie.
+
+         El dibujo del plano si el servidor lo puede generar; si no, el logo,
+         que al menos ocupa el lugar. Ver PlanoImagenController. --}}
+    @if ($imagen)
+        <meta property="og:image" content="{{ $imagen }}">
+        <meta property="og:image:type" content="image/png">
+        <meta property="og:image:width" content="1200">
+        <meta property="og:image:height" content="630">
+        <meta property="og:image:alt" content="Plano de {{ $plano['proyecto']['nombre'] }}">
+        <meta name="twitter:card" content="summary_large_image">
+    @elseif ($logo)
         <meta property="og:image" content="{{ $logo }}">
     @endif
 
@@ -199,13 +214,17 @@
          * ⚠️ Estos tonos son los de esta página, NO los del panel. Adentro
          * del sistema mandan los de `EstadoLote::colorHex()`, pensados para
          * leerse junto a tablas, no para una vidriera.
+         *
+         * ⚠️ Y no están escritos acá: salen de `EstadoLote::relleno()` y
+         * `borde()`, porque los mismos dos tonos los usan la leyenda de más
+         * abajo y el PNG que ve WhatsApp. Tres listas que tienen que
+         * coincidir terminan no coincidiendo.
          */
         .lote { transition: filter .12s ease; }
 
-        .lote.e-disponible { fill: #b8ead0; stroke: #4eb37e; }
-        .lote.e-apartado   { fill: #fbdcab; stroke: #dfa04a; }
-        .lote.e-vendido    { fill: #f7b8b3; stroke: #e0736a; }
-        .lote.e-cancelado  { fill: #e4e4e7; stroke: #a1a1aa; }
+@foreach ($plano['colores'] as $tono)
+        .lote.e-{{ $tono['estado'] }} { fill: {{ $tono['relleno'] }}; stroke: {{ $tono['borde'] }}; }
+@endforeach
 
         .lote.libre { cursor: pointer; }
         .lote.libre:hover { filter: brightness(.96) saturate(1.25); }
@@ -402,6 +421,36 @@
             font-size: .8125rem; font-weight: 600; color: #14532d;
         }
         .servicios svg { flex: none; color: #16a34a; }
+
+        /* ─── Ubicación del proyecto ─── */
+
+        .llegar {
+            flex: none; background: var(--papel);
+            border-top: 1px solid var(--linea);
+            padding: .875rem 1rem 1.125rem;
+        }
+        .llegar h2 {
+            margin: 0 0 .625rem; font-size: .6875rem; font-weight: 700;
+            text-transform: uppercase; letter-spacing: .07em; color: var(--suave);
+        }
+        .llegar .destinos {
+            display: grid; gap: .5rem;
+            grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+        }
+        .llegar a {
+            display: flex; align-items: center; justify-content: center; gap: .5rem;
+            padding: .8125rem 1rem; border-radius: .875rem;
+            font-weight: 700; font-size: .9375rem; text-decoration: none;
+            transition: transform .12s ease;
+        }
+        .llegar a:active { transform: scale(.985); }
+        .llegar a.maps { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+        .llegar a.waze { background: #ecfeff; color: #0e7490; border: 1px solid #a5f3fc; }
+        .llegar svg { flex: none; }
+
+        /* Los dos botones del pie de la ficha, lado a lado cuando entran. */
+        .acciones { display: grid; }
+        @media (min-width: 30rem) { .acciones { grid-template-columns: 1fr 1fr; gap: .5rem; } }
     </style>
 </head>
 <body>
@@ -488,10 +537,15 @@
         <p style="padding:2rem;text-align:center;color:var(--suave)">El plano de este proyecto todavía no está dibujado.</p>
     @endif
 
+    {{-- Los mismos tonos del plano, del mismo lugar. Cancelado no se
+         explica: para el cliente solo significa «no está a la venta», y
+         nombrarlo invita a preguntar por qué. --}}
     <div class="leyenda">
-        <span><i class="punto" style="background:#b8ead0;box-shadow:0 0 0 2px #4eb37e"></i> <b>Disponible</b></span>
-        <span><i class="punto" style="background:#fbdcab;box-shadow:0 0 0 2px #dfa04a"></i> <b>Apartado</b></span>
-        <span><i class="punto" style="background:#f7b8b3;box-shadow:0 0 0 2px #e0736a"></i> <b>Vendido</b></span>
+        @foreach ($plano['colores'] as $tono)
+            @if ($tono['enLeyenda'])
+                <span><i class="punto" style="background:{{ $tono['relleno'] }};box-shadow:0 0 0 2px {{ $tono['borde'] }}"></i> <b>{{ $tono['etiqueta'] }}</b></span>
+            @endif
+        @endforeach
     </div>
 </div>
 
@@ -513,6 +567,35 @@
                 </li>
             @endforeach
         </ul>
+    </section>
+@endif
+
+@if ($plano['ubicacion'])
+    {{-- La segunda pregunta que hace todo el mundo, después del precio.
+
+         Los dos enlaces están en el formato que arranca la APLICACIÓN con la
+         ruta puesta, no el que abre el sitio web adentro del navegador del
+         teléfono. En un móvil eso es la diferencia entre «cómo llegar» y una
+         dirección escrita. --}}
+    <section class="llegar">
+        <h2>Cómo llegar</h2>
+        <div class="destinos">
+            <a class="maps" href="{{ $plano['ubicacion']['googleMaps'] }}" target="_blank" rel="noopener noreferrer">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+                    <circle cx="12" cy="10" r="3" />
+                </svg>
+                Abrir en Google Maps
+            </a>
+            <a class="waze" href="{{ $plano['ubicacion']['waze'] }}" target="_blank" rel="noopener noreferrer">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m3 11 18-8-8 18-2-8-8-2Z" />
+                </svg>
+                Navegar con Waze
+            </a>
+        </div>
     </section>
 @endif
 
@@ -581,7 +664,10 @@
             </button>
         </form>
 
-        <button type="button" class="boton gris" id="cerrar-pie">Seguir viendo el plano</button>
+        <div class="acciones">
+            <button type="button" class="boton gris" id="copiar">Copiar el enlace de este lote</button>
+            <button type="button" class="boton gris" id="cerrar-pie">Seguir viendo el plano</button>
+        </div>
     </div>
 </div>
 
@@ -778,17 +864,117 @@
         dibujarPrecios(lote);
 
         telon.setAttribute('data-abierto', '');
+        recordar(lote);
     }
 
     function cerrar() {
         telon.removeAttribute('data-abierto');
         if (marcado) { marcado.classList.remove('activo'); marcado = null; }
+        olvidar();
+    }
+
+    /*
+     * ─── El enlace directo a un lote ──────────────────────────────────
+     *
+     * `.../praderas-del-sol#lote=12-A` abre la pagina con la ficha de ese
+     * lote puesta y el plano centrado en el. Es para que un vendedor mande
+     * «mira este» en vez de «abri el plano y busca el 12 de la A», que es
+     * donde el cliente se pierde y cierra.
+     *
+     * La direccion se actualiza sola al abrir cualquier lote, asi que el que
+     * copia de la barra del navegador se lleva el enlace correcto sin saber
+     * que existe esta funcion.
+     *
+     * Se acepta el rotulo (12-A, 12A) y el codigo entero (RPS-A-012): los dos
+     * circulan por WhatsApp y no hay razon para que uno sirva y el otro no.
+     * Se compara solo letras y numeros, sin guiones ni mayusculas.
+     */
+    function normalizar(texto) {
+        return String(texto || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    }
+
+    function etiquetaDe(lote) {
+        return lote.numero + (lote.bloque ? '-' + lote.bloque : '');
+    }
+
+    function recordar(lote) {
+        if (window.history && history.replaceState) {
+            history.replaceState(null, '', '#lote=' + encodeURIComponent(etiquetaDe(lote)));
+        }
+    }
+
+    function olvidar() {
+        if (window.history && history.replaceState) {
+            history.replaceState(null, '', location.pathname + location.search);
+        }
+    }
+
+    function loteDelHash() {
+        var hallado = /(?:^|[#&])lote=([^&]+)/.exec(location.hash || '');
+        if (!hallado) { return null; }
+
+        var busca = normalizar(decodeURIComponent(hallado[1]));
+        if (!busca) { return null; }
+
+        for (var id in porId) {
+            if (!Object.prototype.hasOwnProperty.call(porId, id)) { continue; }
+
+            var lote = porId[id];
+            if (normalizar(lote.codigo) === busca || normalizar(lote.rotulo) === busca) {
+                return lote;
+            }
+        }
+
+        return null;
+    }
+
+    /*
+     * El respaldo para copiar. `navigator.clipboard` solo existe en https o
+     * en localhost: mientras el plano se sirva por http en una red local,
+     * este es el unico camino que de verdad copia.
+     */
+    function copiarAMano(texto) {
+        var caja = document.createElement('textarea');
+        caja.value = texto;
+        caja.setAttribute('readonly', '');
+        caja.style.position = 'fixed';
+        caja.style.left = '-9999px';
+        document.body.appendChild(caja);
+        caja.select();
+
+        var listo = false;
+        try { listo = document.execCommand('copy'); } catch (e) { listo = false; }
+
+        document.body.removeChild(caja);
+        return listo;
     }
 
     document.getElementById('cerrar').addEventListener('click', cerrar);
     document.getElementById('cerrar-pie').addEventListener('click', cerrar);
     telon.addEventListener('click', function (e) { if (e.target === telon) { cerrar(); } });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { cerrar(); } });
+
+    var copiar = document.getElementById('copiar');
+
+    copiar.addEventListener('click', function () {
+        var texto = location.href;
+        var original = copiar.textContent;
+
+        var avisar = function (listo) {
+            copiar.textContent = listo ? '¡Enlace copiado!' : 'Copialo de la barra de arriba';
+            setTimeout(function () { copiar.textContent = original; }, 2500);
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(texto).then(
+                function () { avisar(true); },
+                function () { avisar(copiarAMano(texto)); }
+            );
+            return;
+        }
+
+        avisar(copiarAMano(texto));
+    });
 
     // ─── El mapa ──────────────────────────────────────────────────────
 
@@ -876,6 +1062,40 @@
             vista[0] + (cx - caja.left) / caja.width * vista[2],
             vista[1] + (cy - caja.top) / caja.height * vista[3]
         ];
+    }
+
+    /*
+     * El encuadre alrededor de un lote, para el enlace directo.
+     *
+     * ⚠️ El alto se deriva del ancho por la proporcion del encuadre inicial.
+     * Un viewBox con otra proporcion que la del <svg> hace que
+     * preserveAspectRatio="xMidYMid meet" agregue bandas, y el lote termina
+     * corrido de donde uno lo puso.
+     *
+     * Y se deja aire alrededor a proposito —cinco veces el lote— porque un
+     * lote solo a pantalla completa no dice en que parte del proyecto esta,
+     * que es la mitad de lo que el cliente quiere saber.
+     */
+    function centrarEn(lote) {
+        var p = puntosDe(lote.puntos);
+        if (!p.length) { return; }
+
+        var xs = p.map(function (q) { return q[0]; });
+        var ys = p.map(function (q) { return q[1]; });
+        var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
+        var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+
+        var razon = inicial[3] / inicial[2];
+        var ancho = Math.max(maxX - minX, (maxY - minY) / razon) * 5;
+
+        // Los mismos topes que el zoom a dedo, o el plano quedaria en una
+        // escala a la que ninguno de los botones puede volver.
+        ancho = Math.min(Math.max(ancho, inicial[2] / 16), inicial[2] * 1.4);
+
+        var alto = ancho * razon;
+
+        vista = [(minX + maxX) / 2 - ancho / 2, (minY + maxY) / 2 - alto / 2, ancho, alto];
+        aplicar();
     }
 
     document.getElementById('mas').addEventListener('click', function () {
@@ -980,6 +1200,33 @@
 
         abrir(porId[figura.dataset.lote]);
     });
+
+    /*
+     * Y lo ultimo: si el link venia con un lote, se abre solo.
+     *
+     * Va aca abajo y no arriba porque necesita `vista`, `inicial` y
+     * `aplicar()`, que son del bloque del mapa. Centrar es cambiar el
+     * encuadre del SVG, no hacer scroll de la pagina.
+     */
+    (function abrirElDelEnlace() {
+        var lote = loteDelHash();
+
+        if (!lote) { return; }
+
+        var figura = mapa.querySelector('polygon[data-lote="' + lote.id + '"]');
+
+        if (figura) {
+            marcado = figura;
+            figura.classList.add('activo');
+        }
+
+        centrarEn(lote);
+        abrir(lote);
+
+        // La pista de «pellizcá para acercar» sobra: el que llego por un
+        // enlace directo ya tiene la ficha abierta encima.
+        if (pista) { pista.style.opacity = '0'; }
+    })();
 })();
 </script>
 </body>

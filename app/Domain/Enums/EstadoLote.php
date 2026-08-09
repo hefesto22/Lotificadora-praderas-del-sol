@@ -74,6 +74,59 @@ enum EstadoLote: string
     }
 
     /**
+     * El relleno con el que el lote se pinta en la vidriera publica.
+     *
+     * Distinto de `colorHex()` a proposito. Adentro del panel el color es una
+     * etiqueta —verde bueno, azul cerrado— y un relleno saturado se lee bien
+     * porque quien mira sabe que esta mirando. En el plano publico son 301
+     * poligonos pegados uno al lado del otro: con relleno saturado la pagina
+     * se ve como un tablero de ajedrez y deja de leerse la FORMA del terreno,
+     * que es para lo que el cliente abrio el link. Pastel adentro y saturado
+     * en el borde dice lo mismo sin gritar.
+     *
+     * ⚠️ Vive aca y no en el CSS de `publico/plano.blade.php` porque los usan
+     * TRES superficies: ese CSS, la leyenda de la pagina y el PNG que ve
+     * WhatsApp. Tres listas de colores que tienen que coincidir terminan no
+     * coincidiendo.
+     */
+    public function relleno(): string
+    {
+        return match ($this) {
+            self::Disponible => '#b8ead0',
+            self::Apartado   => '#fbdcab',
+            self::Vendido    => '#f7b8b3',
+            self::Cancelado  => '#e4e4e7',
+        };
+    }
+
+    /**
+     * El borde, que es lo que de verdad distingue un lote del vecino cuando
+     * el plano esta alejado y cada uno mide tres pixeles.
+     */
+    public function borde(): string
+    {
+        return match ($this) {
+            self::Disponible => '#4eb37e',
+            self::Apartado   => '#dfa04a',
+            self::Vendido    => '#e0736a',
+            self::Cancelado  => '#a1a1aa',
+        };
+    }
+
+    /**
+     * ¿Se explica en la leyenda del plano publico?
+     *
+     * Cancelado no. Es un estado interno —un apartado que se cayo, una venta
+     * rescindida— y para el cliente que mira la vidriera solo significa «no
+     * esta a la venta». Nombrarlo invita a preguntar por que, que es una
+     * conversacion que no le toca tener a una pagina web.
+     */
+    public function enLeyendaPublica(): bool
+    {
+        return $this !== self::Cancelado;
+    }
+
+    /**
      * ¿El lote está comprometido con un cliente?
      *
      * Un lote apartado o vendido no puede volver a apartarse ni venderse

@@ -82,6 +82,7 @@ final class PlanoPublicoController
 
         return view('publico.plano', [
             'plano'    => $datos,
+            'imagen'   => $this->imagen($proyecto, $datos),
             'proyecto' => $proyecto,
             'whatsapp' => $this->whatsapp($proyecto),
             'empresa'  => $this->empresa(),
@@ -90,6 +91,25 @@ final class PlanoPublicoController
     }
 
     // ─── Interno ──────────────────────────────────────────────────────
+
+    /**
+     * La miniatura que WhatsApp muestra al lado del link, o null.
+     *
+     * Null en dos casos, y en los dos es mejor que nada: cuando el servidor no
+     * tiene GD —un `og:image` que da 404 deja una tarjeta rota, que se ve peor
+     * que una tarjeta sin imagen— y cuando el proyecto todavia no esta
+     * dibujado, porque un rectangulo vacio no invita a nadie a tocar.
+     *
+     * @param array<string, mixed> $datos
+     */
+    private function imagen(Proyecto $proyecto, array $datos): ?string
+    {
+        if (! PlanoImagenController::disponible() || ($datos['hayGeometria'] ?? false) !== true) {
+            return null;
+        }
+
+        return route('plano.imagen', ['slug' => $proyecto->getAttribute('slug')]);
+    }
 
     /**
      * El número en el formato que espera `wa.me`: solo dígitos, con el país.

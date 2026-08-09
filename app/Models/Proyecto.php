@@ -33,6 +33,8 @@ use Spatie\Activitylog\Support\LogOptions;
     'municipio',
     'departamento',
     'direccion',
+    'latitud',
+    'longitud',
     'activo',
     'plano_esquematico',
     'slug',

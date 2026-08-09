@@ -26,6 +26,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Validation\Rules\Unique;
 use Override;
 
 /**
@@ -84,6 +85,37 @@ class PlanesDePagoRelationManager extends RelationManager
                     ->maxValue(PlanDeCuotas::PLAZO_MAXIMO_MESES)
                     ->required()
                     ->live(onBlur: true)
+                    /*
+                     * 🔴 El texto de abajo prometia algo que el formulario no
+                     * cumplia: «no puede repetirse dentro del proyecto» lo
+                     * hacia cumplir un indice unico de la base, y sin esta
+                     * regla el segundo plan a 12 meses no era un aviso en el
+                     * campo — era una pantalla de error 500 con la consulta
+                     * SQL adentro, en la cara de la administradora.
+                     *
+                     * El alcance es el proyecto y no la tabla entera: dos
+                     * lotificaciones distintas pueden ofrecer 12 meses cada
+                     * una, y de hecho es lo normal.
+                     */
+                    /*
+                     * ⚠️ El parametro TIENE que llamarse `$rule`. Filament
+                     * inyecta en estos cierres por NOMBRE y, cuando el nombre
+                     * no le suena, cae a resolver por TIPO desde el
+                     * contenedor: `Unique` pide un `$table` en su
+                     * constructor, no lo encuentra, y lo que se ve es un
+                     * «Unresolvable dependency» que no menciona ni al campo
+                     * ni al formulario.
+                     */
+                    ->unique(
+                        ignoreRecord: true,
+                        modifyRuleUsing: fn (Unique $rule): Unique => $rule->where(
+                            'proyecto_id',
+                            $this->getOwnerRecord()->getKey(),
+                        ),
+                    )
+                    ->validationMessages([
+                        'unique' => 'Este proyecto ya tiene un plan a ese plazo. Editá el que existe o usá otro número de meses.',
+                    ])
                     ->helperText('0 es contado. No puede repetirse dentro del proyecto.'),
 
                 MontoField::make('precio_vara', 'Precio por vara²')

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\EstadoDeCuentaController;
 use App\Http\Controllers\ImprimirReciboController;
+use App\Http\Controllers\PlanoImagenController;
 use App\Http\Controllers\PlanoPublicoController;
 use App\Http\Controllers\RegistrarInteresController;
 use App\Http\Middleware\SuspensionPorMora;
@@ -71,6 +72,14 @@ Route::middleware(SuspensionPorMora::class)
     ->prefix('plano')
     ->name('plano.')
     ->group(function (): void {
+        /*
+          * La miniatura de la tarjeta de WhatsApp. Va ANTES del `{slug}` por
+          * costumbre y no por necesidad —`{slug}` no cruza barras, asi que
+          * nunca se comerian entre si—, pero leerlas en este orden evita la
+          * duda al que venga despues.
+          */
+        Route::get('{slug}/imagen.png', PlanoImagenController::class)->name('imagen');
+
         Route::get('{slug}', PlanoPublicoController::class)->name('publico');
 
         Route::post('{slug}/interes', RegistrarInteresController::class)

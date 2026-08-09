@@ -220,6 +220,54 @@ describe('La pestaña del proyecto', function (): void {
             'pageClass'   => ViewProyecto::class,
         ])->assertActionHidden(TestAction::make('create')->table());
     });
+
+    /*
+    | 🔴 El texto de ayuda del campo prometia «no puede repetirse dentro del
+    | proyecto» y quien lo hacia cumplir era un indice unico de la base. O
+    | sea: el segundo plan a 12 meses no era un aviso en el campo — era una
+    | pantalla de error 500 con la consulta SQL adentro, en la cara de la
+    | administradora, y el trabajo que habia cargado se perdia.
+    |
+    | Una promesa escrita en un helperText que solo cumple la base de datos
+    | no es una validacion: es una trampa con instrucciones.
+    */
+    test('un plazo repetido se avisa en el campo y no revienta la pantalla', function (): void {
+        PlanDePago::factory()->delProyecto($this->proyecto)->aPlazo(12, '1400.00')->create();
+
+        Livewire::test(PlanesDePagoRelationManager::class, [
+            'ownerRecord' => $this->proyecto,
+            'pageClass'   => ViewProyecto::class,
+        ])
+            ->callAction(TestAction::make('create')->table(), [
+                'meses'       => 12,
+                'precio_vara' => '2350.00',
+            ])
+            ->assertHasActionErrors(['meses' => 'unique']);
+
+        expect(PlanDePago::query()->count())->toBe(1);
+    });
+
+    /*
+    | Y el alcance es el proyecto, no la tabla: doce meses es lo normal en
+    | todas las lotificaciones, y la de al lado tiene que poder ofrecerlo.
+    */
+    test('el mismo plazo en otro proyecto sí entra', function (): void {
+        PlanDePago::factory()->delProyecto($this->proyecto)->aPlazo(12, '1400.00')->create();
+
+        $otro = Proyecto::factory()->create(['codigo' => 'OTRO']);
+
+        Livewire::test(PlanesDePagoRelationManager::class, [
+            'ownerRecord' => $otro,
+            'pageClass'   => ViewProyecto::class,
+        ])
+            ->callAction(TestAction::make('create')->table(), [
+                'meses'       => 12,
+                'precio_vara' => '2350.00',
+            ])
+            ->assertHasNoActionErrors();
+
+        expect(PlanDePago::query()->count())->toBe(2);
+    });
 });
 
 /*
