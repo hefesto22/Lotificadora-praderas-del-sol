@@ -22,12 +22,12 @@ class ProspectoFactory extends Factory
         return [
             'proyecto_id' => Proyecto::factory(),
             'lote_id'     => null,
-            'nombre'      => $this->faker->name(),
+            'nombre'      => fake()->name(),
             // Un número hondureño de ocho dígitos, que es lo que va a llegar.
-            'telefono'    => '9'.$this->faker->numerify('#######'),
+            'telefono'    => '9'.fake()->numerify('#######'),
             'mensaje'     => null,
             'plazo_meses' => 12,
-            'ip'          => $this->faker->ipv4(),
+            'ip'          => fake()->ipv4(),
         ];
     }
 

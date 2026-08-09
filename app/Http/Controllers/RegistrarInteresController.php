@@ -117,8 +117,7 @@ final class RegistrarInteresController
         $numero = $this->whatsapp($proyecto);
 
         if ($numero === null) {
-            return redirect()
-                ->route('plano.publico', ['slug' => $proyecto->getAttribute('slug')])
+            return to_route('plano.publico', ['slug' => $proyecto->getAttribute('slug')])
                 ->with('gracias', 'Gracias, ya tenemos tus datos. Te vamos a llamar.');
         }
 

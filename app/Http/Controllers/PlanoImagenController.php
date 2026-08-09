@@ -207,7 +207,11 @@ final class PlanoImagenController
              */
             imagesetthickness($lienzo, max((int) round($calle['ancho'] * $zoom), 1));
 
-            for ($i = 0; $i + 3 < count($puntos); $i += 2) {
+            // Valores x,y intercalados: se avanza de dos en dos y se lee
+            // hasta cuatro adelante, asi que el largo se saca una sola vez.
+            $coordenadas = count($puntos);
+
+            for ($i = 0; $i + 3 < $coordenadas; $i += 2) {
                 imageline($lienzo, $puntos[$i], $puntos[$i + 1], $puntos[$i + 2], $puntos[$i + 3], $asfalto);
             }
         }
