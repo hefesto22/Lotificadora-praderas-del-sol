@@ -37,6 +37,19 @@ final readonly class CuentaDelLote
         public Monto $pagado,
         public Monto $saldo,
         public Monto $vencido,
+        /*
+         * El desglose. `interes` es lo que el plan cobra en total por el
+         * dinero; los dos «Pagado» son en qué se convirtió lo que el cliente
+         * ya entregó. Con tasa 0 —Praderas, R1— `interes` es cero y
+         * `capitalPagado` es igual a `pagado`, que es como se leía este
+         * objeto antes de que estas propiedades existieran.
+         */
+        public bool $llevaInteres,
+        public Monto $interes,
+        public Monto $interesPagado,
+        public Monto $capitalPagado,
+        public Monto $mora,
+        public Monto $moraCondonada,
         public int $cuotasVencidas,
         public int $cuotasPagadas,
         public ?Monto $cuota,
@@ -51,12 +64,40 @@ final readonly class CuentaDelLote
         $pagado = Monto::cero();
         $saldo = Monto::cero();
         $vencido = Monto::cero();
+        $interes = Monto::cero();
+        $interesPagado = Monto::cero();
+        $capitalPagado = Monto::cero();
+        $mora = Monto::cero();
+        $moraCondonada = Monto::cero();
+        $llevaInteres = false;
         $vencidas = 0;
         $pagadas = 0;
 
         foreach ($cuotas as $cuota) {
             $pagado = $pagado->sumar($cuota->montoPagado());
             $saldo = $saldo->sumar($cuota->saldo());
+
+            /*
+             * El desglose sale de la CUOTA y no de `aplicaciones_de_pago`.
+             *
+             * Es la misma razón por la que esta clase no guarda un
+             * `saldo_actual`: la cuota es el contrato de hoy, y sumar los
+             * renglones de cada recibo obligaría a cargar todos los pagos de
+             * todos los lotes para imprimir un papel.
+             *
+             * Vale porque un pago parcial cubre interés antes que capital
+             * (§8.5, mora → interés → capital), así que `interesPagado()`
+             * sale de la cuota sin adivinar. Hay un test que compara este
+             * desglose contra la suma de las aplicaciones: si algún día se
+             * cambia el orden de imputación, se entera ahí y no en un papel
+             * que ya se le entregó a un cliente.
+             */
+            $llevaInteres = $llevaInteres || $cuota->llevaInteres();
+            $interes = $interes->sumar($cuota->montoInteres());
+            $interesPagado = $interesPagado->sumar($cuota->interesPagado());
+            $capitalPagado = $capitalPagado->sumar($cuota->capitalPagado());
+            $mora = $mora->sumar($cuota->moraPagada());
+            $moraCondonada = $moraCondonada->sumar($cuota->moraCondonada());
 
             if ($cuota->estaPagada()) {
                 $pagadas++;
@@ -79,6 +120,12 @@ final readonly class CuentaDelLote
             pagado: $pagado,
             saldo: $saldo,
             vencido: $vencido,
+            llevaInteres: $llevaInteres,
+            interes: $interes,
+            interesPagado: $interesPagado,
+            capitalPagado: $capitalPagado,
+            mora: $mora,
+            moraCondonada: $moraCondonada,
             cuotasVencidas: $vencidas,
             cuotasPagadas: $pagadas,
             /*
@@ -102,6 +149,29 @@ final readonly class CuentaDelLote
     public function estaAlDia(): bool
     {
         return $this->cuotasVencidas === 0;
+    }
+
+    /**
+     * Lo que falta de interés: el del plan menos el que ya se cubrió.
+     */
+    public function interesPendiente(): Monto
+    {
+        return $this->interes->restar($this->interesPagado);
+    }
+
+    /**
+     * ¿Hubo mora en este lote —cobrada o perdonada—?
+     *
+     * Con R2 (Praderas no cobra mora) esto es false siempre, y el papel no
+     * imprime una fila de ceros que haría preguntar «¿me están cobrando algo
+     * que no entiendo?».
+     */
+    public function huboMora(): bool
+    {
+        // Cobrada + condonada: las dos son no negativas, así que la suma es
+        // cero solo si las dos lo son. Sin `||`, que es lo que pide Rector
+        // (ReturnBinaryOrToEarlyReturn) y además se lee mejor.
+        return ! $this->mora->sumar($this->moraCondonada)->esCero();
     }
 
     /**

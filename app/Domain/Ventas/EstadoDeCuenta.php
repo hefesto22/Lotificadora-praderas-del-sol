@@ -54,6 +54,13 @@ final readonly class EstadoDeCuenta
         public Monto $pagadoEnCuotas,
         public Monto $saldo,
         public Monto $vencido,
+        /* El desglose del contrato: la suma de lo mismo por cada lote. */
+        public bool $llevaInteres,
+        public Monto $interes,
+        public Monto $interesPagado,
+        public Monto $capitalPagado,
+        public Monto $mora,
+        public Monto $moraCondonada,
         public int $cuotasVencidas,
         public int $cuotasPagadas,
         public int $cuotasTotales,
@@ -68,6 +75,12 @@ final readonly class EstadoDeCuenta
         $pagado = Monto::cero();
         $saldo = Monto::cero();
         $vencido = Monto::cero();
+        $interes = Monto::cero();
+        $interesPagado = Monto::cero();
+        $capitalPagado = Monto::cero();
+        $mora = Monto::cero();
+        $moraCondonada = Monto::cero();
+        $llevaInteres = false;
         $vencidas = 0;
         $pagadas = 0;
         $totales = 0;
@@ -79,6 +92,13 @@ final readonly class EstadoDeCuenta
             $pagado = $pagado->sumar($cuenta->pagado);
             $saldo = $saldo->sumar($cuenta->saldo);
             $vencido = $vencido->sumar($cuenta->vencido);
+
+            $llevaInteres = $llevaInteres || $cuenta->llevaInteres;
+            $interes = $interes->sumar($cuenta->interes);
+            $interesPagado = $interesPagado->sumar($cuenta->interesPagado);
+            $capitalPagado = $capitalPagado->sumar($cuenta->capitalPagado);
+            $mora = $mora->sumar($cuenta->mora);
+            $moraCondonada = $moraCondonada->sumar($cuenta->moraCondonada);
             $vencidas += $cuenta->cuotasVencidas;
             $pagadas += $cuenta->cuotasPagadas;
             $totales += $cuenta->cuotasTotales();
@@ -96,6 +116,12 @@ final readonly class EstadoDeCuenta
             pagadoEnCuotas: $pagado,
             saldo: $saldo,
             vencido: $vencido,
+            llevaInteres: $llevaInteres,
+            interes: $interes,
+            interesPagado: $interesPagado,
+            capitalPagado: $capitalPagado,
+            mora: $mora,
+            moraCondonada: $moraCondonada,
             cuotasVencidas: $vencidas,
             cuotasPagadas: $pagadas,
             cuotasTotales: $totales,
@@ -121,6 +147,25 @@ final readonly class EstadoDeCuenta
     public function estaAlDia(): bool
     {
         return $this->cuotasVencidas === 0;
+    }
+
+    /**
+     * El interés que todavía falta pagar de todo el expediente.
+     */
+    public function interesPendiente(): Monto
+    {
+        return $this->interes->restar($this->interesPagado);
+    }
+
+    /**
+     * ¿Hubo mora en el expediente —cobrada o perdonada—? Con R2, nunca.
+     */
+    public function huboMora(): bool
+    {
+        // Cobrada + condonada: las dos son no negativas, así que la suma es
+        // cero solo si las dos lo son. Sin `||`, que es lo que pide Rector
+        // (ReturnBinaryOrToEarlyReturn) y además se lee mejor.
+        return ! $this->mora->sumar($this->moraCondonada)->esCero();
     }
 
     public function estaCancelado(): bool

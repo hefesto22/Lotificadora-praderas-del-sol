@@ -277,6 +277,45 @@ class Recibo extends Model
      * renglones tienen que verse impresos, o el cliente no entiende por qué
      * pagó L 100,000.00 y sus cuotas solo bajaron L 50,000.00.
      */
+    /**
+     * De lo que este recibo le aplicó a las cuotas, cuánto fue interés.
+     *
+     * Sale de los RENGLONES y no de la cuota: el recibo acredita este pago, y
+     * la cuota puede traer encima plata de otro recibo. Preguntarle a la
+     * cuota daría el acumulado, que en un papel que dice «recibí de usted»
+     * sería un número que el cliente no entregó hoy.
+     */
+    public function interesDeCuotas(): Monto
+    {
+        $total = Monto::cero();
+
+        foreach ($this->aplicaciones as $aplicacion) {
+            $total = $total->sumar($aplicacion->montoInteres());
+        }
+
+        return $total;
+    }
+
+    /**
+     * Y cuánto fue capital. ⚠️ No confundir con `montoACapital()`, que es el
+     * abono extra del R21: este es el capital que venía adentro de la cuota.
+     */
+    public function capitalDeCuotas(): Monto
+    {
+        $total = Monto::cero();
+
+        foreach ($this->aplicaciones as $aplicacion) {
+            $total = $total->sumar($aplicacion->montoCapital());
+        }
+
+        return $total;
+    }
+
+    public function cobroInteres(): bool
+    {
+        return ! $this->interesDeCuotas()->esCero();
+    }
+
     public function montoACapital(): Monto
     {
         return $this->montoTotal()->restar($this->montoAplicadoACuotas());

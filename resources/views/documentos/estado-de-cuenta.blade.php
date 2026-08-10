@@ -203,6 +203,19 @@
         </div>
     </div>
 
+    @if ($cuenta->llevaInteres)
+        {{-- La pregunta que hace un cliente el primer mes: «¿cuánto de lo que
+             pagué bajó mi deuda?». Contestada en palabras y no solo en
+             columnas, porque el que pregunta no está leyendo la tabla. --}}
+        <p class="nota">
+            De lo que lleva pagado en cuotas, <strong>{{ $cuenta->capitalPagado->formateado() }}</strong>
+            bajó el precio del terreno y <strong>{{ $cuenta->interesPagado->formateado() }}</strong>
+            fue interés por el financiamiento. Al terminar de pagar habrá cubierto
+            {{ $cuenta->interes->formateado() }} de interés en total; faltan
+            {{ $cuenta->interesPendiente()->formateado() }}.
+        </p>
+    @endif
+
     @if ($cuenta->estaCancelado())
         <p class="aviso aldia"><strong>Este contrato está totalmente pagado.</strong> No queda saldo pendiente.</p>
     @elseif ($cuenta->estaAlDia())
@@ -253,6 +266,13 @@
                         <tr>
                             <th>Cuota</th>
                             <th>Vence</th>
+                            {{-- Capital e interés solo si el plan cobra. Con tasa 0
+                                 —Praderas, R1— serían dos columnas de ceros al lado
+                                 del número que importa. --}}
+                            @if ($lote->llevaInteres)
+                                <th>Capital</th>
+                                <th>Interés</th>
+                            @endif
                             <th>Monto</th>
                             <th>Pagado</th>
                             <th>Falta</th>
@@ -264,6 +284,10 @@
                             <tr class="{{ $cuota->estaPagada() ? 'pagada' : ($cuota->estaVencida() ? 'vencida' : '') }}">
                                 <td>{{ $cuota->getAttribute('numero') }}</td>
                                 <td>{{ $cuota->getAttribute('fecha_vencimiento')?->format('d/m/Y') ?? '—' }}</td>
+                                @if ($lote->llevaInteres)
+                                    <td>{{ $cuota->montoCapital()->formateado() }}</td>
+                                    <td>{{ $cuota->montoInteres()->formateado() }}</td>
+                                @endif
                                 <td>{{ $cuota->montoTotal()->formateado() }}</td>
                                 <td>{{ $cuota->montoPagado()->esCero() ? '—' : $cuota->montoPagado()->formateado() }}</td>
                                 <td>{{ $cuota->saldo()->esCero() ? '—' : $cuota->saldo()->formateado() }}</td>
@@ -280,15 +304,34 @@
                         @endforeach
                     </tbody>
                     <tfoot>
+                        {{-- ⚠️ Con interés, «Monto» NO es valor − prima: eso es el
+                             capital. La columna suma capital + interés, y si el pie
+                             dijera solo el capital no cerraría contra sus propias
+                             filas — que es exactamente lo que revisa un cliente con
+                             la calculadora en la mano. --}}
                         <tr>
                             <td colspan="2">Total del lote</td>
-                            <td>{{ $lote->valor->restar($lote->prima)->formateado() }}</td>
+                            @if ($lote->llevaInteres)
+                                <td>{{ $lote->valor->restar($lote->prima)->formateado() }}</td>
+                                <td>{{ $lote->interes->formateado() }}</td>
+                            @endif
+                            <td>{{ $lote->valor->restar($lote->prima)->sumar($lote->interes)->formateado() }}</td>
                             <td>{{ $lote->pagado->formateado() }}</td>
                             <td>{{ $lote->saldo->formateado() }}</td>
                             <td></td>
                         </tr>
                     </tfoot>
                 </table>
+
+                @if ($lote->huboMora())
+                    {{-- Solo cuando la hubo. Un renglón «Mora L 0.00» en un papel
+                         que se le entrega al cliente invita a preguntar por un
+                         cobro que no existe. --}}
+                    <p class="nota">
+                        Mora de este lote: se cobró {{ $lote->mora->formateado() }}@unless ($lote->moraCondonada->esCero()) y se condonó {{ $lote->moraCondonada->formateado() }}@endunless.
+                        La mora se paga aparte de la cuota y no baja el saldo del lote.
+                    </p>
+                @endif
             @endif
         </div>
     @endforeach

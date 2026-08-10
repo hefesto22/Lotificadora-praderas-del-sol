@@ -266,6 +266,28 @@
         <div class="letras">{{ $enLetras }}</div>
     </div>
 
+    {{-- En qué se convirtió lo que entregó hoy.
+
+         Solo cuando hay algo además de capital: con tasa 0 y sin mora (R1,
+         R2) esta línea diría «capital» y el total otra vez, y repetir el
+         mismo número con otro nombre hace dudar de los dos. --}}
+    @if ($recibo->cobroMora() || $recibo->cobroInteres())
+        <p class="nota">
+            <strong>De este pago:</strong>
+            @if ($recibo->cobroMora()) mora {{ $recibo->montoMora()->formateado() }} · @endif
+            @if ($recibo->cobroInteres()) interés {{ $recibo->interesDeCuotas()->formateado() }} · @endif
+            capital {{ $recibo->capitalDeCuotas()->sumar($aCapital)->formateado() }}.
+            El interés es el costo del financiamiento y no baja su saldo; el capital sí.
+        </p>
+    @endif
+
+    @if ($recibo->condonoMora())
+        <p class="nota">
+            Se le condonó mora por <strong>{{ $recibo->moraCondonada()->formateado() }}</strong>,
+            que no se cobró en este recibo.
+        </p>
+    @endif
+
     @if ($saldo)
         <p class="nota">
             Saldo del lote al {{ now()->format('d/m/Y') }}: <strong>{{ $saldo->formateado() }}</strong>.
