@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Clientes\Schemas;
 
+use App\Filament\Support\ListadoDelCliente;
 use App\Models\Cliente;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\TextEntry;
@@ -40,6 +41,26 @@ class ClienteInfolist
                             ->state(fn (Cliente $record): ?string => $record->rtnFormateado())
                             ->placeholder('Sin RTN')
                             ->copyable(),
+                    ]),
+
+                /*
+                | ═══ LA PREGUNTA DEL MOSTRADOR ═══
+                |
+                | «¿Cuánto debe este señor?» Un cliente con tres lotes en dos
+                | contratos obligaba a entrar a los dos expedientes y sumar a
+                | mano. La sección desaparece para quien no puede ver Ventas:
+                | el número sale de ahí (§13.5).
+                */
+                Section::make('Estado de cuenta')
+                    ->icon('heroicon-o-banknotes')
+                    ->description('Sumando todos sus expedientes vigentes. Lo rescindido no cuenta.')
+                    ->columns(2)
+                    ->visible(fn (): bool => ListadoDelCliente::puedeVerVentas())
+                    ->schema([
+                        TextEntry::make('saldo_pendiente')
+                            ->label('Debe hoy')
+                            ->state(fn (Cliente $record): string => $record->saldoPendiente()->formateado())
+                            ->weight('bold'),
                     ]),
 
                 Section::make('Contacto')

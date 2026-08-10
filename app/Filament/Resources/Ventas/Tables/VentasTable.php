@@ -13,6 +13,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 /**
  * §10.7: columnas explícitas, eager loading, filtros con la misma fuente
@@ -107,6 +108,32 @@ class VentasTable
                     ->relationship('proyecto', 'nombre')
                     ->searchable()
                     ->preload(),
+
+                /*
+                 * ═══ EL FILTRO QUE HACE POSIBLE EL LINK DESDE EL CLIENTE ═══
+                 *
+                 * `ClientesTable` abre esta pantalla con
+                 * `?filters[cliente][value]=…`. El nombre `cliente` es el
+                 * contrato entre las dos pantallas y está escrito una sola
+                 * vez, en `ListadoDelCliente::FILTRO`.
+                 *
+                 * Filtra por CUALQUIERA de los que firman, no solo por el
+                 * titular: la columna «Titular» muestra a uno, pero un lote
+                 * comprado entre marido y mujer es de los dos (R8).
+                 *
+                 * El `withoutGlobalScopes` tampoco es decorativo. Un cliente
+                 * archivado sigue teniendo sus ventas: sin esa línea el
+                 * contador de su ficha diría «1» y esta pantalla mostraría
+                 * cero — que es exactamente el contador mentiroso del §9.E6.
+                 */
+                SelectFilter::make('cliente')
+                    ->label('Cliente')
+                    ->relationship(
+                        'clientes',
+                        'nombre',
+                        static fn (Builder $query): Builder => $query->withoutGlobalScopes([SoftDeletingScope::class]),
+                    )
+                    ->searchable(),
             ])
             ->recordActions([
                 ActionGroup::make([

@@ -8,6 +8,9 @@ use App\Filament\Resources\Clientes\Pages\CreateCliente;
 use App\Filament\Resources\Clientes\Pages\EditCliente;
 use App\Filament\Resources\Clientes\Pages\ListClientes;
 use App\Filament\Resources\Clientes\Pages\ViewCliente;
+use App\Filament\Resources\Clientes\RelationManagers\ApartadosRelationManager;
+use App\Filament\Resources\Clientes\RelationManagers\RecibosRelationManager;
+use App\Filament\Resources\Clientes\RelationManagers\VentasRelationManager;
 use App\Filament\Resources\Clientes\Schemas\ClienteForm;
 use App\Filament\Resources\Clientes\Schemas\ClienteInfolist;
 use App\Filament\Resources\Clientes\Tables\ClientesTable;
@@ -99,12 +102,32 @@ class ClienteResource extends Resource
     }
 
     /**
+     * El expediente completo del cliente, en pestañas.
+     *
+     * ═══ SON TRES Y NO UNA POR UNA RAZON ═══
+     *
+     * Filament arma las solapas solo cuando hay más de un relation manager.
+     * Con estos tres, la ficha contesta las tres preguntas que llegan al
+     * mostrador —qué compró, qué tiene reservado, qué ha pagado— sin salir de
+     * la pantalla y sin que nadie tenga que acordarse de ir a buscarlas.
+     *
+     * Ninguno redefine una columna: cada uno declara su `$relatedResource` y
+     * Filament aplica la tabla de esa pantalla tal cual. Ver el docblock de
+     * `VentasRelationManager`.
+     *
+     * El orden es el del ciclo de vida —se aparta, se vende, se paga— pero al
+     * revés, porque lo que más se consulta es lo que ya se vendió.
+     *
      * @return array<int, string>
      */
     #[Override]
     public static function getRelations(): array
     {
-        return [];
+        return [
+            VentasRelationManager::class,
+            ApartadosRelationManager::class,
+            RecibosRelationManager::class,
+        ];
     }
 
     /**

@@ -19,6 +19,7 @@ use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 /**
  * Los apartados ordenados por lo que se vence primero.
@@ -144,6 +145,22 @@ class ApartadosTable
                 SelectFilter::make('estado')
                     ->label('Estado')
                     ->options(static fn (): array => self::estados()),
+
+                /*
+                 * El destino del link que sale de la ficha del cliente. El
+                 * nombre `cliente` es el contrato con `ListadoDelCliente`, y
+                 * el `withoutGlobalScopes` está para que un cliente archivado
+                 * no abra una pantalla vacía — la razón larga está escrita en
+                 * `VentasTable`.
+                 */
+                SelectFilter::make('cliente')
+                    ->label('Cliente')
+                    ->relationship(
+                        'cliente',
+                        'nombre',
+                        static fn (Builder $query): Builder => $query->withoutGlobalScopes([SoftDeletingScope::class]),
+                    )
+                    ->searchable(),
             ])
             ->recordActions([
                 ActionGroup::make([

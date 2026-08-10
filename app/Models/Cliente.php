@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Domain\Enums\TipoCompromiso;
 use App\Domain\ValueObjects\DNI;
+use App\Domain\ValueObjects\Monto;
 use App\Domain\ValueObjects\RTN;
 use App\Traits\HasAuditFields;
 use Database\Factories\ClienteFactory;
@@ -14,6 +16,8 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Override;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
@@ -77,6 +81,120 @@ class Cliente extends Model
             ->logOnlyDirty()
             ->dontLogEmptyChanges()
             ->setDescriptionForEvent(fn (string $evento): string => "Cliente {$evento}");
+    }
+
+    // ─── Relaciones ───────────────────────────────────────────────────
+
+    /**
+     * Los expedientes donde este cliente firma, solo o acompañado (R8).
+     *
+     * Es el reverso de `Venta::clientes()`, y NO distingue al titular del
+     * copropietario a propósito: la pregunta que llega al mostrador es «¿este
+     * señor qué compró?», y un lote comprado entre marido y mujer es de los
+     * dos aunque la titular sea ella.
+     *
+     * @return BelongsToMany<Venta, $this>
+     */
+    public function ventas(): BelongsToMany
+    {
+        return $this->belongsToMany(Venta::class, 'venta_cliente')
+            ->withPivot(['titular', 'orden'])
+            ->withTimestamps();
+    }
+
+    /**
+     * Todo lo que este cliente tiene comprometido: lo apartado y lo vendido.
+     *
+     * @return HasMany<Compromiso, $this>
+     */
+    public function compromisos(): HasMany
+    {
+        return $this->hasMany(Compromiso::class);
+    }
+
+    /**
+     * Los apartados, que son compromisos de tipo apartado (§8.2).
+     *
+     * La condición es LA MISMA línea que `ApartadoResource::getEloquentQuery()`,
+     * y eso es a propósito: el contador de la ficha y la pantalla que abre el
+     * link tienen que estar de acuerdo sobre qué es un apartado, o el número
+     * dice dos y la lista muestra tres (§9.E6).
+     *
+     * @return HasMany<Compromiso, $this>
+     */
+    public function apartados(): HasMany
+    {
+        return $this->hasMany(Compromiso::class)->where('tipo', TipoCompromiso::Apartado);
+    }
+
+    /**
+     * Lo que este cliente ha pagado, anulados incluidos.
+     *
+     * Los anulados NO se filtran porque la pantalla de Recibos tampoco los
+     * esconde: el número sigue en la serie y el papel sigue en la mano de
+     * alguien. Un contador que dijera menos que la lista que abre sería un
+     * contador que miente.
+     *
+     * @return HasMany<Recibo, $this>
+     */
+    public function recibos(): HasMany
+    {
+        return $this->hasMany(Recibo::class);
+    }
+
+    // ─── Dinero ───────────────────────────────────────────────────────
+
+    /**
+     * Lo que este cliente debe hoy, sumando TODOS sus expedientes vigentes.
+     *
+     * ═══ POR QUE SOLO LOS VIGENTES ═══
+     *
+     * Es la misma regla del «Por cobrar» del Escritorio. Una venta rescindida
+     * deja sus cuotas impagas en la tabla, y sumarlas sería inventarle al
+     * cliente una deuda que nadie le va a cobrar nunca.
+     *
+     * ═══ SE CALCULA, NO SE GUARDA ═══
+     *
+     * Lo mismo que dice `Venta::saldoPendiente()`: una columna `saldo_actual`
+     * que se desincroniza es la forma más cara de mentirle a un cliente
+     * (§8.3.4).
+     */
+    public function saldoPendiente(): Monto
+    {
+        /** @var string|int|null $suma */
+        $suma = self::query()
+            ->whereKey($this->getKey())
+            ->addSelect(['saldo_pendiente' => self::consultaDeSaldo()])
+            ->value('saldo_pendiente');
+
+        return new Monto(is_string($suma) || is_int($suma) ? $suma : '0');
+    }
+
+    /**
+     * La misma cuenta de arriba, como subconsulta correlacionada.
+     *
+     * Va adentro del `addSelect` de un listado de clientes y resuelve toda la
+     * página con UNA consulta, en vez de una por fila (§9.D). Correlaciona
+     * contra `clientes.id` de la consulta de afuera, así que solo sirve
+     * adentro de una consulta sobre `clientes`.
+     *
+     * `venta_cliente` se nombra acá por segunda vez —la primera está en
+     * `Venta::clientes()`— porque una relación de Eloquent no sabe
+     * correlacionar contra una columna de la consulta de afuera: es un join a
+     * la pivote, o es una consulta por fila.
+     *
+     * @return Builder<Cuota>
+     */
+    public static function consultaDeSaldo(): Builder
+    {
+        return Cuota::query()
+            ->reorder()
+            ->selectRaw('COALESCE(SUM(monto - monto_pagado), 0)')
+            ->whereIn('venta_id', Venta::query()
+                ->vigentes()
+                ->select('ventas.id')
+                ->join('venta_cliente', 'venta_cliente.venta_id', '=', 'ventas.id')
+                ->whereColumn('venta_cliente.cliente_id', 'clientes.id'));
     }
 
     // ─── Normalización de entrada ─────────────────────────────────────

@@ -21,6 +21,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 /**
  * Lo cobrado, del más reciente al más viejo.
@@ -158,6 +159,22 @@ class RecibosTable
                         false: static fn (Builder $query): Builder => $query->whereNull('anulado_el'),
                         blank: static fn (Builder $query): Builder => $query,
                     ),
+
+                /*
+                 * El destino del link que sale de la ficha del cliente. El
+                 * nombre `cliente` es el contrato con `ListadoDelCliente`, y
+                 * el `withoutGlobalScopes` está para que un cliente archivado
+                 * no abra una pantalla vacía — la razón larga está escrita en
+                 * `VentasTable`.
+                 */
+                SelectFilter::make('cliente')
+                    ->label('Cliente')
+                    ->relationship(
+                        'cliente',
+                        'nombre',
+                        static fn (Builder $query): Builder => $query->withoutGlobalScopes([SoftDeletingScope::class]),
+                    )
+                    ->searchable(),
             ])
             ->recordActions([
                 ActionGroup::make([
