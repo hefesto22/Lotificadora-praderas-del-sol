@@ -5,21 +5,29 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Proyectos\RelationManagers;
 
 use App\Domain\Enums\EstadoLote;
+use App\Domain\Exceptions\Foto360InvalidaException;
+use App\Domain\Plano\Foto360;
+use App\Domain\Plano\MarcasDelLote;
 use App\Filament\Schemas\Components\AreaField;
 use App\Filament\Schemas\Components\MayusculasField;
 use App\Filament\Schemas\Components\MontoField;
 use App\Models\Bloque;
 use App\Models\Lote;
 use BackedEnum;
+use Closure;
 use Filament\Actions\CreateAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Validation\ValidationException;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Override;
 
 /**
@@ -83,6 +91,138 @@ class LotesRelationManager extends RelationManager
                 MontoField::make('precio_vara', 'Precio por vara²')
                     ->disabled(fn (?Lote $record): bool => $this->estaVendido($record))
                     ->helperText('El valor se calcula solo: área × precio.'),
+
+                /*
+                 * ═══ LA FOTO 360 DEL TERRENO ═══
+                 *
+                 * Sube el archivo crudo de la cámara —6000×3000, hasta veinte
+                 * megas— y lo que queda guardado es de 4096×2048 y medio mega.
+                 * Todo eso pasa en `Foto360`; acá solo se le entrega el
+                 * archivo temporal y se guarda la ruta que devuelve.
+                 *
+                 * `saveUploadedFileUsing` y no un hook después de guardar: si
+                 * la foto no sirve —no es 2:1, es enorme, no se puede abrir—
+                 * el error tiene que salir en el campo, junto al archivo que
+                 * la administradora acaba de elegir, y no como un 500 después
+                 * de que el formulario dijo «guardado».
+                 */
+                FileUpload::make('foto360_path')
+                    ->label('Foto 360 del lote')
+                    ->image()
+                    ->disk('public')
+                    ->directory('lotes/360')
+                    ->visibility('public')
+                    ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
+                    // Lo que sale de una cámara 360 sin exportar reducido.
+                    // Acompaña al tope de Livewire en config/livewire.php: si
+                    // este fuera mayor, el archivo se subiría entero para que
+                    // lo rechace el otro, con un mensaje que no dice nada.
+                    ->maxSize(30 * 1024)
+                    ->helperText(
+                        'La foto tal como la exporta la cámara 360 (el doble de ancha que de alta, '
+                        .'por ejemplo 6000×3000). Se reduce sola a 4096×2048 para que cargue rápido '
+                        .'en el teléfono del cliente. Aparece en el plano público con el botón «Ver 360».'
+                    )
+                    /*
+                     * ⚠️ EL PARÁMETRO SE LLAMA `$file` Y NO PUEDE LLAMARSE DE
+                     * OTRA FORMA.
+                     *
+                     * Filament inyecta los argumentos de estos closures POR
+                     * NOMBRE (`BaseFileUpload` los pasa como `['file' => ...]`).
+                     * Con cualquier otro nombre no encuentra el argumento, cae
+                     * a resolver `TemporaryUploadedFile` del contenedor, y
+                     * revienta con «Unresolvable dependency ... $path» al
+                     * guardar — no al subir, que es lo que hace que cueste
+                     * relacionarlo. Ya nos pasó con `modifyRuleUsing`.
+                     */
+                    ->saveUploadedFileUsing(function (TemporaryUploadedFile $file, ?Lote $record, FileUpload $component): string {
+                        $foto = new Foto360;
+
+                        try {
+                            // Reemplazar deja huérfana a la anterior: se borra
+                            // acá, que es el único lugar que sabe cuál era.
+                            $foto->borrar($record?->getAttribute('foto360_path'));
+
+                            return $foto->guardar(
+                                // Sin cast: `TemporaryUploadedFile::getRealPath()`
+                                // ya devuelve string y Rector lo marca (Recasting).
+                                $file->getRealPath(),
+                                (int) ($record?->getKey() ?? 0),
+                            );
+                        } catch (Foto360InvalidaException $error) {
+                            /*
+                             * ⚠️ Sin esto, «la foto mide 12000 y el máximo es
+                             * 8192» sale como una pantalla de Internal Server
+                             * Error: un mensaje escrito para ayudar, servido de
+                             * la forma que más asusta.
+                             *
+                             * `getStatePath()` da la clave exacta de ESTE campo
+                             * —adentro de un modal de relation manager es algo
+                             * como `mountedActions.0.data.foto360_path`— así que
+                             * el texto aparece debajo del archivo que la
+                             * administradora acaba de elegir, que es donde puede
+                             * hacer algo con él.
+                             */
+                            throw ValidationException::withMessages([
+                                $component->getStatePath() => $error->getMessage(),
+                            ]);
+                        }
+                    })
+                    ->deleteUploadedFileUsing(function (string $file): void {
+                        (new Foto360)->borrar($file);
+                    })
+                    ->columnSpanFull(),
+
+                /*
+                 * ═══ LAS MARCAS, PEGADAS DEL EDITOR ═══
+                 *
+                 * El contorno y los rótulos NO se queman en la foto, y esa es
+                 * toda la diferencia: una línea dentro del JPG deja de ser una
+                 * línea —se reduce, se realza, se comprime— y al hacer zoom el
+                 * cliente agranda píxeles. Guardada como ángulos, el visor la
+                 * traza como vector en cada cuadro.
+                 *
+                 * Se validan al guardar y otra vez al publicar (`MarcasDelLote`):
+                 * este es un textarea abierto, y lo que se escriba acá llega al
+                 * navegador de cualquiera que abra el link.
+                 */
+                Textarea::make('foto360_marcas')
+                    ->label('Marcas del 360 (contorno y rótulos)')
+                    ->rows(3)
+                    ->placeholder('[{"tipo":"contorno", …}]')
+                    ->helperText(
+                        'Se pega desde el editor 360, con el botón «Copiar marcas». Las líneas se '
+                        .'dibujan como vectores, así que se ven nítidas a cualquier zoom y el texto '
+                        .'queda fijo donde lo dejaste. Vacío = sin marcas.'
+                    )
+                    /*
+                     * El formulario maneja TEXTO; la columna guarda una lista.
+                     *
+                     * `JSON_THROW_ON_ERROR` y no un `?: null`: sin la bandera,
+                     * `json_encode` puede devolver `false` —PHPStan lo marca, y
+                     * con razón— y taparlo con un null dejaría el campo en
+                     * blanco frente a la administradora, que apretaría guardar
+                     * y borraría las marcas del lote sin enterarse. Que
+                     * reviente es preferible: significa que en la columna hay
+                     * algo que no debería estar ahí.
+                     */
+                    ->formatStateUsing(fn (mixed $state): ?string => match (true) {
+                        is_array($state)  => $state === [] ? null : json_encode($state, JSON_THROW_ON_ERROR),
+                        is_string($state) => $state,
+                        default           => null,
+                    })
+                    ->dehydrateStateUsing(
+                        fn (mixed $state): array => resolve(MarcasDelLote::class)
+                            ->desdeElTexto(is_string($state) ? $state : null)
+                    )
+                    ->rule(fn (): Closure => function (string $atributo, mixed $valor, Closure $falla): void {
+                        try {
+                            resolve(MarcasDelLote::class)->desdeElTexto(is_string($valor) ? $valor : null);
+                        } catch (Foto360InvalidaException $error) {
+                            $falla($error->getMessage());
+                        }
+                    })
+                    ->columnSpanFull(),
             ]);
     }
 

@@ -7,6 +7,8 @@ namespace App\Models;
 use App\Domain\Enums\EstadoLote;
 use App\Domain\Exceptions\LoteInmutableException;
 use App\Domain\Exceptions\ValueObjectInvalidoException;
+use App\Domain\Plano\Foto360;
+use App\Domain\Plano\MarcasDelLote;
 use App\Domain\ValueObjects\Monto;
 use App\Traits\HasAuditFields;
 use Database\Factories\LoteFactory;
@@ -17,6 +19,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Storage;
 use Override;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
@@ -38,6 +41,8 @@ use Spatie\Activitylog\Support\LogOptions;
     'estado',
     'poligono',
     'observaciones',
+    'foto360_path',
+    'foto360_marcas',
 ])]
 class Lote extends Model
 {
@@ -72,8 +77,9 @@ class Lote extends Model
     protected function casts(): array
     {
         return [
-            'estado'   => EstadoLote::class,
-            'poligono' => 'array',
+            'foto360_marcas' => 'array',
+            'estado'         => EstadoLote::class,
+            'poligono'       => 'array',
         ];
     }
 
@@ -366,6 +372,54 @@ class Lote extends Model
     public function proyecto(): BelongsTo
     {
         return $this->belongsTo(Proyecto::class);
+    }
+
+    /**
+     * @return BelongsTo<Bloque, $this>
+     */
+    /**
+     * ¿Este lote tiene foto 360 cargada?
+     *
+     * ⚠️ Mira la COLUMNA, no el disco. Preguntarle al sistema de archivos por
+     * cada lote serían 301 llamadas para dibujar un plano. La ruta la escribe
+     * `Foto360` y la borra `Foto360`: si algún día no coinciden, el problema
+     * está ahí y no en una comprobación por lote.
+     */
+    public function tieneFoto360(): bool
+    {
+        $ruta = $this->getAttribute('foto360_path');
+
+        return is_string($ruta) && trim($ruta) !== '';
+    }
+
+    /**
+     * Las marcas del 360, revisadas antes de salir del sistema.
+     *
+     * Se limpian ACÁ y no solo al guardar: la fila puede venir de un import o
+     * de un tinker, y la página pública no es el lugar para descubrirlo.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function foto360Marcas(): array
+    {
+        return resolve(MarcasDelLote::class)->paraPublicar($this->getAttribute('foto360_marcas'));
+    }
+
+    public function foto360Url(): ?string
+    {
+        return $this->tieneFoto360()
+            ? Storage::disk('public')->url((string) $this->getAttribute('foto360_path'))
+            : null;
+    }
+
+    /**
+     * La miniatura borrosa que el visor pinta mientras baja la grande.
+     */
+    public function foto360MiniUrl(): ?string
+    {
+        return $this->tieneFoto360()
+            ? Storage::disk('public')->url(Foto360::mini((string) $this->getAttribute('foto360_path')))
+            : null;
     }
 
     /**

@@ -53,7 +53,7 @@ final readonly class PlanoDelProyecto
      *     esquematico: bool,
      *     sinDibujar: int,
      *     resumen: array<string, int>,
-     *     lotes: list<array{id: int, codigo: string, numero: string, bloque: string, rotulo: string, estado: string, etiqueta: string, color: string, puntos: string, centro: array{float, float}, cliente: string|null, areaVaras: string, valor: string, valorFormateado: string, desalineado: bool}>,
+     *     lotes: list<array{id: int, codigo: string, numero: string, bloque: string, rotulo: string, estado: string, etiqueta: string, color: string, puntos: string, centro: array{float, float}, cliente: string|null, areaVaras: string, valor: string, valorFormateado: string, desalineado: bool, foto360: string|null, foto360Mini: string|null, foto360Marcas: list<array<string, mixed>>}>,
      *     calles: list<array{nombre: string|null, tipo: string, etiqueta: string, ancho: float, esArea: bool, puntos: string}>
      * }
      */
@@ -132,6 +132,9 @@ final readonly class PlanoDelProyecto
                 'valor'           => (string) $lote->getAttribute('valor'),
                 'valorFormateado' => $lote->montoValor()->formateado(),
                 'desalineado'     => $lote->poligonoDesalineado(),
+                'foto360'         => $lote->foto360Url(),
+                'foto360Mini'     => $lote->foto360MiniUrl(),
+                'foto360Marcas'   => $lote->foto360Marcas(),
             ];
         }
 

@@ -145,6 +145,14 @@ describe('Plano público — lo que NO puede salir', function (): void {
                 'id', 'codigo', 'numero', 'rotulo', 'bloque', 'estado',
                 'etiqueta', 'color', 'puntos', 'centro', 'area',
                 'areaFormateada', 'seCotiza', 'clave',
+                // 10-ago: la foto 360. Se agregó A PROPÓSITO y no para que
+                // el test dejara de fallar: es una foto del terreno, no dice
+                // precio ni comprador. Ver el comentario en `PlanoPublico`.
+                'foto360', 'foto360Mini',
+                // 10-ago: el contorno y los rótulos del 360, como ángulos.
+                // Se agregó A PROPÓSITO: es la forma de un dibujo, no dice
+                // precio ni comprador. Ver `MarcasDelLote`.
+                'foto360Marcas',
             ]);
         }
     });

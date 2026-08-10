@@ -62,7 +62,7 @@ final readonly class PlanoPublico
      *     esquematico: bool,
      *     disponibles: int,
      *     total: int,
-     *     lotes: list<array{id: int, codigo: string, numero: string, rotulo: string, bloque: string, estado: string, etiqueta: string, color: string, puntos: string, centro: array{float, float}, area: string, areaFormateada: string, seCotiza: bool, clave: string}>,
+     *     lotes: list<array{id: int, codigo: string, numero: string, rotulo: string, bloque: string, estado: string, etiqueta: string, color: string, puntos: string, centro: array{float, float}, area: string, areaFormateada: string, seCotiza: bool, clave: string, foto360: string|null, foto360Mini: string|null, foto360Marcas: list<array<string, mixed>>}>,
      *     calles: list<array{nombre: string|null, tipo: string, etiqueta: string, ancho: float, esArea: bool, puntos: string}>,
      *     planes: list<array{meses: int, nombre: string, tasa: string|null}>,
      *     precios: array<string, array<int, array{valor: string, cuota: string|null, total: string, interes: string|null}>>
@@ -105,6 +105,24 @@ final readonly class PlanoPublico
                 // Solo lo que está a la venta lleva precio. Ver el docblock.
                 'seCotiza' => $estaLibre,
                 'clave'    => $estaLibre ? CotizacionPorPlazo::clave($lote['areaVaras']) : '',
+                /*
+                 * La foto 360 SÍ sale, y también la de los lotes vendidos.
+                 * Es una foto del terreno mirando alrededor: no dice a qué
+                 * precio se vendió ni quién lo compró, que es lo único que
+                 * esta lista blanca existe para retener. Y un plano donde los
+                 * vendidos no se pueden mirar hace pensar que hay algo que
+                 * esconder justo donde no lo hay.
+                 */
+                'foto360'     => $lote['foto360'],
+                'foto360Mini' => $lote['foto360Mini'],
+                /*
+                 * El contorno y los rótulos, como ángulos sobre la esfera. El
+                 * visor los traza como vectores en cada cuadro: nítidos a
+                 * cualquier zoom, y el rótulo queda exactamente donde y como
+                 * se fijó. Ver `MarcasDelLote`, que es la lista blanca de lo
+                 * que cada marca puede traer.
+                 */
+                'foto360Marcas' => $lote['foto360Marcas'],
             ];
         }
 
