@@ -731,6 +731,478 @@ final class ExpedientesHistoricos
                 ],
             ],
 
+            // ── Exp. 0033 — página 73 del cuaderno ───────────────────
+            //
+            // 🔴 EL PRIMERO CON UN LOTE IRREGULAR ADENTRO. El O-5 mide
+            // 250.0000 vr² y va al precio confirmado de L 250,000.00; el O-6
+            // mide 437.3700 vr² y es uno de los 49 sin precio conocido. Los
+            // dos juntos se vendieron en L 500,000.00, así que al O-6 le queda
+            // L 250,000.00 — el mismo precio que un lote de 250 vr², midiendo
+            // casi el doble. ⚠️ Es el único reparto defendible (el precio del
+            // O-5 está confirmado por decenas de expedientes) pero está
+            // PENDIENTE de que la contratante lo confirme.
+            //
+            // Y es también la primera REMESA de toda la cartera: la cuota de
+            // julio entró por remesa, la forma de pago que no existía en el
+            // sistema hasta esta carga.
+            //
+            // El recibo 00000320 dice «cuota julio» pero es de L 20,000.00
+            // —el doble de la cuota mensual—: cubre dos meses. Mismo caso que
+            // el exp. 0032, y el sistema lo reparte solo.
+            [
+                'expediente' => 33,
+                'fecha'      => '2026-06-15',
+                'cliente'    => [
+                    'nombre'   => 'DEVER ADONAY LÓPEZ',
+                    'dni'      => null,
+                    'telefono' => null,
+                ],
+                'lotes' => [
+                    ['bloque' => 'O', 'numero' => '5', 'valor' => '250000.00'],
+                    ['bloque' => 'O', 'numero' => '6', 'valor' => '250000.00'],
+                ],
+                'prima'         => '20000.00',
+                'plazo'         => 48,
+                'dia_pago'      => 15,
+                'forma_prima'   => 'deposito',
+                'ref_prima'     => 'DEPÓSITO — RECIBIÓ DIONEL PINTO',
+                'recibo_prima'  => 62,
+                'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 73. '
+                    .'El lote O-6 es irregular (437.3700 vr²) y su precio se '
+                    .'dedujo restando: PENDIENTE de confirmar con la contratante.',
+                'pagos' => [
+                    [
+                        'recibo'        => 320,
+                        'fecha'         => '2026-07-18',
+                        'tipo'          => 'cuota',
+                        'monto'         => '20000.00',
+                        'forma'         => 'remesa',
+                        'referencia'    => 'REMESA — DIONEL PINTO',
+                        'lote'          => null,
+                        'observaciones' => 'Recibo 00000320 del talonario. Cuaderno: cuota julio. '
+                            .'Recibió Dionel Pinto. Son L 20,000.00, el doble de la cuota '
+                            .'mensual: cubre dos meses.',
+                    ],
+                ],
+            ],
+
+            // ── Exp. 0034 — página 75 del cuaderno ───────────────────
+            //
+            // El más simple de la tanda: un lote, la prima, y nada más. El
+            // cuaderno escribió la fecha con letra —«16 de junio de 2026»—.
+            [
+                'expediente' => 34,
+                'fecha'      => '2026-06-16',
+                'cliente'    => [
+                    'nombre'   => 'ELSI ROXANA ARANDA LÓPEZ',
+                    'dni'      => null,
+                    'telefono' => null,
+                ],
+                'lotes' => [
+                    ['bloque' => 'E', 'numero' => '6', 'valor' => '250000.00'],
+                ],
+                'prima'         => '10000.00',
+                'plazo'         => 48,
+                'dia_pago'      => 16,
+                'forma_prima'   => 'efectivo',
+                'ref_prima'     => null,
+                'recibo_prima'  => 63,
+                'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 75.',
+                'pagos'         => [],
+            ],
+
+            // ── Exp. 0035 — página 77 del cuaderno ───────────────────
+            //
+            // Tres lotes seguidos del bloque D, los tres de 250 vr² al precio
+            // confirmado. La cuota de julio se pagó el 17 de JUNIO, un día
+            // después de firmar: un mes adelantada.
+            [
+                'expediente' => 35,
+                'fecha'      => '2026-06-16',
+                'cliente'    => [
+                    'nombre'   => 'ERICK HUMBERTO REYES ORELLANA',
+                    'dni'      => null,
+                    'telefono' => null,
+                ],
+                'lotes' => [
+                    ['bloque' => 'D', 'numero' => '11', 'valor' => '250000.00'],
+                    ['bloque' => 'D', 'numero' => '12', 'valor' => '250000.00'],
+                    ['bloque' => 'D', 'numero' => '13', 'valor' => '250000.00'],
+                ],
+                'prima'         => '30000.00',
+                'plazo'         => 48,
+                'dia_pago'      => 16,
+                'forma_prima'   => 'efectivo',
+                'ref_prima'     => null,
+                'recibo_prima'  => 64,
+                'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 77.',
+                'pagos'         => [
+                    [
+                        'recibo'        => 315,
+                        'fecha'         => '2026-06-17',
+                        'tipo'          => 'cuota',
+                        'monto'         => '15000.00',
+                        'forma'         => 'deposito',
+                        'referencia'    => 'DEPÓSITO — DIONEL PINTO',
+                        'lote'          => null,
+                        'observaciones' => 'Recibo 00000315 del talonario. Cuaderno: cuota julio. '
+                            .'Recibió Dionel Pinto. Pagada el día siguiente de firmar.',
+                    ],
+                ],
+            ],
+
+            // ── Exp. 0036 — página 79 del cuaderno ───────────────────
+            //
+            // ⚠️ Debajo del último renglón hay marcas tenues de un renglón
+            // BORRADO. No se carga: no se alcanza a leer ni monto ni recibo, y
+            // los saldos del cuaderno cierran sin él.
+            [
+                'expediente' => 36,
+                'fecha'      => '2026-06-16',
+                'cliente'    => [
+                    'nombre'   => 'LILIAN YESENIA MANCÍA ESTÉVEZ',
+                    'dni'      => '0412197900512',
+                    'telefono' => null,
+                ],
+                'lotes' => [
+                    ['bloque' => 'G', 'numero' => '15', 'valor' => '250000.00'],
+                    ['bloque' => 'G', 'numero' => '16', 'valor' => '250000.00'],
+                ],
+                'prima'         => '20000.00',
+                'plazo'         => 48,
+                'dia_pago'      => 16,
+                'forma_prima'   => 'deposito',
+                'ref_prima'     => 'DEPÓSITO — RECIBIÓ ADONAY PEÑA',
+                'recibo_prima'  => 65,
+                'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 79. '
+                    .'Debajo del último renglón hay marcas de un renglón borrado, '
+                    .'ilegible; los saldos cierran sin él.',
+                'pagos' => [
+                    [
+                        'recibo'        => 359,
+                        'fecha'         => '2026-07-31',
+                        'tipo'          => 'cuota',
+                        'monto'         => '10000.00',
+                        'forma'         => 'deposito',
+                        'referencia'    => 'DEPÓSITO — ADONAY E.',
+                        'lote'          => null,
+                        'observaciones' => 'Recibo 00000359 del talonario. Cuaderno: cuota julio. '
+                            .'Recibió Adonay E.',
+                    ],
+                ],
+            ],
+
+            // ── Exp. 0037 — página 81 del cuaderno ───────────────────
+            //
+            // ⚠️ EL NUMERO DEL RECIBO DEL 13-JUL NO SE LEE. En el escaneo se
+            // ven cuatro o cinco dígitos borrosos. Se cargó como 00000316
+            // porque es lo que la serie permite —el 00000315 es del 17-jun y el
+            // 00000320 del 18-jul—, pero está PENDIENTE de mirar el papel.
+            [
+                'expediente' => 37,
+                'fecha'      => '2026-06-16',
+                'cliente'    => [
+                    'nombre'   => 'DANIA ARELY TRIGUEROS MANCÍA',
+                    'dni'      => '0412199800185',
+                    'telefono' => null,
+                ],
+                'lotes' => [
+                    ['bloque' => 'G', 'numero' => '1', 'valor' => '250000.00'],
+                ],
+                'prima'         => '10000.00',
+                'plazo'         => 48,
+                'dia_pago'      => 16,
+                'forma_prima'   => 'deposito',
+                'ref_prima'     => 'DEPÓSITO — RECIBIÓ ADONAY PEÑA',
+                'recibo_prima'  => 66,
+                'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 81. '
+                    .'El número del recibo del 13-jul no se lee en el escaneo: '
+                    .'se cargó como 00000316, PENDIENTE de confirmar contra el papel.',
+                'pagos' => [
+                    [
+                        'recibo'        => 316,
+                        'fecha'         => '2026-07-13',
+                        'tipo'          => 'cuota',
+                        'monto'         => '5000.00',
+                        'forma'         => 'deposito',
+                        'referencia'    => 'DEPÓSITO — ADONAY ESPINOZA',
+                        'lote'          => null,
+                        'observaciones' => 'Cuaderno: cuota julio. Recibió Adonay Espinoza. '
+                            .'El número del talonario no se lee en el escaneo.',
+                    ],
+                    [
+                        'recibo'        => 358,
+                        'fecha'         => '2026-07-31',
+                        'tipo'          => 'cuota',
+                        'monto'         => '5000.00',
+                        'forma'         => 'deposito',
+                        'referencia'    => 'DEPÓSITO — ADONAY E.',
+                        'lote'          => null,
+                        'observaciones' => 'Recibo 00000358 del talonario. Cuaderno: cuota agosto. '
+                            .'Recibió Adonay E. Pagada adelantada.',
+                    ],
+                ],
+            ],
+
+            // ── Exp. 0038 — página 83 del cuaderno ───────────────────
+            //
+            // ⚠️ El recibo de prima salta del 0066 al 0068: el 0067 no
+            // aparece en ninguna página del cuaderno.
+            [
+                'expediente' => 38,
+                'fecha'      => '2026-06-16',
+                'cliente'    => [
+                    'nombre'   => 'KARELIA NICOL TRIGUEROS TORRES',
+                    'dni'      => '0412200600084',
+                    'telefono' => null,
+                ],
+                'lotes' => [
+                    ['bloque' => 'H', 'numero' => '5', 'valor' => '250000.00'],
+                ],
+                'prima'         => '10000.00',
+                'plazo'         => 48,
+                'dia_pago'      => 16,
+                'forma_prima'   => 'efectivo',
+                'ref_prima'     => null,
+                'recibo_prima'  => 68,
+                'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 83.',
+                'pagos'         => [],
+            ],
+
+            // ── Exp. 0039 — página 85 del cuaderno ───────────────────
+            //
+            // ⚠️ El recibo 00000314 es del 16-jul y el 00000315 del 17-JUN
+            // (exp. 0035): el talonario largo NO se usó en orden. Se cargan
+            // como están, que es la regla.
+            [
+                'expediente' => 39,
+                'fecha'      => '2026-06-17',
+                'cliente'    => [
+                    'nombre'   => 'SULMY KARIXA MANCÍA TORRES',
+                    'dni'      => '0412200100409',
+                    'telefono' => null,
+                ],
+                'lotes' => [
+                    ['bloque' => 'E', 'numero' => '4', 'valor' => '250000.00'],
+                ],
+                'prima'         => '10000.00',
+                'plazo'         => 48,
+                'dia_pago'      => 17,
+                'forma_prima'   => 'deposito',
+                'ref_prima'     => 'DEPÓSITO — RECIBIÓ DIONEL PINTO',
+                'recibo_prima'  => 69,
+                'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 85.',
+                'pagos'         => [
+                    [
+                        'recibo'        => 314,
+                        'fecha'         => '2026-07-16',
+                        'tipo'          => 'cuota',
+                        'monto'         => '5000.00',
+                        'forma'         => 'efectivo',
+                        'referencia'    => null,
+                        'lote'          => null,
+                        'observaciones' => 'Recibo 00000314 del talonario. Cuaderno: cuota mensual. '
+                            .'Recibió Dionel Pinto.',
+                    ],
+                ],
+            ],
+
+            // ── Exp. 0040 — página 87 del cuaderno ───────────────────
+            //
+            // 🔴 EL PRIMERO VENDIDO POR ALGUIEN QUE NO ES LA LOTIFICADORA:
+            // el cuaderno anota «Vendido por: Jony García». Los 19 anteriores
+            // no traen vendedor. Va a observaciones porque el sistema todavía
+            // no tiene dónde guardar quién vendió — y eso es una comisión que
+            // alguien va a querer cobrar.
+            //
+            // ⚠️ El recibo de prima salta del 0069 al 0071: falta el 0070.
+            [
+                'expediente' => 40,
+                'fecha'      => '2026-06-19',
+                'cliente'    => [
+                    'nombre'   => 'OBDULIA MARÍA GÓMEZ MORENO',
+                    'dni'      => '0405199200296',
+                    'telefono' => '9550-4277',
+                ],
+                'lotes' => [
+                    ['bloque' => 'F', 'numero' => '6', 'valor' => '250000.00'],
+                ],
+                'prima'         => '10000.00',
+                'plazo'         => 48,
+                'dia_pago'      => 19,
+                'forma_prima'   => 'efectivo',
+                'ref_prima'     => null,
+                'recibo_prima'  => 71,
+                'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 87. '
+                    .'Vendido por: Jony García.',
+                'pagos' => [
+                    [
+                        'recibo'        => 330,
+                        'fecha'         => '2026-07-22',
+                        'tipo'          => 'cuota',
+                        'monto'         => '5000.00',
+                        'forma'         => 'efectivo',
+                        'referencia'    => null,
+                        'lote'          => null,
+                        'observaciones' => 'Recibo 00000330 del talonario. Cuaderno: cuota julio. '
+                            .'Recibió Dionel P.',
+                    ],
+                ],
+            ],
+
+            // ── Exp. 0041 — página 89 del cuaderno ───────────────────
+            [
+                'expediente' => 41,
+                'fecha'      => '2026-06-19',
+                'cliente'    => [
+                    'nombre'   => 'ELKIN JAVIER TORRES ESTÉVEZ',
+                    'dni'      => '0412200400186',
+                    'telefono' => '9543-4227',
+                ],
+                'lotes' => [
+                    ['bloque' => 'O', 'numero' => '10', 'valor' => '250000.00'],
+                ],
+                'prima'         => '10000.00',
+                'plazo'         => 48,
+                'dia_pago'      => 19,
+                'forma_prima'   => 'efectivo',
+                'ref_prima'     => null,
+                'recibo_prima'  => 72,
+                'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 89.',
+                'pagos'         => [
+                    [
+                        'recibo'        => 360,
+                        'fecha'         => '2026-07-31',
+                        'tipo'          => 'cuota',
+                        'monto'         => '5000.00',
+                        'forma'         => 'deposito',
+                        'referencia'    => 'DEPÓSITO — ADONAY E.',
+                        'lote'          => null,
+                        'observaciones' => 'Recibo 00000360 del talonario. Cuaderno: cuota julio. '
+                            .'Recibió Adonay E.',
+                    ],
+                ],
+            ],
+
+            // ── Exp. 0042 — página 91 del cuaderno ───────────────────
+            //
+            // ⚠️ El recibo 00000023 es de ocho dígitos como los del talonario
+            // largo, pero de un número bajísimo para un pago del 10-jul. El
+            // exp. 0043 tiene el mismo caso (00000019). Se cargan tal cual.
+            [
+                'expediente' => 42,
+                'fecha'      => '2026-06-19',
+                'cliente'    => [
+                    'nombre'   => 'MAVIS YADANI GARCÍA SOLÍS',
+                    'dni'      => '0412198900344',
+                    'telefono' => '9441-8185',
+                ],
+                'lotes' => [
+                    ['bloque' => 'R', 'numero' => '16', 'valor' => '250000.00'],
+                ],
+                'prima'         => '10000.00',
+                'plazo'         => 48,
+                'dia_pago'      => 19,
+                'forma_prima'   => 'deposito',
+                'ref_prima'     => 'DEPÓSITO — RECIBIÓ DIONEL PINTO',
+                'recibo_prima'  => 73,
+                'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 91.',
+                'pagos'         => [
+                    [
+                        'recibo'        => 23,
+                        'fecha'         => '2026-07-10',
+                        'tipo'          => 'cuota',
+                        'monto'         => '5000.00',
+                        'forma'         => 'deposito',
+                        'referencia'    => 'DEPÓSITO — ADONAY ESPINOZA',
+                        'lote'          => null,
+                        'observaciones' => 'Recibo 00000023 del talonario. Cuaderno: cuota mes julio. '
+                            .'Recibió Adonay Espinoza.',
+                    ],
+                ],
+            ],
+
+            // ── Exp. 0043 — página 93 del cuaderno ───────────────────
+            //
+            // 🔴 LA FECHA DEL CUADERNO ES IMPOSIBLE. El renglón de la cuota
+            // dice «09/06/2026», DIEZ DÍAS ANTES de que se firmara el contrato
+            // (19/06/2026). Un pago no puede existir antes de la venta que
+            // paga, así que se cargó como 09/07/2026 —el 6 y el 7 se parecen
+            // en esa letra, y el concepto dice «cuota julio»—.
+            // ⚠️ PENDIENTE de confirmar contra el recibo 00000019.
+            [
+                'expediente' => 43,
+                'fecha'      => '2026-06-19',
+                'cliente'    => [
+                    'nombre'   => 'HÉCTOR EMILIO CRUZ MOLINA',
+                    'dni'      => '1604200000565',
+                    'telefono' => '8899-3983',
+                ],
+                'lotes' => [
+                    ['bloque' => 'N', 'numero' => '2', 'valor' => '250000.00'],
+                ],
+                'prima'         => '10000.00',
+                'plazo'         => 48,
+                'dia_pago'      => 19,
+                'forma_prima'   => 'deposito',
+                'ref_prima'     => 'DEPÓSITO — RECIBIÓ ADONAY PEÑA',
+                'recibo_prima'  => 74,
+                'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 93. '
+                    .'El cuaderno fecha la cuota el 09/06/2026, diez días antes del '
+                    .'contrato: se cargó como 09/07/2026, PENDIENTE de confirmar.',
+                'pagos' => [
+                    [
+                        'recibo'        => 19,
+                        'fecha'         => '2026-07-09',
+                        'tipo'          => 'cuota',
+                        'monto'         => '5000.00',
+                        'forma'         => 'transferencia',
+                        'referencia'    => 'TRANSFERENCIA — ADONAY E.',
+                        'lote'          => null,
+                        'observaciones' => 'Recibo 00000019 del talonario. Cuaderno: cuota julio, '
+                            .'fechada 09/06/2026 (imposible: anterior al contrato). '
+                            .'Recibió Adonay E.',
+                    ],
+                ],
+            ],
+
+            // ── Exp. 0044 — página 95 del cuaderno ───────────────────
+            //
+            // El último del PDF. Con este se cierra la cartera anterior al
+            // sistema: 24 expedientes, 0021 a 0044.
+            [
+                'expediente' => 44,
+                'fecha'      => '2026-06-20',
+                'cliente'    => [
+                    'nombre'   => 'MAYCOL EFRAÍN PERDOMO BRIZUELA',
+                    'dni'      => '0412199600064',
+                    'telefono' => '8994-5267',
+                ],
+                'lotes' => [
+                    ['bloque' => 'M', 'numero' => '5', 'valor' => '250000.00'],
+                ],
+                'prima'         => '10000.00',
+                'plazo'         => 48,
+                'dia_pago'      => 20,
+                'forma_prima'   => 'efectivo',
+                'ref_prima'     => null,
+                'recibo_prima'  => 75,
+                'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 95.',
+                'pagos'         => [
+                    [
+                        'recibo'        => 336,
+                        'fecha'         => '2026-07-23',
+                        'tipo'          => 'cuota',
+                        'monto'         => '5000.00',
+                        'forma'         => 'deposito',
+                        'referencia'    => 'DEPÓSITO — DIONEL PINTO',
+                        'lote'          => null,
+                        'observaciones' => 'Recibo 00000336 del talonario. Cuaderno: cuota julio. '
+                            .'Recibió Dionel Pinto.',
+                    ],
+                ],
+            ],
+
         ];
     }
 }
