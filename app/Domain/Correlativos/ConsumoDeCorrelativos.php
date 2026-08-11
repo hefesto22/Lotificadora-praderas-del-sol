@@ -93,6 +93,26 @@ final readonly class ConsumoDeCorrelativos
     }
 
     /**
+     * Consume el siguiente numero de comprobante de egreso.
+     *
+     * Serie PROPIA y GLOBAL. Propia por lo mismo que la devolucion: R12
+     * promete que en la serie de recibos no falta ninguno, y meter ahi
+     * documentos que no son cobros rompe esa promesa.
+     *
+     * GLOBAL aunque el gasto pertenezca a un proyecto, que es la parte que
+     * sorprende. El comprobante lo emite la lotificadora, no el desarrollo, y
+     * una serie por proyecto se rompe sola el dia que alguien corrija a que
+     * proyecto iba cargada una factura: el numero tendria que cambiar, y un
+     * numero de comprobante que cambia no sirve para nada.
+     *
+     * @throws CorrelativoInvalidoException
+     */
+    public function siguienteDeGasto(): int
+    {
+        return $this->consumir(TipoCorrelativo::Gasto, null);
+    }
+
+    /**
      * Arma el numero de contrato visible: `RPS-2026-0001`.
      *
      * El anio es el de la firma, no parte de la llave: el secuencial no

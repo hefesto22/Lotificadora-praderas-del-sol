@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Domain\Archivos\GuardadoDeArchivos;
 use App\Domain\Enums\TipoDeDocumento;
 use App\Traits\HasAuditFields;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -37,6 +38,35 @@ class Documento extends Model
      * El disco donde viven los papeles. Privado a propósito.
      */
     public const string DISCO = 'local';
+
+    /**
+     * El peso lo dice el DISCO, no el navegador (11-ago-2026).
+     *
+     * Desde que las imágenes se guardan convertidas a WebP, el tamaño que
+     * reportaba el archivo subido —el del original— dejó de ser cierto: sobra
+     * por seis. Se pregunta al disco después de guardar, y así vale también al
+     * editar y al importar, no solo en el formulario.
+     *
+     * Si el archivo no está, NO se toca lo que venga: `pesoEnDisco()` devuelve
+     * `null` y este hook se hace a un lado. Ver `GuardadoDeArchivos`.
+     */
+    #[Override]
+    protected static function booted(): void
+    {
+        static::saving(function (self $documento): void {
+            if (! $documento->isDirty('archivo')) {
+                return;
+            }
+
+            $peso = GuardadoDeArchivos::pesoEnDisco(self::DISCO, $documento->getAttribute('archivo'));
+
+            if ($peso === null) {
+                return;
+            }
+
+            $documento->setAttribute('bytes', $peso);
+        });
+    }
 
     /**
      * @return array<string, string>

@@ -6,6 +6,7 @@ namespace App\Filament\Pages;
 
 use App\Models\BrandingSetting;
 use App\Support\ImageOptimizer;
+use BackedEnum;
 use BezhanSalleh\FilamentShield\Support\Utils;
 use Filament\Forms\Components\ColorPicker;
 use Filament\Forms\Components\FileUpload;
@@ -13,6 +14,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Override;
 
@@ -32,6 +34,16 @@ class BrandingSettingsPage extends Page
 {
     #[Override]
     protected string $view = 'filament.pages.branding-settings';
+
+    /**
+     * Sin ícono, Filament dibuja una bolita gris.
+     *
+     * Es el default para las páginas sueltas, y en un menú donde los otros
+     * nueve ítems llevan su dibujo, el único con bolita se lee como algo a
+     * medio terminar. Un engranaje cuesta una línea.
+     */
+    #[Override]
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCog6Tooth;
 
     #[Override]
     public function getTitle(): string

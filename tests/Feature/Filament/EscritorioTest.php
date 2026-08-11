@@ -11,6 +11,7 @@ use App\Filament\Widgets\CorteDeCajaDeHoy;
 use App\Models\Bloque;
 use App\Models\Cliente;
 use App\Models\Cuota;
+use App\Models\Gasto;
 use App\Models\Lote;
 use App\Models\Proyecto;
 use App\Support\Roles;
@@ -138,5 +139,54 @@ describe('Corte de caja de hoy', function (): void {
             ->assertDontSee('L. 75,000.00');
 
         expect($cobradoPorOtro->getAttribute('created_by'))->not->toBeNull();
+    });
+
+    /*
+    | ═══ LO QUE SALIO TAMBIEN CUENTA (11-ago-2026) ═══
+    |
+    | Antes del modulo de gastos el widget sumaba solo ingresos, y la frase
+    | «es lo que tiene que estar en la caja» era falsa cualquier dia que se
+    | pagara algo en efectivo. Se cobran L 75,000.00 —prima mas cuota— y salen
+    | L 12,000.00 de planilla: en la caja tienen que quedar L 63,000.00.
+    */
+    test('un gasto en efectivo baja lo que tiene que estar en la caja', function (): void {
+        ($this->cobrar)('25000.00');
+
+        Gasto::factory()->de('12000.00')->create();
+
+        Livewire::test(CorteDeCajaDeHoy::class)
+            ->assertSee('Salió de la caja hoy')
+            ->assertSee('L. 12,000.00')
+            ->assertSee('en la caja tienen que quedar L. 63,000.00');
+    });
+
+    /*
+    | Un gasto por transferencia no toca el efectivo: ese dinero nunca estuvo
+    | en la gaveta. Si lo restara, quien cuenta los billetes encontraria de mas
+    | y buscaria un error que no existe.
+    */
+    test('un gasto por transferencia no toca el efectivo de la caja', function (): void {
+        ($this->cobrar)('25000.00');
+
+        Gasto::factory()->porTransferencia()->de('12000.00')->create();
+
+        Livewire::test(CorteDeCajaDeHoy::class)
+            ->assertSee('Es lo que tiene que estar en la caja al cerrar')
+            ->assertDontSee('Salió de la caja hoy');
+    });
+
+    /*
+    | El receptor no registra gastos ni ve la pestaña, y su cuadro tampoco los
+    | resta: el numero que el ve es lo que cobro el, no la caja de la
+    | administracion.
+    */
+    test('al receptor no se le restan los gastos de la administración', function (): void {
+        Gasto::factory()->de('12000.00')->create();
+
+        $this->actingAs(crearUsuarioConRol(Roles::RECEPTOR));
+
+        Livewire::test(CorteDeCajaDeHoy::class)
+            ->assertDontSee('Salió de la caja hoy')
+            ->assertDontSee('L. 12,000.00');
     });
 });

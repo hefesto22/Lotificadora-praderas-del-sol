@@ -14,6 +14,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Estado de cuenta {{ $cuenta->venta->getAttribute('numero_contrato') }}</title>
+    @include('comun.fuente')
     <style>
         @page { size: letter; margin: 12mm; }
         * { box-sizing: border-box; }
@@ -21,7 +22,7 @@
         body {
             margin: 0; padding: 1.5rem 1rem;
             background: #f4f4f5; color: #18181b;
-            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+            font-family: var(--olympo-fuente);
             font-size: 13px; line-height: 1.5;
         }
 

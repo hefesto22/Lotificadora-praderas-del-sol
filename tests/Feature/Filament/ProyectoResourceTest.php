@@ -137,3 +137,62 @@ describe('ProyectoResource — permisos (§9.E.1)', function (): void {
         $this->get(ProyectoResource::getUrl('index'))->assertForbidden();
     });
 });
+
+/*
+| ═══ MEDIDAS DEL PLANO ═══
+|
+| Dos campos que se ven parecidos y no lo son: el toggle es presentacion y
+| el numero de abajo decide cuantas varas² tiene cada lote —o sea, cuanto
+| cuesta—. Los dos tienen que guardarse, y el rango tiene que frenar en el
+| formulario y no recien contra el CHECK de la base.
+*/
+describe('ProyectoResource — medidas del plano', function (): void {
+    test('el proyecto guarda en que unidad se lee su plano', function (): void {
+        actingAsAdmin();
+        $proyecto = Proyecto::factory()->create(['codigo' => 'REB']);
+
+        Livewire::test(EditProyecto::class, ['record' => $proyecto->getKey()])
+            ->fillForm([
+                'medidas_en_metros' => true,
+                'vara_en_metros'    => '0.8467',
+            ])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $proyecto->refresh();
+
+        expect($proyecto->getAttribute('medidas_en_metros'))->toBeTrue()
+            ->and($proyecto->varaEnMetros())->toBe('0.846700');
+    });
+
+    /*
+    | Vacio NO es cero ni 0.8359 copiado en la fila: es «la del sistema».
+    | La diferencia se ve el dia que cambie el default de la config.
+    */
+    test('vacio significa la vara del sistema, no cero', function (): void {
+        actingAsAdmin();
+        config()->set('lotificadora.area.vara_en_metros', '0.8359');
+
+        $proyecto = Proyecto::factory()->create(['codigo' => 'REB']);
+
+        Livewire::test(EditProyecto::class, ['record' => $proyecto->getKey()])
+            ->fillForm(['vara_en_metros' => null])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $proyecto->refresh();
+
+        expect($proyecto->getAttribute('vara_en_metros'))->toBeNull()
+            ->and($proyecto->varaEnMetros())->toBe('0.8359');
+    });
+
+    test('el formulario frena una vara que no puede ser una vara', function (): void {
+        actingAsAdmin();
+        $proyecto = Proyecto::factory()->create(['codigo' => 'REB']);
+
+        Livewire::test(EditProyecto::class, ['record' => $proyecto->getKey()])
+            ->fillForm(['vara_en_metros' => '83.59'])
+            ->call('save')
+            ->assertHasFormErrors(['vara_en_metros']);
+    });
+});

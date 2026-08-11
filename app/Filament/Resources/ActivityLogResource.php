@@ -39,7 +39,24 @@ class ActivityLogResource extends Resource
     protected static ?string $pluralModelLabel = 'Registros de Actividad';
 
     #[Override]
-    protected static ?int $navigationSort = 99;
+    protected static ?int $navigationSort = 3;
+
+    /**
+     * El rótulo del menú se escribe a mano, y no es un capricho.
+     *
+     * Sin este método Filament arma la etiqueta con `Str::title()` sobre el
+     * plural, y `Str::title()` es inglés: capitaliza TODAS las palabras. En
+     * el menú salía «Registros De Actividad», con esa `De` que en español no
+     * existe y que delata que el rótulo lo escribió una máquina.
+     *
+     * Cualquier recurso cuyo nombre lleve «de», «del» o «y» necesita lo
+     * mismo. Es el motivo por el que `Prospectos` también lo declara.
+     */
+    #[Override]
+    public static function getNavigationLabel(): string
+    {
+        return 'Registros de actividad';
+    }
 
     #[Override]
     public static function getNavigationGroup(): ?string

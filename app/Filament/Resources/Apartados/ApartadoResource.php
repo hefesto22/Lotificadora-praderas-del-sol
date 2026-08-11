@@ -68,7 +68,7 @@ class ApartadoResource extends Resource
     protected static ?string $pluralModelLabel = 'Apartados';
 
     #[Override]
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 4;
 
     #[Override]
     public static function getNavigationGroup(): ?string

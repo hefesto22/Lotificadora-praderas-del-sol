@@ -27,6 +27,12 @@ namespace App\Domain\Enums;
  *   documentos que NO son cobros la rompe. Un comprobante de salida no es
  *   un recibo — dice lo contrario.
  *
+ * - GASTO es GLOBAL y nace el 11-ago-2026 con el modulo de gastos del
+ *   proyecto. Va en serie propia por lo mismo que la devolucion, y es
+ *   GLOBAL aunque el gasto pertenezca a un proyecto: el comprobante lo emite
+ *   la lotificadora, y una serie por proyecto se rompe el dia que alguien
+ *   corrige a que desarrollo iba cargado un pago.
+ *
  * No hay serie de CAI: la contratante no usa talonario autorizado por el
  * SAR para estos cobros (R10).
  *
@@ -41,6 +47,7 @@ enum TipoCorrelativo: string
     case Contrato = 'contrato';
     case ReciboInterno = 'recibo_interno';
     case Devolucion = 'devolucion';
+    case Gasto = 'gasto';
 
     /**
      * @return list<string>
@@ -67,7 +74,7 @@ enum TipoCorrelativo: string
      */
     public static function valoresGlobales(): array
     {
-        return [self::ReciboInterno->value, self::Devolucion->value];
+        return [self::ReciboInterno->value, self::Devolucion->value, self::Gasto->value];
     }
 
     public function etiqueta(): string
@@ -76,6 +83,7 @@ enum TipoCorrelativo: string
             self::Contrato      => 'Contrato',
             self::ReciboInterno => 'Recibo interno',
             self::Devolucion    => 'Comprobante de devolución',
+            self::Gasto         => 'Comprobante de egreso',
         };
     }
 

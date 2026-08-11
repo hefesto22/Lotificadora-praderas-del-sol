@@ -53,7 +53,8 @@ final readonly class PlanoDelProyecto
      *     esquematico: bool,
      *     sinDibujar: int,
      *     resumen: array<string, int>,
-     *     lotes: list<array{id: int, codigo: string, numero: string, bloque: string, rotulo: string, estado: string, etiqueta: string, color: string, puntos: string, centro: array{float, float}, cliente: string|null, areaVaras: string, valor: string, valorFormateado: string, desalineado: bool, foto360: string|null, foto360Mini: string|null, foto360Marcas: list<array<string, mixed>>}>,
+     *     medidas: array{enMetros: bool, varaEnMetros: float, factor: float, unidad: string, pie: string},
+     *     lotes: list<array{id: int, codigo: string, numero: string, bloque: string, rotulo: string, estado: string, etiqueta: string, color: string, puntos: string, centro: array{float, float}, cliente: string|null, areaVaras: string, areaMetros: string, valor: string, valorFormateado: string, desalineado: bool, foto360: string|null, foto360Mini: string|null, foto360Marcas: list<array<string, mixed>>}>,
      *     calles: list<array{nombre: string|null, tipo: string, etiqueta: string, ancho: float, esArea: bool, puntos: string}>
      * }
      */
@@ -117,18 +118,22 @@ final readonly class PlanoDelProyecto
                 : null;
 
             $lotesDibujados[] = [
-                'id'              => (int) $lote->getKey(),
-                'codigo'          => (string) $lote->getAttribute('codigo'),
-                'numero'          => (string) $lote->getAttribute('numero'),
-                'bloque'          => $nombreBloque,
-                'rotulo'          => Lote::componerRotulo($nombreBloque, (string) $lote->getAttribute('numero')),
-                'estado'          => $estado->value,
-                'etiqueta'        => $estado->etiqueta(),
-                'color'           => $estado->colorHex(),
-                'puntos'          => $this->comoPuntosSvg($vertices),
-                'centro'          => $this->centroDe($vertices),
-                'cliente'         => $cliente,
-                'areaVaras'       => (string) $lote->getAttribute('area_varas'),
+                'id'         => (int) $lote->getKey(),
+                'codigo'     => (string) $lote->getAttribute('codigo'),
+                'numero'     => (string) $lote->getAttribute('numero'),
+                'bloque'     => $nombreBloque,
+                'rotulo'     => Lote::componerRotulo($nombreBloque, (string) $lote->getAttribute('numero')),
+                'estado'     => $estado->value,
+                'etiqueta'   => $estado->etiqueta(),
+                'color'      => $estado->colorHex(),
+                'puntos'     => $this->comoPuntosSvg($vertices),
+                'centro'     => $this->centroDe($vertices),
+                'cliente'    => $cliente,
+                'areaVaras'  => (string) $lote->getAttribute('area_varas'),
+                'areaMetros' => $this->enMetrosCuadrados(
+                    (string) $lote->getAttribute('area_varas'),
+                    $proyecto->varaEnMetros(),
+                ),
                 'valor'           => (string) $lote->getAttribute('valor'),
                 'valorFormateado' => $lote->montoValor()->formateado(),
                 'desalineado'     => $lote->poligonoDesalineado(),
@@ -186,11 +191,81 @@ final readonly class PlanoDelProyecto
             'calco'        => $this->calcoDe($proyecto),
             'hayGeometria' => $puntosParaEncuadre !== [],
             'esquematico'  => (bool) $proyecto->getAttribute('plano_esquematico'),
+            'medidas'      => $this->medidasDe($proyecto),
             'sinDibujar'   => $sinDibujar,
             'resumen'      => $this->resumen($lotes),
             'lotes'        => $lotesDibujados,
             'calles'       => $callesDibujadas,
         ];
+    }
+
+    /**
+     * En qué unidad se le enseñan las medidas de este proyecto a la gente.
+     *
+     * ═══ POR QUÉ ESTO EXISTE ═══
+     *
+     * El plano del topógrafo viene acotado en METROS: «25.05m», «17.98m».
+     * El negocio compra, vende y cobra en VARAS². Un cliente parado frente
+     * al plano impreso, con el teléfono en la mano, tiene que ver los
+     * mismos números en los dos lados o la conversación se va a las manos.
+     *
+     * Se resuelve mostrando lo que dice el plano y guardando lo que se
+     * cobra: las cotas de los lados salen en la unidad que elija el
+     * proyecto, y el área sigue siendo en varas² —con los m² al lado,
+     * igual que los rotula el topógrafo (A=320.19m2 / 459.22v2)—.
+     *
+     * `factor` viaja calculado para que el navegador no tenga que saber si
+     * hay que convertir o no: multiplicar por 1 no convierte nada.
+     *
+     * @return array{enMetros: bool, varaEnMetros: float, factor: float, unidad: string, pie: string}
+     */
+    private function medidasDe(Proyecto $proyecto): array
+    {
+        $enMetros = (bool) $proyecto->getAttribute('medidas_en_metros');
+        $vara = (float) $proyecto->varaEnMetros();
+
+        return [
+            'enMetros'     => $enMetros,
+            'varaEnMetros' => $vara,
+            'factor'       => $enMetros ? $vara : 1.0,
+            'unidad'       => $enMetros ? 'm' : 'V',
+            'pie'          => $enMetros
+                ? 'Medidas en metros, tomadas del plano del topógrafo.'
+                : 'Medidas en varas, tomadas del plano del topógrafo.',
+        ];
+    }
+
+    /**
+     * El área de un lote en m², para mostrarla al lado de las varas².
+     *
+     * La cuenta pasa por bcmath y no por float aunque sea presentación:
+     * son cuatro decimales por un factor de seis, y el número termina
+     * impreso al lado de uno que sí es dinero. Un centavo de metro de
+     * diferencia entre el sistema y el plano abre una discusión que no
+     * tiene por qué existir.
+     *
+     * El `(float)` del final es solo para separar los miles: a esa altura
+     * el número ya está redondeado a dos decimales y no vuelve a operarse.
+     *
+     * Los dos `is_numeric` no son paranoia: `bcmul` exige numeric-string y
+     * los dos valores llegan como `string` —uno de una columna decimal, el
+     * otro de la config o de la ficha del proyecto—. La guarda es lo que
+     * convierte «podría no ser un número» en «es un número», acá y para
+     * PHPStan.
+     */
+    private function enMetrosCuadrados(string $areaVaras, string $varaEnMetros): string
+    {
+        if (! is_numeric($areaVaras) || ! is_numeric($varaEnMetros)) {
+            return '0.00';
+        }
+
+        $enMetros = bcmul(bcmul($areaVaras, $varaEnMetros, 12), $varaEnMetros, 12);
+
+        // bcmath TRUNCA, no redondea: el medio centavo se suma a mano
+        // antes de cortar, que es como redondea el resto del sistema.
+        $redondeado = bcadd($enMetros, '0.005', 2);
+
+        return number_format((float) $redondeado, 2, '.', ',');
     }
 
     /**

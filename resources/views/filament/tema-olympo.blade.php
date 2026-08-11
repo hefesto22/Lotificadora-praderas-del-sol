@@ -231,45 +231,69 @@
        desparejas —que es lo honesto: hay cajas con más adentro que otras— y
        la página se acorta sola.
 
-       Va sobre los dos candidatos porque según el caso el hijo de la grilla
-       es la sección o su envoltorio; sobre el que no lo sea, la regla no
-       hace absolutamente nada.
+       ═══ ⚠️ 🔴 LA CORRECCION DEL 11-AGO-2026 ═══
+
+       Hasta hoy esta regla decía `.fi-sc-component, .fi-section`, con el
+       argumento de que «según el caso el hijo de la grilla es la sección o
+       su envoltorio, y sobre el que no lo sea la regla no hace nada».
+
+       La segunda mitad es FALSA, y es exactamente lo que Mauricio vio en el
+       expediente de una venta: «acá antes el diseño estaba bien bonito, qué
+       pasó».
+
+       La cadena real, leída del DOM con el panel a 1216:
+
+           .fi-grid                                   1216px
+           └ .fi-grid-col          ← ESTE es el item de la grilla
+             └ .fi-sc-component                       (block)
+               └ .fi-sc-section    ← display: flex, flex-direction: COLUMN
+                 └ section.fi-section
+
+       En un flex en COLUMNA el eje transversal es el HORIZONTAL. Así que
+       `align-self: start` sobre la sección no le tocaba la altura: le
+       apagaba el `stretch` del ANCHO, y cada tarjeta se encogía al largo de
+       su propio texto. Medido en dos pantallas:
+
+           Ventas    · «Quiénes compran»    221px  en vez de   596
+           Ventas    · «Lotes»              639px  en vez de  1216
+           Proyectos · «Identificación»     380px  en vez de   596
+           Proyectos · «Estado»             628px  en vez de  1216
+
+       Con la regla sobre `.fi-grid-col` los cuatro vuelven a su ancho y
+       NINGUNA altura cambia —medidas idénticas antes y después—: en una
+       grilla `align-self` sí es el eje vertical, que es lo único que este
+       bloque quiso decir siempre.
+
+       La moraleja, por si vuelve a tentar: `align-self` no significa lo
+       mismo en un grid que en un flex en columna. Antes de repartir una
+       regla «sobre los dos candidatos», hay que mirar qué es cada padre.
     */
-    .fi-sc-component,
-    .fi-section { align-self: start; }
+    .fi-grid > .fi-grid-col { align-self: start; }
 
     /*
        ── 11. La caja que tiene que ocupar TODO el ancho ────────────────
 
-       ═══ EL DIAGNOSTICO, MEDIDO EN EL NAVEGADOR ═══
+       `columnSpanFull()` en el infolist del cliente ya deja todo el
+       andamiaje a 1216. Esta clase —que el componente pone a mano con
+       `extraAttributes`— solo lo dice también en el CSS, y alcanza
+       EXACTAMENTE a las cajas que la piden y a ninguna otra.
 
-       Se perdieron cinco intentos suponiendo. La cadena real de la ficha
-       del cliente, leída del DOM el 10-ago-2026, es esta:
+       ═══ ⚠️ ACA VIVIA UN PARCHE QUE TAPABA EL BUG DEL §10 ═══
 
-           .fi-grid            (grilla de 2 columnas)      1216px
-           └ .fi-grid-col      --col-span-default: 1/-1    1216px  ✅
-             └ .fi-sc-component                            1216px  ✅
-               └ .fi-sc-section    ← display: FLEX         1216px  ✅
-                 └ section.fi-section                       688px  ❌
+       Debajo había un `flex: 1 1 100%; width: 100%` sobre la sección de
+       adentro, con este diagnóstico del 10-ago: «el `<section>` mide 688 de
+       1216 porque su padre es un flex y un item de flex sin `flex-grow`
+       mide lo que mide su contenido».
 
-       O sea que `columnSpanFull()` SÍ funcionaba: todo el andamiaje ya
-       estaba a 1216. El que se quedaba corto era el `<section>` de más
-       adentro, porque su padre es un **flex** y un item de flex sin
-       `flex-grow` mide lo que mide su contenido — 688px con cuatro
-       columnas de datos cortos.
+       La primera mitad era cierta —el padre es un flex en columna— y la
+       segunda confundía la consecuencia con la causa: ese item no tenía que
+       CRECER, tenía que ESTIRARSE, y lo único que le apagaba el estiramiento
+       era el `align-self: start` del §10. Arreglado el §10, el parche sobra:
+       medido el 11-ago, la sección da 1216 con él y sin él.
 
-       Por eso el arreglo NO va sobre el contenedor sino sobre la sección
-       de adentro. Medido: 688 → 1216, exacto al contenedor.
-
-       La clase la pone a mano el componente con `extraAttributes`, así que
-       esto alcanza EXACTAMENTE a las cajas que la piden y a ninguna otra.
+       Se borra. Un parche que ya no tapa nada solo hace creer que hace algo.
     */
     .olympo-ancho-total { grid-column: 1 / -1; }
-
-    .olympo-ancho-total > .fi-section {
-        flex: 1 1 100%;
-        width: 100%;
-    }
 
     /*
        ── 12. El control segmentado del modal de cobro ──────────────────
@@ -383,6 +407,68 @@
     .dark .olympo-modo input:checked + .fi-btn {
         background: rgb(46 48 56);
         color: rgb(244 244 245);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 0 0 1px rgba(255, 255, 255, .06);
+    }
+
+    /*
+       ── 13. La barra de la izquierda ──────────────────────────────────
+
+       Lo pidió Mauricio el 11-ago-2026: «mejoremos el navbar, que sea más
+       profesional».
+
+       ═══ EL PROBLEMA: TODO ERA LA MISMA HOJA ═══
+
+       Medido antes de tocar nada: `.fi-sidebar` tenía `background:
+       transparent` y CERO borde, así que el menú y el contenido compartían
+       exactamente el mismo `rgb(247 248 250)` del `<body>`. No había línea,
+       no había tono, no había nada: el ojo tenía que deducir dónde
+       terminaba la navegación por la posición de las palabras.
+
+       Un riel apenas más apagado lo contesta sin decir una palabra. Es lo
+       que hacen Linear, Stripe y Vercel, y es más viejo que las tres: el
+       margen de una libreta.
+
+       ═══ EL ACTIVO ES UNA PASTILLA BLANCA, IGUAL QUE EL §12 ═══
+
+       Sobre el riel gris, el activo se marca **al revés**: la pastilla es
+       la que va en blanco, con la misma sombra de un pixel que el control
+       segmentado del modal de cobro. Dos controles distintos del sistema
+       diciendo «esto es lo que está elegido» con el mismo gesto.
+
+       El default de Filament era un gris casi idéntico al del riel nuevo
+       —`oklch(0.967)` sobre `rgb(241 243 246)`—, o sea que sin este cambio
+       el ítem activo se habría vuelto invisible.
+
+       ⚠️ El color del texto y del ícono NO se tocan: el activo sigue en el
+       primario de la lotificadora (Ley L0). Blanco + ámbar, o blanco + azul
+       el día que otra lotificadora elija el suyo.
+
+       ⚠️ La clase del activo es `.fi-active` sobre el `<li>`, NO
+       `.fi-sidebar-item-active`. Leído del DOM; el nombre viejo no existe
+       en Filament 5.
+    */
+    .fi-sidebar {
+        background-color: rgb(241 243 246);
+        border-right: 1px solid rgb(228 230 235);
+    }
+
+    .fi-sidebar-item .fi-sidebar-item-btn:hover { background-color: rgba(255, 255, 255, .65); }
+
+    .fi-sidebar-item.fi-active .fi-sidebar-item-btn {
+        background-color: rgb(255 255 255);
+        box-shadow: 0 1px 2px rgba(9, 9, 11, .10), 0 0 0 1px rgba(9, 9, 11, .04);
+    }
+
+    /* En oscuro el riel va para el otro lado: más hundido que el contenido. */
+    .dark .fi-sidebar {
+        background-color: rgb(13 14 18);
+        border-right-color: rgba(255, 255, 255, .08);
+    }
+
+    .dark .fi-sidebar-item .fi-sidebar-item-btn:hover { background-color: rgba(255, 255, 255, .04); }
+
+    .dark .fi-sidebar-item.fi-active .fi-sidebar-item-btn {
+        background-color: rgb(46 48 56);
         box-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 0 0 1px rgba(255, 255, 255, .06);
     }
 </style>

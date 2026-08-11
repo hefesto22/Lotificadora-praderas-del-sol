@@ -140,6 +140,13 @@ function sembrarPermisosDeShield(): void
         'ViewAny:Prospecto',
         'View:Prospecto',
         'Update:Prospecto',
+        // Los gastos del proyecto. Fuera de RECURSOS a proposito: ese cruce se
+        // le reparte tambien al receptor, y el no ve los gastos.
+        'ViewAny:Gasto',
+        'View:Gasto',
+        'Create:Gasto',
+        'Update:Gasto',
+        'Delete:Gasto',
     ] as $permiso) {
         Permission::query()->firstOrCreate(['name' => $permiso], ['guard_name' => 'web']);
     }

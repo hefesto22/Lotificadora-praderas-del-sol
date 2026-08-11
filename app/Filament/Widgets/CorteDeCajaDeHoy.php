@@ -6,6 +6,8 @@ namespace App\Filament\Widgets;
 
 use App\Domain\Enums\FormaDePago;
 use App\Domain\ValueObjects\Monto;
+use App\Models\Devolucion;
+use App\Models\Gasto;
 use App\Models\Recibo;
 use App\Models\User;
 use App\Support\Roles;
@@ -33,6 +35,17 @@ use Override;
  *
  * ⚠️ Los recibos ANULADOS no cuentan. Su número sigue en la serie, pero su
  * dinero volvió a deberse y no está en la caja.
+ *
+ * ═══ LO QUE SALIO TAMBIEN CUENTA (11-ago-2026) ═══
+ *
+ * Hasta hoy el widget sumaba solo ingresos, y el número que decía «es lo que
+ * tiene que estar en la caja» era falso cualquier día que se pagara algo en
+ * efectivo. Ahora se restan los dos egresos que existen: los **gastos** del
+ * proyecto y las **devoluciones de seña**, que estaba anotado como pendiente
+ * desde el 10-ago.
+ *
+ * Solo se le muestran a quien ve el arqueo completo. Un receptor ve lo que
+ * cobró él, y de la caja de la administración no registra ni decide nada.
  */
 class CorteDeCajaDeHoy extends StatsOverviewWidget
 {
@@ -68,6 +81,23 @@ class CorteDeCajaDeHoy extends StatsOverviewWidget
 
         $banco = $total->restar($efectivo);
 
+        /*
+         * La suma viene ARMADA desde acá y no adentro del método: `selectRaw()`
+         * está tipado `literal-string`, así que una expresión con una variable
+         * interpolada es un error de PHPStan —y la regla no es capricho: ese
+         * parámetro va crudo al SQL—. El alias `total` es lo que vuelve
+         * intercambiables a las dos tablas.
+         */
+        $gastos = $this->egresoEnEfectivo(
+            Gasto::query()->reorder()->selectRaw('COALESCE(SUM(monto), 0) AS total'),
+        );
+
+        $devoluciones = $this->egresoEnEfectivo(
+            Devolucion::query()->reorder()->selectRaw('COALESCE(SUM(monto_devuelto), 0) AS total'),
+        );
+
+        $egresos = $gastos->sumar($devoluciones);
+
         return [
             Stat::make($this->rotuloDelTotal(), $total->formateado())
                 ->description($this->quienesCobraron())
@@ -75,7 +105,7 @@ class CorteDeCajaDeHoy extends StatsOverviewWidget
                 ->color($total->esCero() ? 'gray' : 'success'),
 
             Stat::make('En efectivo', $efectivo->formateado())
-                ->description('Es lo que tiene que estar en la caja al cerrar')
+                ->description($this->loQueQuedaEnLaCaja($efectivo, $egresos))
                 ->descriptionIcon('heroicon-m-banknotes')
                 ->color($efectivo->esCero() ? 'gray' : 'success'),
 
@@ -83,6 +113,19 @@ class CorteDeCajaDeHoy extends StatsOverviewWidget
                 ->description($this->desglosePorForma($porForma))
                 ->descriptionIcon('heroicon-m-building-library')
                 ->color($banco->esCero() ? 'gray' : 'info'),
+
+            /*
+             * El cuarto cuadro aparece solo cuando hay algo que contar. Un
+             * «Salió de la caja: L 0.00» todos los días entrena al ojo a
+             * saltarse el renglón, que es justo el que hay que mirar el día
+             * que dice otra cosa.
+             */
+            ...($egresos->esCero() ? [] : [
+                Stat::make('Salió de la caja hoy', $egresos->formateado())
+                    ->description($this->desgloseDelEgreso($gastos, $devoluciones))
+                    ->descriptionIcon('heroicon-m-arrow-up-tray')
+                    ->color('danger'),
+            ]),
         ];
     }
 
@@ -105,6 +148,88 @@ class CorteDeCajaDeHoy extends StatsOverviewWidget
         }
 
         return $porForma;
+    }
+
+    /**
+     * Lo que sale en efectivo hoy, de una tabla de egresos.
+     *
+     * ⚠️ La suma la hace Postgres —el `selectRaw` lo pone el llamador— y entra
+     * a `Monto` como string. `->sum()` del query builder castea a float y el
+     * §8.3.1 lo prohíbe en el camino del dinero.
+     *
+     * ⚠️ Nunca se filtra por `created_by`: un receptor no ve este número —lo
+     * corta `soloLoMio()` antes de pedirlo— y la administradora tiene que ver
+     * la caja entera, no la parte que registró ella.
+     *
+     * @param Builder<Gasto>|Builder<Devolucion> $consulta
+     */
+    private function egresoEnEfectivo(Builder $consulta): Monto
+    {
+        if ($this->soloLoMio()) {
+            return Monto::cero();
+        }
+
+        /*
+         * `value()` y no `pluck()->first()`: traer una colección de un
+         * elemento para quedarse con el primero es una consulta que ya sabía
+         * pedir una sola fila. Larastan lo marca
+         * (`noUnnecessaryCollectionCall`) y tiene razón.
+         *
+         * El `select` ya viene puesto por el llamador, así que `value()` NO lo
+         * pisa: `onceWithColumns` solo reemplaza las columnas cuando no hay
+         * ninguna.
+         */
+        $total = $consulta
+            ->whereDate('fecha', today())
+            ->where('forma_pago', FormaDePago::Efectivo->value)
+            ->value('total');
+
+        return new Monto(is_string($total) || is_int($total) ? $total : '0');
+    }
+
+    /**
+     * La frase que hace verdadero el número de arriba.
+     *
+     * Sin egresos, «en efectivo» ES lo que tiene que estar en la caja. Con
+     * egresos ya no, y decirlo igual sería mandar a alguien a cuadrar contra
+     * un número que nadie va a encontrar.
+     */
+    private function loQueQuedaEnLaCaja(Monto $efectivo, Monto $egresos): string
+    {
+        if ($egresos->esCero()) {
+            return 'Es lo que tiene que estar en la caja al cerrar';
+        }
+
+        // Puede pasar, y no es un error: se paga con el efectivo que quedó de
+        // ayer. `Monto::restar()` no admite negativos, así que se pregunta
+        // antes en vez de atrapar la excepción.
+        if ($egresos->mayorQue($efectivo)) {
+            return sprintf(
+                'Salieron %s, más de lo que entró: la diferencia sale del efectivo con que arrancó el día',
+                $egresos->formateado(),
+            );
+        }
+
+        return sprintf(
+            'Menos %s que salieron: en la caja tienen que quedar %s',
+            $egresos->formateado(),
+            $efectivo->restar($egresos)->formateado(),
+        );
+    }
+
+    private function desgloseDelEgreso(Monto $gastos, Monto $devoluciones): string
+    {
+        $partes = [];
+
+        if (! $gastos->esCero()) {
+            $partes[] = 'Gastos '.$gastos->formateado();
+        }
+
+        if (! $devoluciones->esCero()) {
+            $partes[] = 'Devoluciones de seña '.$devoluciones->formateado();
+        }
+
+        return implode(' · ', $partes);
     }
 
     private function quienesCobraron(): string

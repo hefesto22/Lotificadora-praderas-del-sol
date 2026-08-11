@@ -10,6 +10,7 @@ use App\Filament\Resources\Proyectos\Pages\ListProyectos;
 use App\Filament\Resources\Proyectos\Pages\VerPlano;
 use App\Filament\Resources\Proyectos\Pages\ViewProyecto;
 use App\Filament\Resources\Proyectos\RelationManagers\BloquesRelationManager;
+use App\Filament\Resources\Proyectos\RelationManagers\GastosRelationManager;
 use App\Filament\Resources\Proyectos\RelationManagers\LotesRelationManager;
 use App\Filament\Resources\Proyectos\RelationManagers\PlanesDePagoRelationManager;
 use App\Filament\Resources\Proyectos\Schemas\ProyectoForm;
@@ -48,7 +49,7 @@ class ProyectoResource extends Resource
     protected static ?string $pluralModelLabel = 'Proyectos';
 
     #[Override]
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 6;
 
     /**
      * §10.5: navegación explícita. Str::headline produce cosas como
@@ -114,6 +115,13 @@ class ProyectoResource extends Resource
             BloquesRelationManager::class,
             LotesRelationManager::class,
             PlanesDePagoRelationManager::class,
+            /*
+             * Los gastos del desarrollo (11-ago-2026). Va al final a
+             * proposito: las tres primeras describen lo que se vende, esta
+             * dice lo que cuesta. Al receptor no se le dibuja — Filament
+             * resuelve `GastoPolicy::viewAny()` en `canViewForRecord()`.
+             */
+            GastosRelationManager::class,
         ];
     }
 

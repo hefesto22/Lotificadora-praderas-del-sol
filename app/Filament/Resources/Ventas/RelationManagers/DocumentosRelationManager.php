@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Ventas\RelationManagers;
 
+use App\Domain\Archivos\GuardadoDeArchivos;
 use App\Domain\Enums\TipoDeDocumento;
 use App\Models\Documento;
 use BackedEnum;
@@ -11,6 +12,7 @@ use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\BaseFileUpload;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -21,6 +23,7 @@ use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Override;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -80,17 +83,34 @@ class DocumentosRelationManager extends RelationManager
                     ->required()
                     ->maxSize(10240)
                     ->acceptedFileTypes(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
-                    ->helperText('PDF o foto, hasta 10 MB.')
-                    ->afterStateUpdated(function (mixed $state, callable $set): void {
-                        // El peso se guarda al subir: despues el archivo esta
-                        // en el disco privado y preguntarlo cuesta una lectura
-                        // por fila de la tabla.
-                        if (is_object($state) && method_exists($state, 'getSize')) {
-                            $set('bytes', (int) $state->getSize());
-                        }
-                    }),
-
-                TextInput::make('bytes')->hidden()->dehydrated(),
+                    ->helperText('PDF o foto, hasta 10 MB. Las fotos se guardan convertidas a WebP: pesan seis veces menos y abren al instante.')
+                    /*
+                     * 🔴 El guardado pasa por `GuardadoDeArchivos`: una foto de
+                     * teléfono entra en 2–5 MB y sale en WebP de 250–400 KB,
+                     * con el lado largo topado en 2,400 px. El PDF pasa
+                     * intacto, y ante cualquier problema —GD sin WebP, imagen
+                     * corrupta— se guarda el original: un comprobante no se
+                     * pierde por optimizarlo.
+                     *
+                     * El PESO no se calcula acá. Lo lee el modelo del disco
+                     * después de convertir, que es el único momento en que el
+                     * número es cierto.
+                     */
+                    /*
+                     * 🔴 LOS NOMBRES `$component` Y `$file` SON UN CONTRATO.
+                     *
+                     * Filament evalúa este closure con `evaluate($callback,
+                     * ['file' => $file])`: busca los parámetros POR NOMBRE en
+                     * ese arreglo y, al que no encuentra, lo pide al
+                     * contenedor. Llamarle `$subido` hace que Filament intente
+                     * construir un `TemporaryUploadedFile` desde cero y
+                     * reviente con `BindingResolutionException:
+                     * Unresolvable dependency [$path]`.
+                     *
+                     * Por eso van en inglés, contra el estilo del resto del
+                     * repo: acá el nombre no es una decisión nuestra.
+                     */
+                    ->saveUploadedFileUsing(static fn (BaseFileUpload $component, TemporaryUploadedFile $file): ?string => resolve(GuardadoDeArchivos::class)->guardar($component, $file)),
 
                 Textarea::make('observaciones')
                     ->label('Observaciones')

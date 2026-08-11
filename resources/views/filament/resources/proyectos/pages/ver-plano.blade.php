@@ -391,6 +391,12 @@
             x-data="{
                 lotes: @js($plano['lotes']),
                 planes: @js($planes),
+
+                /* En que unidad se muestran las medidas de ESTE proyecto.
+                   Los poligonos estan siempre en varas: `factor` es 1 o
+                   los metros que mide la vara del desarrollo. */
+                medidas: @js($plano['medidas']),
+
                 base: @js($plano['viewBox']).split(' ').map(Number),
                 vista: { x: 0, y: 0, w: 1, h: 1 },
                 seleccionado: null,
@@ -850,7 +856,7 @@
                         if (angulo > 90) angulo -= 180;
                         if (angulo < -90) angulo += 180;
 
-                        lados.push({ a, b, mx, my, nx, ny, largo, angulo, extra: 0 });
+                        lados.push({ a, b, mx, my, nx, ny, largo, angulo, extra: 0, texto: this.cota(largo) });
                     }
 
                     /*
@@ -872,8 +878,11 @@
                         const y = lado.my + lado.ny * distancia;
 
                         // 0.55 em por caracter: el ancho tipico de un digito
-                        // en las fuentes de palo seco que usa el panel.
-                        const ancho = (lado.largo.toFixed(2).length + 2) * fuente * 0.55;
+                        // en las fuentes de palo seco que usa el panel. Se
+                        // mide el TEXTO ya armado —«25.05 m» y «29.99 V» no
+                        // ocupan lo mismo— o los choques se calculan contra
+                        // una etiqueta que no es la que se va a dibujar.
+                        const ancho = (lado.texto.length + 1) * fuente * 0.55;
                         const radianes = lado.angulo * Math.PI / 180;
                         const ux = Math.cos(radianes);
                         const uy = Math.sin(radianes);
@@ -988,7 +997,7 @@
                         texto.setAttribute('font-weight', '600');
                         texto.setAttribute('fill', '#b91c1c');
                         texto.setAttribute('transform', `rotate(${lado.angulo} ${tx} ${ty})`);
-                        texto.textContent = `${lado.largo.toFixed(2)} V`;
+                        texto.textContent = lado.texto;
                         g.appendChild(texto);
                     }
                 },
@@ -1141,6 +1150,26 @@ get hayInteres() {
                     const area = Number(crudo);
 
                     return Number.isFinite(area) ? this.numero(area) : crudo;
+                },
+
+                /* La cota de un lado, en la unidad que eligio el proyecto.
+
+                   Convertir ACA y no en la base es lo que permite cambiar el
+                   ajuste sin tocar un solo poligono: la geometria se guarda
+                   en varas para siempre, porque en varas² es como se cobra. */
+                cota(enVaras) {
+                    return `${(enVaras * this.medidas.factor).toFixed(2)} ${this.medidas.unidad}`;
+                },
+
+                /* El area con las DOS unidades cuando el proyecto esta en
+                   metros, igual que la rotula el topografo en el plano
+                   (A=320.19m2 / 459.22v2). La vara² nunca desaparece: es la
+                   unidad con la que se vende. */
+                get areaConUnidades() {
+                    const varas = `${this.areaFormateada} v²`;
+                    const metros = this.seleccionado?.areaMetros;
+
+                    return this.medidas.enMetros && metros ? `${varas} · ${metros} m²` : varas;
                 },
             }"
             :class="completo ? 'plano-grid plano-completo' : 'plano-grid'"
@@ -1427,6 +1456,11 @@ get hayInteres() {
                                          encabezado del modal —el codigo y el
                                          "Bloque Q · lote 2"— y repetirlo
                                          adentro del dibujo solo estorba. --}}
+                                    {{-- La vara² arriba y los m² abajo, en dos
+                                         renglones y no en uno: es como lo rotula el
+                                         topografo (A=320.19m2 / 459.22v2), y en una
+                                         sola linea el texto se sale de los lotes
+                                         angostos y se monta con las cotas. --}}
                                     <text
                                         x-show="figura"
                                         :x="figura?.cx"
@@ -1436,20 +1470,34 @@ get hayInteres() {
                                         :font-size="figura ? figura.fuente * 1.35 : 1"
                                         font-weight="600"
                                         fill="#3f3f46"
-                                        x-text="`${areaFormateada} v²`"
-                                    ></text>
+                                    >
+                                        <tspan
+                                            :x="figura?.cx"
+                                            :dy="medidas.enMetros ? -(figura?.fuente ?? 0) * 0.7 : 0"
+                                            x-text="`${areaFormateada} v²`"
+                                        ></tspan>
+                                        <tspan
+                                            x-show="medidas.enMetros && seleccionado?.areaMetros"
+                                            :x="figura?.cx"
+                                            :dy="(figura?.fuente ?? 0) * 1.5"
+                                            :font-size="figura ? figura.fuente : 1"
+                                            font-weight="500"
+                                            fill="#71717a"
+                                            x-text="`${seleccionado?.areaMetros ?? ''} m²`"
+                                        ></tspan>
+                                    </text>
 
                                     <g x-effect="dibujarCotas($el)"></g>
                                 </svg>
 
-                                <p class="plano-modal-escala">Medidas en varas, tomadas del plano del topógrafo.</p>
+                                <p class="plano-modal-escala">{{ $plano['medidas']['pie'] }}</p>
                             </div>
 
                             <div>
                                 <dl class="plano-datos">
                                     <div class="plano-dato">
                                         <dt>Área</dt>
-                                        <dd><span x-text="areaFormateada"></span> v²</dd>
+                                        <dd x-text="areaConUnidades"></dd>
                                     </div>
                                     <div class="plano-dato plano-dato-fuerte">
                                         <dt>Valor</dt>

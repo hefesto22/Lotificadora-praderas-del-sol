@@ -60,7 +60,7 @@ class VentaResource extends Resource
     protected static ?string $pluralModelLabel = 'Ventas';
 
     #[Override]
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 2;
 
     #[Override]
     public static function getNavigationGroup(): ?string

@@ -52,7 +52,7 @@ class ClienteResource extends Resource
     protected static ?string $pluralModelLabel = 'Clientes';
 
     #[Override]
-    protected static ?int $navigationSort = 0;
+    protected static ?int $navigationSort = 1;
 
     #[Override]
     public static function getNavigationGroup(): ?string

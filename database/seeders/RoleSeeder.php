@@ -153,6 +153,20 @@ class RoleSeeder extends Seeder
          */
         $permisos = [...$permisos, ...$this->permisos(['ViewAny', 'View', 'Update'], ['Prospecto'])];
 
+        /*
+         * Los gastos del desarrollo (11-ago-2026). NO van al cruce de
+         * RECURSOS, y esa es toda la decision: RECURSOS se le reparte tambien
+         * al receptor con ViewAny y View, y lo que la lotificadora gasta no es
+         * asunto de quien atiende el mostrador. Nombrados aca, el receptor no
+         * ve ni la pestaña.
+         *
+         * Con Update y Delete, a diferencia de las devoluciones: un gasto es
+         * un asiento interno cuyo respaldo es la factura del proveedor, no un
+         * papel que el cliente se llevo firmado. Lo que lo mantiene auditable
+         * es la bitacora, que `Gasto` escribe en cada cambio.
+         */
+        $permisos = [...$permisos, ...$this->permisos(['ViewAny', 'View', 'Create', 'Update', 'Delete'], ['Gasto'])];
+
         $this->rol(Roles::ADMINISTRADORA)->syncPermissions($permisos);
     }
 

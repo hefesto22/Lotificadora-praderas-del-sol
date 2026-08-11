@@ -60,6 +60,7 @@ final readonly class PlanoPublico
      *     calco: string|null,
      *     hayGeometria: bool,
      *     esquematico: bool,
+     *     medidas: array{enMetros: bool, varaEnMetros: float, factor: float, unidad: string, pie: string},
      *     disponibles: int,
      *     total: int,
      *     lotes: list<array{id: int, codigo: string, numero: string, rotulo: string, bloque: string, estado: string, etiqueta: string, color: string, puntos: string, centro: array{float, float}, area: string, areaFormateada: string, seCotiza: bool, clave: string, foto360: string|null, foto360Mini: string|null, foto360Marcas: list<array<string, mixed>>}>,
@@ -71,6 +72,7 @@ final readonly class PlanoPublico
     public function para(Proyecto $proyecto): array
     {
         $completo = $this->plano->para($proyecto);
+        $medidas = $completo['medidas'];
 
         $lotes = [];
         $areasACotizar = [];
@@ -101,7 +103,10 @@ final readonly class PlanoPublico
                 'puntos'         => $lote['puntos'],
                 'centro'         => $lote['centro'],
                 'area'           => $lote['areaVaras'],
-                'areaFormateada' => $this->comoArea($lote['areaVaras']),
+                'areaFormateada' => $this->comoArea(
+                    $lote['areaVaras'],
+                    $medidas['enMetros'] ? $lote['areaMetros'] : null,
+                ),
                 // Solo lo que está a la venta lleva precio. Ver el docblock.
                 'seCotiza' => $estaLibre,
                 'clave'    => $estaLibre ? CotizacionPorPlazo::clave($lote['areaVaras']) : '',
@@ -141,6 +146,7 @@ final readonly class PlanoPublico
             'calco'        => $completo['calco'],
             'hayGeometria' => $completo['hayGeometria'],
             'esquematico'  => $completo['esquematico'],
+            'medidas'      => $medidas,
             'disponibles'  => $disponibles,
             'total'        => count($lotes),
             'lotes'        => $lotes,
@@ -160,7 +166,7 @@ final readonly class PlanoPublico
      * hacen parecer que la medida tiene una precisión que no le importa a
      * nadie. Los decimales que sí valen se conservan.
      */
-    private function comoArea(string $varas): string
+    private function comoArea(string $varas, ?string $enMetros = null): string
     {
         $texto = $varas;
 
@@ -168,7 +174,15 @@ final readonly class PlanoPublico
             $texto = rtrim(rtrim($texto, '0'), '.');
         }
 
-        return ($texto === '' ? '0' : $texto).' vr²';
+        $area = ($texto === '' ? '0' : $texto).' vr²';
+
+        /*
+         * Los m² van AL LADO, nunca en lugar de las varas². Es como los
+         * rotula el topografo en el plano (A=320.19m2 / 459.22v2), y es lo
+         * unico honesto: el cliente compara la medida con la hoja impresa
+         * en metros, pero el precio que ve abajo es por vara².
+         */
+        return $enMetros === null ? $area : $area.' · '.$enMetros.' m²';
     }
 
     /**

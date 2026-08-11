@@ -31,6 +31,8 @@ class ProyectoForm
         /** @var array<string, string> $departamentos */
         $departamentos = config('honduras.localizacion.departamentos', []);
 
+        $varaDelSistema = (string) config('lotificadora.area.vara_en_metros', '0.8359');
+
         return $schema
             ->components([
                 Tabs::make('Proyecto')
@@ -119,6 +121,73 @@ class ProyectoForm
                                         'el dibujo respeta el área de cada lote pero NO su ubicación real en '.
                                         'el terreno. Apagalo cuando la geometría venga del plano del topógrafo.'
                                     ),
+
+                                /*
+                                 * ═══ LA VARA ES DEL DESARROLLO, NO DEL SISTEMA ═══
+                                 *
+                                 * El topógrafo acota en metros y el negocio cobra por
+                                 * vara². Mientras hubo un solo proyecto, un número en la
+                                 * config alcanzaba; con el segundo dejó de alcanzar,
+                                 * porque la vara castellana (0.8359 m) no es la única que
+                                 * se usa y de ese factor sale el área que se cobra.
+                                 *
+                                 * El toggle es SOLO presentación —lo que se le enseña al
+                                 * cliente al lado de cada lado del lote— y el campo de
+                                 * abajo sí toca el dinero. Por eso están juntos: quien
+                                 * abre esta sección tiene que ver la diferencia.
+                                 */
+                                Section::make('Medidas del plano')
+                                    ->description('En qué unidad se leen las medidas de este desarrollo.')
+                                    ->icon('heroicon-o-scale')
+                                    ->schema([
+                                        Toggle::make('medidas_en_metros')
+                                            ->label('Mostrar las medidas en metros')
+                                            ->onColor('info')
+                                            ->offColor('gray')
+                                            ->helperText(
+                                                'Los planos de topografía vienen acotados en metros. Encendido, '.
+                                                'los lados de cada lote se muestran en metros —los mismos números '.
+                                                'que dice el plano impreso que el cliente tiene en la mano— y el '.
+                                                'área sale con las dos unidades. El área se sigue guardando y '.
+                                                'COBRANDO en varas²: esto no cambia ningún precio.'
+                                            ),
+
+                                        TextInput::make('vara_en_metros')
+                                            ->label('A cuánto equivale la vara')
+                                            ->numeric()
+                                            ->minValue(0.5)
+                                            ->maxValue(1.5)
+                                            ->step('0.000001')
+                                            ->suffix('m')
+                                            ->placeholder($varaDelSistema)
+                                            ->helperText(
+                                                'De este número sale cuántas varas² tiene cada lote cuando se '.
+                                                'importa el plano, así que TOCA EL PRECIO. Vacío usa la vara del '.
+                                                'sistema ('.$varaDelSistema.' m, la castellana). La mexicana son '.
+                                                '0.838 y la de Texas 0.8467: preguntale al topógrafo con cuál '.
+                                                'levantó el plano.'
+                                            ),
+
+                                        /*
+                                         * Decisión del 11-ago-2026: cambiar la vara no
+                                         * recalcula nada. Rescalar el área de un lote ya
+                                         * apartado o vendido es cambiarle el precio a un
+                                         * contrato firmado, en silencio. El aviso solo
+                                         * aparece cuando hay algo que se pueda romper.
+                                         */
+                                        Placeholder::make('aviso_de_la_vara')
+                                            ->label('Ojo')
+                                            ->columnSpanFull()
+                                            ->visible(fn (?Proyecto $record): bool => ($record?->lotes()->count() ?? 0) > 0)
+                                            ->content(static fn (?Proyecto $record): string => sprintf(
+                                                'Este proyecto ya tiene %d lotes cargados. Cambiar la vara acá NO '.
+                                                'recalcula sus áreas ni sus valores: el número nuevo rige para lo '.
+                                                'que se importe de ahora en adelante. Si la vara estaba mal, hay '.
+                                                'que volver a importar el plano.',
+                                                $record?->lotes()->count() ?? 0,
+                                            )),
+                                    ])
+                                    ->columns(2),
 
                                 Section::make('Plano público')
                                     ->description('La página que se le manda al cliente por WhatsApp.')

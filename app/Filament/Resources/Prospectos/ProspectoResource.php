@@ -48,7 +48,7 @@ class ProspectoResource extends Resource
     protected static ?string $pluralModelLabel = 'Prospectos';
 
     #[Override]
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 5;
 
     #[Override]
     public static function getNavigationGroup(): ?string

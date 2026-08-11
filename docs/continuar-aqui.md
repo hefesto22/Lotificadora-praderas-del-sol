@@ -1,3 +1,158 @@
+# Continuar acá — 11-ago-2026
+
+> Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
+> `bash storage/app/verificar-pagos.sh`: **nada se da por bueno sin eso en verde.**
+
+## ✅ La puerta ya pasó — 805 tests
+
+| | |
+|---|---|
+| Tests | **805 verdes** (4,138 assertions), 14 procesos, 30s |
+| PHPStan | **341/341**, nivel 7, sin errores |
+| Pint / Rector | limpios (741 archivos) |
+
+**Falta correr la migración en `praderas_dev`** para verlo en el navegador —
+Pest corre las suyas sobre `praderas_test`:
+
+```bash
+herd php artisan migrate
+```
+
+⚠️ **El CLI de este proyecto va con `herd php artisan`, NO con `herd artisan`.**
+Herd contesta `Command "artisan" is not defined.` y es fácil leerlo como un
+problema de Laravel. Está en `docs/` y en la memoria del entorno.
+
+Van 12 archivos: 6 nuevos, 6 parcheados, más 2 de tests, más la migración
+`2026_08_11_130000_create_gastos_table.php`.
+
+### 🔴 Los 5 errores de PHPStan que costó, y que se repiten
+
+1. **activitylog v5 movió las dos clases** (3 de los 5). Va
+   `Spatie\Activitylog\Models\Concerns\LogsActivity` y
+   `Spatie\Activitylog\Support\LogOptions` — **no** `Traits\LogsActivity` ni
+   `Spatie\Activitylog\LogOptions`, que es la forma de la v4 y la que sale de
+   memoria. Se copia de `Proyecto` o de `Recibo`, que las tienen bien.
+2. **`selectRaw()` está tipado `literal-string`**: una expresión con una
+   variable interpolada no pasa. Se arma en el llamador con la cadena
+   completa escrita.
+3. **`pluck('x')->first()`** lo marca `larastan.noUnnecessaryCollectionCall`.
+   Va `value('x')` — y no pisa el `select` si ya hay columnas puestas.
+
+⚠️ En el árbol seguía sin commitear el trabajo de **medidas del plano**
+(`2026_08_11_120000_medidas_del_plano.php` y compañía). Los dos temas están
+mezclados en el `git status`: al commitear, enumerar los dos en el mensaje.
+
+## Lo que se construyó el 11-ago: los gastos del proyecto
+
+Lo pidió Mauricio con la pantalla del proyecto abierta: «que ahí donde está
+bloques, lotes y planes de pago haya uno que sea gastos de proyecto, y ahí se
+puedan ir registrando los gastos, los totales y el motivo de en qué se gastó».
+
+Cierra un hueco que era la mitad del negocio: Olympo sabía contestar **cuánto
+he cobrado** y no sabía contestar **cuánto me ha costado**.
+
+### Las cuatro decisiones, todas contestadas por Mauricio
+
+| Qué | Cómo quedó, y por qué |
+|---|---|
+| El motivo | **Catálogo + detalle**, las dos obligatorias. `CategoriaDeGasto` tiene 18 casos y es del PRODUCTO (Ley L0), no de Praderas. El detalle es texto libre porque «Materiales — L 48,000» no le dice nada a nadie dentro de un año |
+| El corte de caja | **Sí resta.** Un gasto en efectivo baja lo que tiene que estar en la gaveta. De paso entró la **devolución de seña**, que estaba anotada como pendiente desde el 10-ago |
+| Quién entra | **Solo la administradora.** El receptor no ve ni la pestaña: lo que el desarrollo cuesta es información del dueño. Misma línea con la que hoy no ve prospectos |
+| El alcance | Pestaña, formulario, totales por categoría y **comprobante escaneado** en disco privado. Con número propio `G-000001` desde el día uno |
+
+### Dónde hacer clic para verlo
+
+`Proyectos → Praderas del Sol → pestaña **Gastos**`, al lado de Planes de
+pago. El cuadro de totales está arriba de la tabla y **respeta los filtros**:
+filtrás por «Terracería» y el total es el de terracería.
+
+### Tres cosas que conviene no re-discutir
+
+1. **El gasto cuelga del PROYECTO, no del lote.** Así se gasta: la
+   retroexcavadora no entra a un lote, abre la calle de un bloque entero.
+   Repartirlo por lote es un prorrateo —decisión de contabilidad— y se puede
+   calcular desde acá el día que haga falta.
+2. **El número es serie propia y GLOBAL** (`TipoCorrelativo::Gasto`). Propia
+   por lo mismo que la devolución (R12 promete que en la serie de recibos no
+   falta ninguno); global aunque el gasto sea de un proyecto, porque el
+   comprobante lo emite la lotificadora y una serie por proyecto se rompe el
+   día que alguien corrija a qué desarrollo iba cargada una factura.
+3. **Un gasto SÍ se puede editar y borrar**, a diferencia de una devolución.
+   Una devolución la firmó el cliente y se llevó el papel; un gasto es un
+   asiento interno cuyo respaldo es la factura del proveedor. Lo que lo
+   mantiene auditable es la bitácora, que `Gasto` escribe en cada cambio.
+
+### 🔴 La trampa de `correlativos`, otra vez
+
+Igual que con `devoluciones`: los dos CHECKs de esa tabla tienen la lista de
+tipos **congelada en su migración**. Agregar el caso al enum no alcanza y la
+migración de `gastos` los recrea. **Cualquier serie nueva tiene que hacer lo
+mismo.**
+
+### Lo que NO entró, y es lo siguiente
+
+1. **El comprobante de egreso imprimible.** El número ya se emite y los datos
+   ya se guardan; falta la ruta, el controlador y la vista, con el patrón de
+   `ImprimirReciboController`. Es exactamente el mismo pendiente que arrastra
+   la devolución de la seña — **se resuelven juntos, en un solo drop.**
+2. **Costo contra ingreso en el Escritorio.** Hoy hay que sumar a mano lo
+   cobrado y lo gastado para saber cómo va el proyecto.
+3. **La separación inversión / gasto operativo.** `CategoriaDeGasto` no la
+   hace a propósito: dónde caen exactamente la mano de obra, lo legal y los
+   impuestos es una decisión de contabilidad, no de programación. El día que
+   un contador la conteste entra como un método más del enum, y ninguna fila
+   guardada cambia.
+4. **Filtro por rango de fechas.** Hoy hay «Solo este mes» y nada más.
+
+## Lo segundo del 11-ago: las imágenes se guardan en WebP
+
+`App\Domain\Archivos\GuardadoDeArchivos`, enganchado en los DOS lugares donde
+se sube algo: el comprobante del gasto y los papeles del expediente. Calidad
+82, lado largo topado en 2,400 px. Una foto de teléfono de 2–5 MB queda en
+250–400 KB.
+
+### No se hizo por el disco
+
+Mauricio preguntó si convenía mandar los archivos a Drive. Los números dicen
+que no hace falta: el VPS es un **Hostinger KVM 4, 200 GB NVMe**, y descontando
+sistema, base, respaldos y logs quedan ~188 GB — **unas 540,000 imágenes en
+WebP**. La razón real es la pantalla: quien abre un expediente en Cucuyagua
+espera por una conexión que no es la de la oficina.
+
+**Drive quedó descartado**: paquete de comunidad, OAuth por lotificadora, y el
+refresh token vence a los 7 días si la app no está publicada en Google Cloud —
+el expediente dejaría de abrir sin que nadie tocara nada. Si algún día el disco
+aprieta, la salida es S3: el disco `s3` YA está configurado con `endpoint`, así
+que sirve Cloudflare R2 (10 GB gratis, egreso $0).
+
+### La regla que manda
+
+🔴 **Un comprobante NUNCA se pierde por optimizarlo.** GD sin WebP, imagen
+corrupta, más de 40 millones de píxeles, o un WebP que pese más que el
+original: en todos esos casos se guarda el archivo tal como llegó.
+
+Los PDF no se tocan. Lo que ya viene en WebP tampoco.
+
+### De paso: el peso lo dice el disco
+
+`Gasto` y `Documento` leen `Storage::size()` en un hook `saving()`. Antes se
+guardaba el tamaño del archivo subido, que después de convertir mentía por
+seis.
+
+### 🔴 La trampa que costó 5 tests
+
+**En los closures de Filament el NOMBRE del parámetro es la llave.**
+`saveUploadedFileUsing` se evalúa con `evaluate($callback, ['file' => $file])`:
+al parámetro que no encuentra por nombre se lo pide al contenedor. Llamarle
+`$subido` en vez de `$file` reventó con `BindingResolutionException:
+Unresolvable dependency [$path]` en los cinco tests de archivos.
+
+Por eso esos dos parámetros van **en inglés** (`$component`, `$file`), contra el
+estilo del repo. Es la misma familia que la trampa de `$arguments` en los
+campos de un schema.
+
+---
+
 # Continuar acá — 10-ago-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es

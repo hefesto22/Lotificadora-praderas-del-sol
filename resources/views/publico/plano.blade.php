@@ -64,12 +64,23 @@
         <meta property="og:image" content="{{ $logo }}">
     @endif
 
+    @include('comun.fuente')
+
     <style>
         /*
          * Todo el diseño vive acá, en un solo bloque, sin hoja externa: es un
-         * viaje menos al servidor en un teléfono con mala señal. Y por eso
-         * tampoco hay tipografía descargada — la del sistema ya está en el
-         * aparato y se pinta en el primer cuadro.
+         * viaje menos al servidor en un teléfono con mala señal.
+         *
+         * ⚠️ 11-ago-2026: hasta hoy este comentario seguía «y por eso tampoco
+         * hay tipografía descargada — la del sistema ya está en el aparato y
+         * se pinta en el primer cuadro». Mauricio pidió una sola letra en todo
+         * el sistema, así que ahora sí baja Inter, la misma del panel.
+         *
+         * La razón de aquella decisión NO se perdió: el `index.css` de
+         * Filament declara `font-display: swap`, o sea que el texto se sigue
+         * pintando en el PRIMER cuadro con la letra del aparato y cambia a
+         * Inter cuando llega. Son 48 KB del subconjunto latín, en segundo
+         * plano, sin bloquear nada.
          */
         *, *::before, *::after { box-sizing: border-box; }
 
@@ -88,7 +99,7 @@
 
         body {
             margin: 0;
-            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+            font-family: var(--olympo-fuente);
             color: var(--tinta);
             line-height: 1.5;
             display: flex;
@@ -618,7 +629,7 @@
                 <div class="dibujo">
                     <svg id="ficha-dibujo" preserveAspectRatio="xMidYMid meet" viewBox="0 0 100 100"></svg>
                 </div>
-                <p class="escala">Medidas en varas, tomadas del plano del topógrafo.</p>
+                <p class="escala">{{ $plano['medidas']['pie'] }}</p>
 
                 {{-- Solo aparece si el lote tiene foto cargada. Fotografiar
                      301 lotes lleva meses: el resto se ve igual que siempre. --}}
@@ -767,6 +778,11 @@
         'lotes'   => $plano['lotes'],
         'precios' => $plano['precios'],
         'planes'  => $plano['planes'],
+
+        /* En que unidad se acotan los lados. Los poligonos vienen SIEMPRE
+           en varas: `factor` es 1, o los metros que mide la vara de este
+           desarrollo. */
+        'medidas' => $plano['medidas'],
     ];
 @endphp
 <script type="application/json" id="datos">@json($paraElNavegador)</script>
@@ -776,6 +792,13 @@
     'use strict';
 
     var datos = JSON.parse(document.getElementById('datos').textContent);
+
+    /* La unidad en la que se acotan los lados de un lote. `factor` es 1
+       cuando el proyecto trabaja en varas, y los metros que mide la vara
+       cuando el plano se lee en metros. Los poligonos NUNCA cambian: se
+       guardan en varas porque en varas² es como se cobra. */
+    var medidas = datos.medidas || { factor: 1, unidad: 'V' };
+
     var porId = {};
     datos.lotes.forEach(function (lote) { porId[lote.id] = lote; });
 
@@ -877,7 +900,8 @@
                 '" stroke="var(--cota)" stroke-width="' + (fuente * 0.07) + '" />' +
                 '<text x="' + fx + '" y="' + fy + '" fill="var(--cota)" font-size="' + fuente +
                 '" text-anchor="middle" dominant-baseline="central" transform="rotate(' +
-                giro + ' ' + fx + ' ' + fy + ')">' + largo.toFixed(2) + ' V</text>'
+                giro + ' ' + fx + ' ' + fy + ')">' +
+                (largo * medidas.factor).toFixed(2) + ' ' + medidas.unidad + '</text>'
             );
         }
 

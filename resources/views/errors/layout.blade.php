@@ -6,6 +6,7 @@
     <meta name="robots" content="noindex, nofollow">
     <title>@yield('codigo') · {{ config('app.name', 'Olympo') }}</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>⚠️</text></svg>">
+    @include('comun.fuente')
     <style>
         :root {
             color-scheme: dark;
@@ -19,7 +20,7 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         html, body {
             height: 100%;
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+            font-family: var(--olympo-fuente);
             background: var(--bg);
             color: var(--text);
             -webkit-font-smoothing: antialiased;

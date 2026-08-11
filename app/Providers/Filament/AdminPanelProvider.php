@@ -123,8 +123,44 @@ class AdminPanelProvider extends PanelProvider
                  */
                 SuspensionPorMora::class,
             ])
+            /*
+             * ── EL ORDEN DE LOS GRUPOS DEL MENU ──────────────────────────
+             *
+             * Sin esta lista Filament los ordena por orden de aparición, que
+             * es el orden en que descubrió los archivos: una casualidad. Así
+             * fue como «FILAMENT SHIELD» terminó ARRIBA de todo, encima del
+             * trabajo del día.
+             *
+             * El orden es por frecuencia de uso, de arriba hacia abajo:
+             * quien atiende vive en Lotificación, entra a Administración una
+             * vez por semana y a Sistema una vez por proyecto.
+             *
+             * Un grupo que no esté en esta lista igual aparece — al final.
+             */
+            ->navigationGroups([
+                'Lotificación',
+                'Administración',
+                'Sistema',
+            ])
             ->plugins([
-                FilamentShieldPlugin::make(),
+                /*
+                 * ⚠️ 🔴 SIN ESTO, EL CLIENTE LEE EL NOMBRE DEL PAQUETE
+                 *
+                 * Shield trae su propio grupo, y su traducción por defecto es
+                 * el nombre del plugin: el menú abría con un rótulo
+                 * «FILAMENT SHIELD» arriba de Clientes. Adentro hay UN ítem,
+                 * Roles, que es administración pura.
+                 *
+                 * Así que se muda a Administración, al lado de Usuarios: son
+                 * la misma pregunta —quién entra y qué puede hacer— y el menú
+                 * baja de cuatro grupos a tres.
+                 *
+                 * El `navigationSort(2)` lo pone entre Usuarios (1) y los
+                 * registros de actividad (3).
+                 */
+                FilamentShieldPlugin::make()
+                    ->navigationGroup('Administración')
+                    ->navigationSort(2),
             ])
             ->databaseNotifications()
             ->databaseNotificationsPolling('30s')

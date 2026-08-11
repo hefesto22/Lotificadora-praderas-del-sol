@@ -37,6 +37,8 @@ use Spatie\Activitylog\Support\LogOptions;
     'longitud',
     'activo',
     'plano_esquematico',
+    'medidas_en_metros',
+    'vara_en_metros',
     'slug',
     'plano_publico',
     'whatsapp',
@@ -79,6 +81,7 @@ class Proyecto extends Model
     #[Override]
     protected $attributes = [
         'plano_esquematico' => false,
+        'medidas_en_metros' => false,
     ];
 
     /**
@@ -210,9 +213,35 @@ class Proyecto extends Model
         return [
             'activo'            => 'boolean',
             'plano_esquematico' => 'boolean',
+            'medidas_en_metros' => 'boolean',
             'plano_publico'     => 'boolean',
             'servicios'         => 'array',
         ];
+    }
+
+    /**
+     * Cuánto mide la vara de ESTE proyecto, en metros.
+     *
+     * `null` en la columna significa «la vara del sistema»: el default
+     * sigue viviendo en config/lotificadora.php y no copiado en cada fila
+     * (§8.3.7). Un proyecto guarda su propio número solo cuando su
+     * topógrafo usa otra vara —la castellana son 0.8359 m, la mexicana
+     * 0.8380 y la de Texas 0.8467—.
+     *
+     * Devuelve string y nunca float: de este número sale cuántas varas²
+     * tiene cada lote al importar el plano, y el precio es POR VARA². Es
+     * el mismo criterio del §8.3.1 —el área en varas² por el precio por
+     * vara² ES dinero— y por eso el valor entra a bcmath como texto.
+     */
+    public function varaEnMetros(): string
+    {
+        $propia = $this->getAttribute('vara_en_metros');
+
+        if (is_numeric($propia) && (float) $propia > 0) {
+            return number_format((float) $propia, 6, '.', '');
+        }
+
+        return (string) config('lotificadora.area.vara_en_metros', '0.8359');
     }
 
     /**
@@ -265,7 +294,7 @@ class Proyecto extends Model
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['nombre', 'codigo', 'activo', 'plano_esquematico'])
+            ->logOnly(['nombre', 'codigo', 'activo', 'plano_esquematico', 'medidas_en_metros', 'vara_en_metros'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges()
             ->setDescriptionForEvent(fn (string $evento): string => "Proyecto {$evento}");
@@ -320,6 +349,22 @@ class Proyecto extends Model
     public function planesDePago(): HasMany
     {
         return $this->hasMany(PlanDePago::class);
+    }
+
+    /**
+     * Lo que este desarrollo ha costado (11-ago-2026).
+     *
+     * Cuelga del proyecto y no del lote porque asi se gasta: la
+     * retroexcavadora no entra a un lote, abre la calle de un bloque entero.
+     * Repartir ese costo entre los lotes que toca es un prorrateo, y un
+     * prorrateo es una decision de contabilidad, no un dato que alguien tenga
+     * enfrente al pagar la factura.
+     *
+     * @return HasMany<Gasto, $this>
+     */
+    public function gastos(): HasMany
+    {
+        return $this->hasMany(Gasto::class);
     }
 
     /**

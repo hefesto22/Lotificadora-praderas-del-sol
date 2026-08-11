@@ -58,7 +58,7 @@ class ReciboResource extends Resource
     protected static ?string $pluralModelLabel = 'Recibos';
 
     #[Override]
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 3;
 
     #[Override]
     public static function getNavigationGroup(): ?string

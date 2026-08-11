@@ -8,6 +8,13 @@
     depender de que un build de assets haya corrido — el día que Vite falle,
     el recibo tiene que seguir saliendo igual.
 
+    ⚠️ La ÚNICA excepción, desde el 11-ago-2026, es la tipografía
+    (`@include('comun.fuente')`): el recibo que el cliente se lleva estaba
+    escrito en una letra distinta a la de la pantalla donde se lo cobraron.
+    No contradice el párrafo de arriba —esos archivos los publica
+    `filament:assets`, no Vite, y están versionados en git—, y si faltaran,
+    el `font-display: swap` deja la hoja exactamente como se veía antes.
+
     ═══ MEDIA CARTA SOBRE CARTA ═══
 
     El contenido va en una columna angosta arriba de la hoja. Así el mismo
@@ -21,6 +28,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Recibo {{ $recibo->folio() }}</title>
+    @include('comun.fuente')
     <style>
         @page { size: letter; margin: 12mm; }
 
@@ -31,7 +39,7 @@
             padding: 1.5rem 1rem;
             background: #f4f4f5;
             color: #18181b;
-            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+            font-family: var(--olympo-fuente);
             font-size: 13px;
             line-height: 1.5;
         }

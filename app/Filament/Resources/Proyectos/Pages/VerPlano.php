@@ -2017,6 +2017,9 @@ class VerPlano extends Page
                     return;
                 }
 
+                /** @var Proyecto $proyecto */
+                $proyecto = $this->getRecord();
+
                 $bloque = Bloque::query()->findOrFail($this->entero($data, 'bloque_id', 0));
                 $importador = new ImportadorDeDxf;
                 $analisis = $importador->analizar($contenido);
@@ -2031,7 +2034,16 @@ class VerPlano extends Page
                     capaDeCalles: $this->texto($data, 'capa_calles', '') ?: $analisis->capaSugeridaDeCalles(),
                     unidad: UnidadDxf::desde($unidadElegida === 'varas' ? null : (int) $unidadElegida),
                     dibujadoEnVaras: $unidadElegida === 'varas',
-                    varaEnMetros: (string) config('lotificadora.area.vara_en_metros', '0.8359'),
+                    /*
+                     * La vara es del DESARROLLO, no del sistema: de este
+                     * factor sale cuantas varas² tiene cada lote, y el
+                     * precio es por vara². Si el topografo de este proyecto
+                     * levanto con otra vara, el area de todo el residencial
+                     * sale corrida. Se configura en la ficha del proyecto,
+                     * pestaña «Estado» → «Medidas del plano»; vacio usa la
+                     * del sistema.
+                     */
+                    varaEnMetros: $proyecto->varaEnMetros(),
                 ));
 
                 $cuerpo = sprintf(
