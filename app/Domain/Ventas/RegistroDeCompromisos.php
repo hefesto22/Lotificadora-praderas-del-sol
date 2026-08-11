@@ -14,6 +14,7 @@ use App\Domain\Exceptions\CompromisoInvalidoException;
 use App\Domain\ValueObjects\Monto;
 use App\Models\Cliente;
 use App\Models\Compromiso;
+use App\Models\Devolucion;
 use App\Models\Lote;
 use App\Models\Recibo;
 use App\Models\Venta;
@@ -391,8 +392,13 @@ final readonly class RegistroDeCompromisos
     /**
      * Suelta un apartado y devuelve el lote a disponible.
      */
-    public function liberar(Lote $lote, string $motivo): Compromiso
-    {
+    public function liberar(
+        Lote $lote,
+        string $motivo,
+        ?Monto $devuelto = null,
+        ?FormaDePago $forma = null,
+        ?string $referencia = null,
+    ): Compromiso {
         $estado = $this->estadoDe($lote);
         $codigo = $this->codigoDe($lote);
         $vigente = $this->vigenteDe($lote);
@@ -407,7 +413,7 @@ final readonly class RegistroDeCompromisos
             throw CompromisoInvalidoException::porVentaNoSeLibera($codigo);
         }
 
-        return DB::transaction(function () use ($lote, $vigente, $motivo): Compromiso {
+        return DB::transaction(function () use ($lote, $vigente, $motivo, $devuelto, $forma, $referencia): Compromiso {
             $vigente->update([
                 'estado'     => EstadoCompromiso::Liberado,
                 'cerrado_el' => today(),
@@ -415,6 +421,20 @@ final readonly class RegistroDeCompromisos
             ]);
 
             $lote->update(['estado' => EstadoLote::Disponible]);
+
+            /*
+             * La devolucion es OPCIONAL y eso es la decision de Mauricio del
+             * 10-ago: el lote tiene que volver a estar disponible YA —eso es
+             * lo urgente— pero el cliente puede no estar ahi para recibir su
+             * dinero. Sin ella, la seña queda como pendiente por devolver y
+             * `devolverLaSenia()` lo cierra cuando la persona vuelve.
+             *
+             * Obligarla seria peor que no tenerla: alguien pondria «devuelto»
+             * con tal de poder soltar el lote.
+             */
+            if ($devuelto instanceof Monto && $forma instanceof FormaDePago) {
+                $this->registrarLaDevolucion($vigente->refresh(), $devuelto, $forma, $motivo, $referencia);
+            }
 
             return $vigente;
         });
@@ -493,48 +513,161 @@ final readonly class RegistroDeCompromisos
     }
 
     /**
-     * Marca que la seña de un apartado caido ya se le devolvio al cliente.
+     * Devolverle al cliente la seña de un apartado que se cayó (R14).
      *
-     * ═══ POR QUE ESTO NO ES UN EGRESO ═══
+     * ═══ QUE CAMBIO EL 10-AGO-2026 ═══
      *
-     * Porque todavia no hay modulo de egresos, y se decidio el 6-ago-2026
-     * dejarlo para despues. Lo que esto resuelve es mas chico y mas urgente:
-     * que la lista de «plata que hay que devolver» se pueda vaciar. Una
-     * lista que no se vacia se deja de mirar a la semana, y entonces R14
-     * queda escrita en el contrato y en ningun otro lado.
+     * Esto era una fecha. `senia_devuelta_el` marcaba «ya se le devolvió» y
+     * sacaba el pendiente de la lista, y su propio docblock lo admitía: «esto
+     * NO es un egreso — no hay comprobante de salida todavía». No decía cuánto
+     * salió, no admitía devolver una parte, y el cliente se iba sin papel.
      *
-     * Cuando exista el egreso con su comprobante, este metodo pasa a
-     * llamarlo y la fecha se sigue escribiendo igual.
+     * Ahora emite un **comprobante de devolución** con su número de serie
+     * propia, y acepta que se devuelva MENOS de lo que entró: lo que no se
+     * devuelve queda a favor del proyecto. Lo pidió Mauricio con este ejemplo:
+     * «si solo se le devolvió una parte y cuánto, para que el resto quede a
+     * favor del proyecto».
+     *
+     * ⚠️ **Va más allá de la letra de R14**, que dice «el dinero se devuelve»,
+     * completo. La enmienda está escrita en `docs/dominio.md` como R14-bis y
+     * espera la firma de la contratante.
+     *
+     * ═══ EL RECIBO DE LA SEÑA NO SE TOCA ═══
+     *
+     * Ni se anula ni se marca. Ese dinero entró de verdad y el lote sí estuvo
+     * apartado; anular diría que el cobro no debió registrarse, que es falso.
+     * Son dos hechos y cada uno tiene su papel — el que el cliente firmó al
+     * entrar y el que firma al salir.
+     *
+     * @param Monto $devuelto lo que se le entrega al cliente; puede ser cero
      *
      * @throws CompromisoInvalidoException
      */
-    public function devolverLaSenia(Compromiso $apartado, ?string $observacion = null): Compromiso
-    {
+    public function devolverLaSenia(
+        Compromiso $apartado,
+        Monto $devuelto,
+        FormaDePago $forma,
+        string $motivo,
+        ?string $referencia = null,
+    ): Devolucion {
         if (! $apartado->seniaPorDevolver() instanceof Monto) {
             throw CompromisoInvalidoException::porDevolverLoQueNoSeDebe(
                 (string) $apartado->lote()->value('codigo')
             );
         }
 
-        $limpia = trim($observacion ?? '');
+        return DB::transaction(fn (): Devolucion => $this->registrarLaDevolucion(
+            $apartado,
+            $devuelto,
+            $forma,
+            $motivo,
+            $referencia,
+        ));
+    }
 
-        return DB::transaction(function () use ($apartado, $limpia): Compromiso {
-            $hoy = today();
+    /**
+     * El comprobante de salida, y la fecha que cierra el pendiente.
+     *
+     * Vive aparte porque tiene DOS puertas: `liberar()` cuando el cliente está
+     * ahí con la mano estirada, y `devolverLaSenia()` cuando vuelve al día
+     * siguiente. Las dos escriben exactamente lo mismo, y por eso lo escriben
+     * en un solo lugar.
+     *
+     * ⚠️ Se llama SIEMPRE dentro de una transacción ya abierta: quema un
+     * número de serie, y un correlativo consumido por un trámite que después
+     * se cae deja un hueco que R12 no perdona.
+     *
+     * @throws CompromisoInvalidoException
+     */
+    private function registrarLaDevolucion(
+        Compromiso $apartado,
+        Monto $devuelto,
+        FormaDePago $forma,
+        string $motivo,
+        ?string $referencia,
+    ): Devolucion {
+        $codigo = (string) $apartado->lote()->value('codigo');
+        $recibido = $apartado->seniaPorDevolver();
 
-            $apartado->update([
-                'senia_devuelta_el' => $hoy,
-                'observaciones'     => $this->anotar(
-                    $apartado,
-                    sprintf(
-                        'Seña devuelta el %s%s',
-                        $hoy->format('d/m/Y'),
-                        $limpia === '' ? '.' : ': '.$limpia,
-                    ),
+        if (! $recibido instanceof Monto) {
+            throw CompromisoInvalidoException::porDevolverLoQueNoSeDebe($codigo);
+        }
+
+        if ($devuelto->mayorQue($recibido)) {
+            throw CompromisoInvalidoException::porDevolverDeMas($devuelto, $recibido, $codigo);
+        }
+
+        $porQue = trim($motivo);
+
+        if ($porQue === '') {
+            throw CompromisoInvalidoException::porFaltarElMotivoDeLaDevolucion();
+        }
+
+        $limpia = trim($referencia ?? '');
+
+        // R11: sin referencia no se puede cruzar la salida contra el banco.
+        if ($forma->exigeReferencia() && $limpia === '') {
+            throw CompromisoInvalidoException::porFaltarLaReferencia($forma->etiqueta());
+        }
+
+        $hoy = today();
+
+        $devolucion = Devolucion::query()->create([
+            'numero'         => $this->correlativos->siguienteDeDevolucion(),
+            'compromiso_id'  => $apartado->getKey(),
+            'cliente_id'     => $apartado->getAttribute('cliente_id'),
+            'recibo_id'      => $this->reciboDeLaSenia($apartado),
+            'monto_recibido' => $recibido->redondeado(),
+            'monto_devuelto' => $devuelto->redondeado(),
+            'monto_retenido' => $recibido->restar($devuelto)->redondeado(),
+            'forma_pago'     => $forma,
+            'referencia'     => $limpia === '' ? null : $limpia,
+            'motivo'         => $porQue,
+            'fecha'          => $hoy->toDateString(),
+        ]);
+
+        /*
+         * La fecha sigue siendo lo que saca el pendiente de la lista y lo que
+         * lee `seniaPorDevolver()`. Se conserva a propósito: media docena de
+         * pantallas ya la consultan, y el comprobante es el detalle de ese
+         * mismo hecho, no su reemplazo.
+         */
+        $apartado->update([
+            'senia_devuelta_el' => $hoy,
+            'observaciones'     => $this->anotar(
+                $apartado,
+                sprintf(
+                    'Devolución %s: se le entregaron %s de %s.%s %s',
+                    $devolucion->folio(),
+                    $devuelto->formateado(),
+                    $recibido->formateado(),
+                    $devolucion->fueTotal()
+                        ? ''
+                        : sprintf(' Quedan %s a favor del proyecto.', $devolucion->montoRetenido()->formateado()),
+                    $porQue,
                 ),
-            ]);
+            ),
+        ]);
 
-            return $apartado;
-        });
+        return $devolucion;
+    }
+
+    /**
+     * El recibo por el que esa seña había entrado, si todavía existe.
+     *
+     * Nullable y no `firstOrFail()`: un apartado importado de la cartera vieja
+     * puede tener monto de seña sin recibo nuestro, y eso no puede impedir
+     * devolverle su dinero a nadie.
+     */
+    private function reciboDeLaSenia(Compromiso $apartado): ?int
+    {
+        $recibo = Recibo::query()
+            ->where('compromiso_id', $apartado->getKey())
+            ->where('concepto', ConceptoDeRecibo::Senia)
+            ->whereNull('anulado_el')
+            ->value('id');
+
+        return is_int($recibo) ? $recibo : null;
     }
 
     /**

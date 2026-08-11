@@ -153,7 +153,7 @@ describe('Acortar el plazo', function (): void {
             ->and($recibo->montoTotal())->toBeMonto('75000.00')
             // Sin cuotas vencidas no hay nada que poner al día: todo fue capital.
             ->and($recibo->aplicaciones()->count())->toBe(0)
-            ->and($recibo->reprogramacion()->count())->toBe(1);
+            ->and($recibo->reprogramaciones()->count())->toBe(1);
     });
 });
 

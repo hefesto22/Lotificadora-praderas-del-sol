@@ -202,4 +202,44 @@ final class CompromisoInvalidoException extends GrupoOlympoException
             'seña, o el apartado sigue vigente, o ya se devolvio.'
         );
     }
+
+    /**
+     * No sale de la caja mas de lo que entro.
+     *
+     * El borde mas caro de un egreso: devolver de mas no se descubre hasta el
+     * corte, y para entonces la persona ya se fue con el dinero.
+     */
+    public static function porDevolverDeMas(Monto $devuelto, Monto $recibido, string $codigo): self
+    {
+        return new self(
+            "Sobre el lote {$codigo} entraron {$recibido->formateado()} de seña y se estan devolviendo ".
+            "{$devuelto->formateado()}. No se puede devolver mas de lo que se recibio."
+        );
+    }
+
+    /**
+     * Una salida de caja sin motivo escrito no se graba.
+     *
+     * Mismo trato que el descuento de R4 y el abono de R21, y por la misma
+     * razon: el mes que viene alguien va a preguntar por que salieron esos
+     * L 5,000, y la respuesta tiene que estar en el papel.
+     */
+    public static function porFaltarElMotivoDeLaDevolucion(): self
+    {
+        return new self(
+            'Para devolver una seña hace falta escribir por que. Queda en el comprobante, con tu '.
+            'usuario y la fecha.'
+        );
+    }
+
+    /**
+     * R11, del lado de la salida.
+     */
+    public static function porFaltarLaReferencia(string $forma): self
+    {
+        return new self(
+            "Una devolucion por {$forma} necesita el numero de referencia: es lo unico que despues ".
+            'permite cruzar esta salida contra el estado de cuenta del banco (R11).'
+        );
+    }
 }

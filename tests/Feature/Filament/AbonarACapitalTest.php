@@ -60,14 +60,27 @@ beforeEach(function (): void {
         ['record' => $this->venta->getKey()],
     );
 
-    $this->datos = fn (array $extra = []): array => array_merge([
-        'compromiso_id' => $this->renglon->getKey(),
-        'monto'         => '75000.00',
-        'modalidad'     => ModalidadDeReprogramacion::AcortarPlazo->value,
-        'forma_pago'    => FormaDePago::Efectivo->value,
-        'fecha'         => today()->toDateString(),
-        'motivo'        => 'El cliente quiere terminar antes',
-    ], $extra);
+    /*
+     * ⚠️ Los campos cambiaron el 10-ago-2026 y es un cambio DELIBERADO: el
+     * abono pasó de un `Select` de un lote a un renglón por lote —casilla,
+     * monto y modalidad—, porque ahora se puede repartir entre varios.
+     *
+     * Las assertions de este archivo NO se tocaron: lo que se prueba sigue
+     * siendo lo mismo, y por eso siguen sirviendo de red. Lo único que se movió
+     * es cómo se llenan los campos.
+     */
+    $this->datos = function (array $extra = []): array {
+        $id = $this->renglon->getKey();
+
+        return array_merge([
+            "abonar_{$id}"    => true,
+            "abono_{$id}"     => '75000.00',
+            "modalidad_{$id}" => ModalidadDeReprogramacion::AcortarPlazo->value,
+            'forma_pago'      => FormaDePago::Efectivo->value,
+            'fecha'           => today()->toDateString(),
+            'motivo'          => 'El cliente quiere terminar antes',
+        ], $extra);
+    };
 });
 
 test('el abono entra por la pantalla y reescribe el plan', function (): void {
@@ -90,8 +103,8 @@ test('el abono entra por la pantalla y reescribe el plan', function (): void {
 test('la modalidad que elige el cliente llega hasta el plan', function (): void {
     ($this->expediente)()
         ->callAction('abonar_a_capital', ($this->datos)([
-            'monto'     => '60000.00',
-            'modalidad' => ModalidadDeReprogramacion::BajarCuota->value,
+            'abono_'.$this->renglon->getKey()     => '60000.00',
+            'modalidad_'.$this->renglon->getKey() => ModalidadDeReprogramacion::BajarCuota->value,
         ]))
         ->assertHasNoActionErrors();
 
@@ -129,7 +142,7 @@ test('sin motivo no pasa del formulario', function (): void {
 */
 test('un abono que supera el saldo no rompe la pantalla', function (): void {
     ($this->expediente)()
-        ->callAction('abonar_a_capital', ($this->datos)(['monto' => '999999.00']))
+        ->callAction('abonar_a_capital', ($this->datos)(['abono_'.$this->renglon->getKey() => '999999.00']))
         ->assertHasNoActionErrors();
 
     expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0)
@@ -148,7 +161,7 @@ test('si no alcanza para lo vencido se registra como pago normal', function (): 
         ->update(['fecha_vencimiento' => today()->subMonths(2)->toDateString()]);
 
     ($this->expediente)()
-        ->callAction('abonar_a_capital', ($this->datos)(['monto' => '50000.00']))
+        ->callAction('abonar_a_capital', ($this->datos)(['abono_'.$this->renglon->getKey() => '50000.00']))
         ->assertHasNoActionErrors();
 
     expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(1)

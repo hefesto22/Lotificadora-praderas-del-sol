@@ -415,27 +415,20 @@ final readonly class RegistroDePagos
     }
 
     /**
-     * Abono extraordinario a capital, con su reprogramación (R21).
+     * Abono extraordinario a capital contra UN lote, con su reprogramación (R21).
      *
-     * ═══ LOS OCHO PASOS, EN ORDEN, Y POR QUE ESE ORDEN ═══
+     * ═══ ES UN ATAJO, Y ESO ES A PROPOSITO ═══
      *
-     *  1. Se bloquean las cuotas del lote y se releen. Entre que se pintó el
-     *     modal y se apretó Guardar, el otro receptor pudo cobrar.
-     *  2. Se calcula el efecto ANTES de escribir nada — el mismo objeto que la
-     *     pantalla ya le mostró al cliente.
-     *  3. Se rechaza lo que no se puede hacer: pagar de más, pasarse del tope,
-     *     un plan que no se puede armar. Todo antes del paso 5.
-     *  4. Si el abono no alcanza ni para lo vencido —y su mora—, esto NO era
-     *     un abono: se registra como pago normal y no se reescribe ningún plan.
-     *  5. Recién acá se quema un número de recibo.
-     *  6. Se pone al día lo vencido, FIFO, con la mora primero.
-     *  7. Se borran las cuotas que nadie tocó y se escribe el plan nuevo, con
-     *     la MISMA tasa congelada del compromiso.
-     *  8. Queda la constancia con su motivo, y el resumen del expediente se
-     *     recalcula desde las cuotas.
+     * Desde el 10-ago-2026 esto es un renglón solo pasado a
+     * `abonarAVariosLotes()`, exactamente como `cobrarCuotas()` es un renglón
+     * solo de `cobrarVariosLotes()`. **Un camino de código, no dos.** Dos
+     * versiones del abono —una para un lote y otra para varios— es la forma más
+     * segura de que dentro de tres meses una arregle un borde que la otra no, y
+     * que dos clientes con el mismo caso reciban números distintos.
      *
-     * Si algo falla en cualquier paso se cae todo junto: el correlativo
-     * vuelve, el plan viejo sigue en pie y no queda media reprogramación.
+     * Se conserva la firma porque la usan los tests golden del dominio, la
+     * pantalla y el import de la cartera vieja: sigue siendo la manera clara de
+     * decir «abono a este lote».
      *
      * ═══ CON INTERES, UN ABONO AHORRA INTERESES ═══
      *
@@ -459,7 +452,90 @@ final readonly class RegistroDePagos
         ?CarbonImmutable $fecha = null,
         ?string $observaciones = null,
     ): Recibo {
-        $this->verificar($venta, $lote, $monto, $forma, $referencia);
+        return $this->abonarAVariosLotes(
+            venta: $venta,
+            cliente: $cliente,
+            renglones: [['lote' => $lote, 'monto' => $monto, 'modalidad' => $modalidad]],
+            motivo: $motivo,
+            forma: $forma,
+            referencia: $referencia,
+            fecha: $fecha,
+            observaciones: $observaciones,
+        );
+    }
+
+    /**
+     * Abonar a capital en VARIOS lotes del mismo contrato, con un solo recibo.
+     *
+     * ═══ QUE PIDIO MAURICIO, TEXTUAL (10-AGO-2026) ═══
+     *
+     * «Deberia de poderse a mas de un lote, en caso de que tenga mas el
+     * cliente: ponle quiere hacer un abono a capital de 20000 al lote 1 y
+     * 10000 al lote 2, todo en una sola transaccion».
+     *
+     * Un cliente entrega un dinero y se lleva un papel — que es lo que R21 ya
+     * decia del abono y lo que `cobrarVariosLotes()` ya hacia para las cuotas.
+     *
+     * ═══ 🔴 QUE DICE R21, Y POR QUE ESTO NO LO CONTRADICE ═══
+     *
+     * R21 dice «el abono se aplica A UN LOTE, y lo elige quien recibe», y lo
+     * justifica: «repartirlo entre todos recalcularia tres cuotas de golpe y le
+     * moveria numeros que no pidio tocar». Lo que la contratante estaba
+     * rechazando es que el SISTEMA reparta solo.
+     *
+     * Aca no reparte nadie: **el monto de cada lote lo teclea quien recibe**, y
+     * la modalidad tambien es por lote. El sistema no adivina un centavo. Un
+     * lote que no se marca no se toca.
+     *
+     * ⚠️ Aun asi, la letra de R21 dice «un lote» y la escribio la contratante.
+     * Hay que enmendarla por escrito — esta anotado en `docs/dominio.md`.
+     *
+     * ═══ LA MODALIDAD ES POR LOTE, NO POR RECIBO ═══
+     *
+     * Decision de Mauricio el 10-ago. Es lo fiel a R21 —los dos caminos los
+     * elige el cliente, y con dos lotes puede querer distinto en cada uno— y no
+     * costo nada de base: `reprogramaciones.modalidad` ya era una columna POR
+     * FILA desde el 6-ago.
+     *
+     * ═══ EL ORDEN DEL BLOQUEO NO ES CASUAL ═══
+     *
+     * Los renglones se ordenan por id ANTES de bloquear, igual que en
+     * `cobrarVariosLotes()`. Dos personas abonando los mismos dos lotes en
+     * orden distinto se traban la una a la otra — el deadlock clasico de dos
+     * transacciones que toman los mismos candados al reves.
+     *
+     * ═══ TODO SE VERIFICA ANTES DE QUEMAR EL NUMERO ═══
+     *
+     * La fase 1 calcula el efecto de TODOS los lotes y rechaza lo que no se
+     * puede hacer; recien la fase 2 escribe. Con dos lotes eso importa mas que
+     * con uno: si el segundo se pasa del tope, el primero TAMPOCO se abona y no
+     * queda medio recibo con un plan reescrito.
+     *
+     * ═══ UN LOTE QUE NO ALCANZA NO TUMBA A LOS OTROS ═══
+     *
+     * Si a un lote no le alcanza ni para lo vencido, ESE lote se registra como
+     * pago normal y no se reprograma —igual que con un solo lote— mientras los
+     * demas siguen su camino. No es un error: el dinero ya esta sobre el
+     * mostrador y la notificacion lo explica.
+     *
+     * @param list<array{lote: Compromiso, monto: Monto, modalidad: ModalidadDeReprogramacion}> $renglones
+     * @param string $motivo obligatorio (R21); la base tambien lo exige
+     *
+     * @throws PagoInvalidoException
+     */
+    public function abonarAVariosLotes(
+        Venta $venta,
+        Cliente $cliente,
+        array $renglones,
+        string $motivo,
+        FormaDePago $forma,
+        ?string $referencia = null,
+        ?CarbonImmutable $fecha = null,
+        ?string $observaciones = null,
+    ): Recibo {
+        if ($renglones === []) {
+            throw PagoInvalidoException::porNoElegirNingunLote();
+        }
 
         $porQue = trim($motivo);
 
@@ -467,77 +543,418 @@ final readonly class RegistroDePagos
             throw PagoInvalidoException::porFaltarElMotivoDelAbono();
         }
 
+        $vistos = [];
+        $total = Monto::cero();
+
+        foreach ($renglones as $renglon) {
+            $this->verificar($venta, $renglon['lote'], $renglon['monto'], $forma, $referencia);
+
+            $id = (int) $renglon['lote']->getKey();
+
+            if (in_array($id, $vistos, true)) {
+                throw PagoInvalidoException::porLoteRepetido($this->codigo($renglon['lote']));
+            }
+
+            $vistos[] = $id;
+            $total = $total->sumar($renglon['monto']);
+        }
+
         $cuando = $fecha ?? CarbonImmutable::parse(today()->toDateString());
         $this->verificarLaFecha($venta, $cuando);
         $limpia = trim($referencia ?? '');
 
+        // El orden del bloqueo, igual para todos. Ver el docblock.
+        usort(
+            $renglones,
+            static fn (array $uno, array $otro): int => (int) $uno['lote']->getKey() <=> (int) $otro['lote']->getKey(),
+        );
+
         return DB::transaction(function () use (
             $venta,
-            $lote,
             $cliente,
-            $monto,
+            $renglones,
+            $porQue,
+            $forma,
+            $limpia,
+            $cuando,
+            $observaciones,
+            $total
+        ): Recibo {
+            /*
+             * FASE 1 — releer bloqueando, calcular y rechazar. Sin escribir una
+             * sola fila: si algo de esto se cae, el correlativo ni se movio.
+             */
+            $planificados = [];
+            $habraReprogramacion = false;
+
+            foreach ($renglones as $renglon) {
+                $lote = $renglon['lote'];
+                $monto = $renglon['monto'];
+
+                $pendientes = $this->pendientesBloqueadas($lote);
+                $mora = MoraDelLote::calcular($pendientes, $this->condicionesDe($lote), $cuando);
+
+                $efecto = EfectoDelAbono::calcular(
+                    $pendientes,
+                    $monto,
+                    $renglon['modalidad'],
+                    $this->diaDePago($venta),
+                    $this->tasaDe($lote),
+                    $mora->total,
+                );
+
+                if ($monto->mayorQue($efecto->saldoDelLote->sumar($mora->total))) {
+                    throw PagoInvalidoException::porPagarDeMas(
+                        $monto,
+                        $efecto->saldoDelLote->sumar($mora->total),
+                        $this->codigo($lote),
+                    );
+                }
+
+                if ($efecto->superaElTope) {
+                    throw PagoInvalidoException::porAbonoQueNoSePuedeReprogramar(
+                        $monto,
+                        $efecto->tope,
+                        $efecto->saldoDelLote,
+                        $this->codigo($lote),
+                    );
+                }
+
+                $plan = $efecto->planNuevo;
+
+                // Un pago normal no reescribe nada, asi que no necesita plan.
+                if (! $efecto->esPagoNormal) {
+                    if ($efecto->problema !== null || ! $plan instanceof PlanDeCuotas) {
+                        throw PagoInvalidoException::porPlanQueNoSePudoArmar(
+                            $efecto->problema ?? 'No se pudo armar el plan nuevo.',
+                            $this->codigo($lote),
+                        );
+                    }
+
+                    // Un plan que no cierra al centimo no llega nunca a la base
+                    // (§8.3.4). Es la misma verificacion que hace RegistroDeVentas.
+                    if (! $plan->cierraExacto()) {
+                        throw PagoInvalidoException::porPlanQueNoCierra($plan->totalCapital(), $efecto->saldoNuevo);
+                    }
+
+                    $habraReprogramacion = true;
+                }
+
+                $planificados[] = [
+                    'lote'       => $lote,
+                    'monto'      => $monto,
+                    'pendientes' => $pendientes,
+                    'mora'       => $mora,
+                    'efecto'     => $efecto,
+                    'plan'       => $plan,
+                ];
+            }
+
+            /*
+             * FASE 2 — escribir. Un solo numero para todo (R12), y
+             * `compromiso_id` en NULL cuando son varios: este recibo no es de
+             * un lote, y el desglose es el que lo dice.
+             */
+            $recibo = $this->emitir(
+                $venta,
+                count($renglones) === 1 ? $renglones[0]['lote'] : null,
+                $cliente,
+                /*
+                 * 🔴 EL PAPEL DICE LO QUE HIZO, NO LO QUE SE PIDIO
+                 *
+                 * Si a ningun lote le alcanzo para bajar capital, esto fue un
+                 * cobro de cuotas y el recibo tiene que decir «cuota» — porque
+                 * `anular()` rechaza los de concepto `abono_capital` por haber
+                 * reescrito un plan. Marcar asi uno que no reprogramo nada lo
+                 * dejaria **inanulable para siempre**, sin ninguna razon.
+                 *
+                 * Se sabe aca porque la fase 1 ya calculo el efecto de todos
+                 * los lotes: para eso existe.
+                 *
+                 * ⚠️ Esta linea se perdio el 10-ago al unificar los dos caminos
+                 * —el `abonarACapital` viejo emitia `Cuota` en su rama de pago
+                 * normal— y la atrapo el golden test del dominio. Si alguien la
+                 * simplifica a `AbonoCapital` fijo, se cae `AbonoACapitalTest`.
+                 */
+                $habraReprogramacion ? ConceptoDeRecibo::AbonoCapital : ConceptoDeRecibo::Cuota,
+                $total,
+                $forma,
+                $limpia,
+                $cuando,
+                $observaciones,
+            );
+
+            $moraCobrada = Monto::cero();
+
+            foreach ($planificados as $planificado) {
+                $efecto = $planificado['efecto'];
+
+                /*
+                 * No alcanzo ni para lo vencido: ESTE lote es un pago normal y
+                 * no se reescribe ningun plan. Los demas siguen su camino.
+                 */
+                if ($efecto->esPagoNormal) {
+                    $reparto = $this->repartir($recibo, $planificado['pendientes'], $planificado['monto'], $planificado['mora']);
+                    $moraCobrada = $moraCobrada->sumar($reparto['cobrada']);
+
+                    continue;
+                }
+
+                $plan = $planificado['plan'];
+
+                if (! $plan instanceof PlanDeCuotas) {
+                    /*
+                     * Imposible: la fase 1 ya lo verifico. Va una excepcion y no
+                     * un `continue` callado, porque un plan que se perdio entre
+                     * las dos fases es un error nuestro y tiene que caerse
+                     * entero, no abonar a medias.
+                     */
+                    throw PagoInvalidoException::porPlanQueNoSePudoArmar(
+                        'El plan se perdio entre la verificacion y la escritura.',
+                        $this->codigo($planificado['lote']),
+                    );
+                }
+
+                /*
+                 * Poner al dia, FIFO, con la mora adelante. Con lo vencido
+                 * cubierto por completo, esas cuotas quedan saldadas y ninguna
+                 * sale parcial de este paso.
+                 */
+                if (! $efecto->ponerAlDia->esCero()) {
+                    $reparto = $this->repartir($recibo, $planificado['pendientes'], $efecto->ponerAlDia, $planificado['mora']);
+                    $moraCobrada = $moraCobrada->sumar($reparto['cobrada']);
+                }
+
+                $this->reescribirElPlan($venta, $planificado['lote'], $efecto, $plan);
+                $this->asentarLaConstancia($venta, $planificado['lote'], $recibo, $efecto, $plan, $porQue);
+            }
+
+            /*
+             * La mora se asienta UNA vez y no por lote: `asentarLaMora()` hace
+             * un `update()` sobre el recibo, asi que llamarla adentro del bucle
+             * pisaria la del lote anterior en vez de sumarla. Es la misma razon
+             * por la que `cobrarVariosLotes()` acumula.
+             */
+            $this->asentarLaMora($recibo, $moraCobrada, Monto::cero(), '');
+
+            // El resumen solo cambia si algun plan se reescribio.
+            if ($habraReprogramacion) {
+                $this->recalcularElResumen($venta);
+            }
+
+            $this->cerrarSiQuedoPagada($venta, $cuando);
+
+            return $recibo;
+        });
+    }
+
+    /**
+     * Cobrar cuotas de varios lotes Y abonar el sobrante a capital, con UN recibo.
+     *
+     * ═══ QUE PIDIO MAURICIO (10-AGO-2026) ═══
+     *
+     * «Aca tambien debe de poderse, la cuota de los lotes que tenga y si
+     * tambien quiere hacer abono a capital en el mismo coso». Y al preguntarle
+     * como reparte: «se selecciona como cuota o abono a capital; en caso de que
+     * traiga para dos cuotas y sobre, se le abona como capital a **un lote
+     * seleccionable**».
+     *
+     * ═══ SON DOS COSAS SEPARADAS, Y ESO LO DECIDIO EL ═══
+     *
+     * Yo habia propuesto un monto por lote que el sistema partiera solo en
+     * cuota y capital. Mauricio lo corrigio y tenia razon: en el mostrador son
+     * dos gestos distintos —«vengo a pagar el mes de mis tres lotes» y «y con
+     * lo que sobra bajame el lote 1»— y mezclarlos en un numero obliga a quien
+     * atiende a hacer cuentas de cabeza.
+     *
+     * Asi que:
+     *
+     *  - `$cuotas` son los renglones que se cobran, FIFO, lote por lote. Es
+     *    exactamente lo que hace `cobrarVariosLotes()`.
+     *  - `$aCapital` es el sobrante, y va contra UN lote elegido.
+     *
+     * 🔴 **De regalo, esto respeta la letra de R21**: el abono sigue yendo a un
+     * solo lote. La enmienda R21-bis solo hace falta para `abonarAVariosLotes()`,
+     * no para este camino.
+     *
+     * ═══ EL ORDEN NO ES NEGOCIABLE: PRIMERO SE COBRA, DESPUES SE ABONA ═══
+     *
+     * R21 no deja tocar una cuota pagada a medias, asi que un abono contra un
+     * lote que tiene una se rechaza (`superaElTope`). Cobrando primero, esa
+     * cuota queda saldada y el abono corre sobre cuotas que nadie toco — que es
+     * justo el caso que este metodo existe para resolver.
+     *
+     * Por eso el efecto del abono se calcula **releyendo despues del cobro** y
+     * no antes: cualquier otra cosa mediria un estado que ya no existe.
+     *
+     * ═══ POR QUE EL SOBRANTE QUE NO ALCANZA SE RECHAZA ═══
+     *
+     * Si despues de cobrar las cuotas el sobrante no llega a bajar capital,
+     * «Ambas» no cumplio lo que promete. Se rechaza con el numero que falta en
+     * vez de registrar en silencio un abono que no abono: la pantalla sigue
+     * abierta y quien atiende mueve ese dinero a las cuotas, que es un campo.
+     *
+     * @param list<array{lote: Compromiso, monto: Monto}> $cuotas los renglones que se cobran
+     * @param string $motivo obligatorio (R21); la base tambien lo exige
+     *
+     * @throws PagoInvalidoException
+     */
+    public function cobrarYAbonar(
+        Venta $venta,
+        Cliente $cliente,
+        array $cuotas,
+        Compromiso $loteDelAbono,
+        Monto $aCapital,
+        ModalidadDeReprogramacion $modalidad,
+        string $motivo,
+        FormaDePago $forma,
+        ?string $referencia = null,
+        ?CarbonImmutable $fecha = null,
+        ?string $observaciones = null,
+    ): Recibo {
+        $this->verificar($venta, $loteDelAbono, $aCapital, $forma, $referencia);
+
+        $porQue = trim($motivo);
+
+        if ($porQue === '') {
+            throw PagoInvalidoException::porFaltarElMotivoDelAbono();
+        }
+
+        $vistos = [];
+        $total = $aCapital;
+
+        foreach ($cuotas as $renglon) {
+            $this->verificar($venta, $renglon['lote'], $renglon['monto'], $forma, $referencia);
+
+            $id = (int) $renglon['lote']->getKey();
+
+            if (in_array($id, $vistos, true)) {
+                throw PagoInvalidoException::porLoteRepetido($this->codigo($renglon['lote']));
+            }
+
+            $vistos[] = $id;
+            $total = $total->sumar($renglon['monto']);
+        }
+
+        $cuando = $fecha ?? CarbonImmutable::parse(today()->toDateString());
+        $this->verificarLaFecha($venta, $cuando);
+        $limpia = trim($referencia ?? '');
+
+        // El orden del bloqueo, igual para todo el sistema. Ver
+        // `cobrarVariosLotes()`: sin esto, dos receptores se traban entre si.
+        usort(
+            $cuotas,
+            static fn (array $uno, array $otro): int => (int) $uno['lote']->getKey() <=> (int) $otro['lote']->getKey(),
+        );
+
+        /*
+         * `compromiso_id` solo se llena cuando TODO el recibo —las cuotas y el
+         * abono— es de un mismo lote. Con dos, la columna diria una mentira y
+         * el desglose es el que contesta (R13).
+         */
+        $tocados = $vistos;
+
+        if (! in_array((int) $loteDelAbono->getKey(), $tocados, true)) {
+            $tocados[] = (int) $loteDelAbono->getKey();
+        }
+
+        return DB::transaction(function () use (
+            $venta,
+            $cliente,
+            $cuotas,
+            $loteDelAbono,
+            $aCapital,
             $modalidad,
             $porQue,
             $forma,
             $limpia,
             $cuando,
-            $observaciones
+            $observaciones,
+            $total,
+            $tocados
         ): Recibo {
-            // 1 y 2. Releer bloqueando, y calcular con lo recién leído.
-            $pendientes = $this->pendientesBloqueadas($lote);
-            $mora = MoraDelLote::calcular($pendientes, $this->condicionesDe($lote), $cuando);
+            // 1. Las cuotas: releer bloqueando y rechazar lo que paga de mas.
+            $tandas = [];
 
-            $efecto = EfectoDelAbono::calcular(
-                $pendientes,
-                $monto,
-                $modalidad,
-                $this->diaDePago($venta),
-                $this->tasaDe($lote),
-                $mora->total,
+            foreach ($cuotas as $renglon) {
+                $pendientes = $this->pendientesBloqueadas($renglon['lote']);
+                $mora = MoraDelLote::calcular($pendientes, $this->condicionesDe($renglon['lote']), $cuando);
+                $tope = $this->saldoDe($pendientes)->sumar($mora->total);
+
+                if ($renglon['monto']->mayorQue($tope)) {
+                    throw PagoInvalidoException::porPagarDeMas($renglon['monto'], $tope, $this->codigo($renglon['lote']));
+                }
+
+                $tandas[] = ['pendientes' => $pendientes, 'monto' => $renglon['monto'], 'mora' => $mora];
+            }
+
+            // 2. UN numero, para las dos mitades (R12).
+            $recibo = $this->emitir(
+                $venta,
+                count($tocados) === 1 ? $loteDelAbono : null,
+                $cliente,
+                ConceptoDeRecibo::AbonoCapital,
+                $total,
+                $forma,
+                $limpia,
+                $cuando,
+                $observaciones,
             );
 
-            // 3. Lo que no se puede hacer, antes de quemar nada.
-            if ($monto->mayorQue($efecto->saldoDelLote->sumar($mora->total))) {
+            // 3. La mitad de cuota: FIFO, mora → interes → capital.
+            $moraCobrada = Monto::cero();
+
+            foreach ($tandas as $tanda) {
+                $reparto = $this->repartir($recibo, $tanda['pendientes'], $tanda['monto'], $tanda['mora']);
+                $moraCobrada = $moraCobrada->sumar($reparto['cobrada']);
+            }
+
+            /*
+             * La mora se asienta UNA vez: `asentarLaMora()` hace un `update()`
+             * sobre el recibo, asi que llamarla por lote pisaria la anterior.
+             */
+            $this->asentarLaMora($recibo, $moraCobrada, Monto::cero(), '');
+
+            /*
+             * 4. El abono, sobre el estado que dejo el cobro. Releer aca es el
+             * corazon del metodo: la cuota que estaba a medias ya quedo saldada
+             * y el lote entra al abono con cuotas que nadie toco.
+             */
+            $limpias = $this->pendientesBloqueadas($loteDelAbono);
+            $moraDelAbono = MoraDelLote::calcular($limpias, $this->condicionesDe($loteDelAbono), $cuando);
+
+            $efecto = EfectoDelAbono::calcular(
+                $limpias,
+                $aCapital,
+                $modalidad,
+                $this->diaDePago($venta),
+                $this->tasaDe($loteDelAbono),
+                $moraDelAbono->total,
+            );
+
+            if ($aCapital->mayorQue($efecto->saldoDelLote->sumar($moraDelAbono->total))) {
                 throw PagoInvalidoException::porPagarDeMas(
-                    $monto,
-                    $efecto->saldoDelLote->sumar($mora->total),
-                    $this->codigo($lote),
+                    $aCapital,
+                    $efecto->saldoDelLote->sumar($moraDelAbono->total),
+                    $this->codigo($loteDelAbono),
+                );
+            }
+
+            if ($efecto->esPagoNormal) {
+                throw PagoInvalidoException::porSobranteQueNoBajaCapital(
+                    $aCapital,
+                    $efecto->ponerAlDia,
+                    $this->codigo($loteDelAbono),
                 );
             }
 
             if ($efecto->superaElTope) {
                 throw PagoInvalidoException::porAbonoQueNoSePuedeReprogramar(
-                    $monto,
+                    $aCapital,
                     $efecto->tope,
                     $efecto->saldoDelLote,
-                    $this->codigo($lote),
+                    $this->codigo($loteDelAbono),
                 );
-            }
-
-            /*
-             * 4. No alcanza ni para lo vencido: es un pago normal y no hay
-             * reprogramación. No se reescribe un plan por algo que no bajó el
-             * capital. El dinero se registra igual —ya está sobre el
-             * mostrador— y quien atiende lo ve en la notificación.
-             */
-            if ($efecto->esPagoNormal) {
-                $recibo = $this->emitir(
-                    $venta,
-                    $lote,
-                    $cliente,
-                    ConceptoDeRecibo::Cuota,
-                    $monto,
-                    $forma,
-                    $limpia,
-                    $cuando,
-                    $observaciones,
-                );
-
-                $reparto = $this->repartir($recibo, $pendientes, $monto, $mora);
-                $this->asentarLaMora($recibo, $reparto['cobrada'], Monto::cero(), '');
-                $this->cerrarSiQuedoPagada($venta, $cuando);
-
-                return $recibo;
             }
 
             $plan = $efecto->planNuevo;
@@ -545,42 +962,22 @@ final readonly class RegistroDePagos
             if ($efecto->problema !== null || ! $plan instanceof PlanDeCuotas) {
                 throw PagoInvalidoException::porPlanQueNoSePudoArmar(
                     $efecto->problema ?? 'No se pudo armar el plan nuevo.',
-                    $this->codigo($lote),
+                    $this->codigo($loteDelAbono),
                 );
             }
 
-            // Un plan que no cierra al céntimo no llega nunca a la base
-            // (§8.3.4). Es la misma verificación que hace RegistroDeVentas.
+            // Un plan que no cierra al centimo no llega nunca a la base (§8.3.4).
             if (! $plan->cierraExacto()) {
                 throw PagoInvalidoException::porPlanQueNoCierra($plan->totalCapital(), $efecto->saldoNuevo);
             }
 
-            // 5. Recién ahora se quema un número (R12).
-            $recibo = $this->emitir(
-                $venta,
-                $lote,
-                $cliente,
-                ConceptoDeRecibo::AbonoCapital,
-                $monto,
-                $forma,
-                $limpia,
-                $cuando,
-                $observaciones,
-            );
-
             /*
-             * 6. Poner al día, FIFO, con la mora adelante. Con lo vencido
-             * cubierto por completo, esas cuotas quedan saldadas y ninguna
-             * sale parcial de este paso.
+             * `ponerAlDia` vale cero: el paso 4 releyo despues del cobro, asi
+             * que no quedo nada vencido que poner al dia. Si algun dia dejara
+             * de valer cero, `esPagoNormal` de arriba ya lo habria rechazado.
              */
-            if (! $efecto->ponerAlDia->esCero()) {
-                $reparto = $this->repartir($recibo, $pendientes, $efecto->ponerAlDia, $mora);
-                $this->asentarLaMora($recibo, $reparto['cobrada'], Monto::cero(), '');
-            }
-
-            // 7 y 8.
-            $this->reescribirElPlan($venta, $lote, $efecto, $plan);
-            $this->asentarLaConstancia($venta, $lote, $recibo, $efecto, $plan, $porQue);
+            $this->reescribirElPlan($venta, $loteDelAbono, $efecto, $plan);
+            $this->asentarLaConstancia($venta, $loteDelAbono, $recibo, $efecto, $plan, $porQue);
             $this->recalcularElResumen($venta);
             $this->cerrarSiQuedoPagada($venta, $cuando);
 

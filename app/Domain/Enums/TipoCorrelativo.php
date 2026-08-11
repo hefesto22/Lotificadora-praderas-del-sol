@@ -21,13 +21,26 @@ namespace App\Domain\Enums;
  *   UPDATE` dentro de la transaccion: es la unica forma de que dos cobros
  *   simultaneos no saquen el mismo numero.
  *
+ * - DEVOLUCION es GLOBAL y nace el 10-ago-2026 con el primer EGRESO del
+ *   sistema. Va en serie PROPIA y no en la de recibos: R12 promete que
+ *   entre el 000120 y el 000130 no falta ninguno, y meter en esa serie
+ *   documentos que NO son cobros la rompe. Un comprobante de salida no es
+ *   un recibo — dice lo contrario.
+ *
  * No hay serie de CAI: la contratante no usa talonario autorizado por el
  * SAR para estos cobros (R10).
+ *
+ * ⚠️ **Agregar un caso acá NO alcanza.** La tabla `correlativos` tiene un
+ * CHECK con la lista congelada en su migracion, asi que el tipo nuevo
+ * rebotaria contra la base. Hay que recrear
+ * `correlativos_tipo_valido_chk` y `correlativos_alcance_segun_tipo_chk`
+ * en una migracion, como hizo la de `devoluciones`.
  */
 enum TipoCorrelativo: string
 {
     case Contrato = 'contrato';
     case ReciboInterno = 'recibo_interno';
+    case Devolucion = 'devolucion';
 
     /**
      * @return list<string>
@@ -54,7 +67,7 @@ enum TipoCorrelativo: string
      */
     public static function valoresGlobales(): array
     {
-        return [self::ReciboInterno->value];
+        return [self::ReciboInterno->value, self::Devolucion->value];
     }
 
     public function etiqueta(): string
@@ -62,6 +75,7 @@ enum TipoCorrelativo: string
         return match ($this) {
             self::Contrato      => 'Contrato',
             self::ReciboInterno => 'Recibo interno',
+            self::Devolucion    => 'Comprobante de devolución',
         };
     }
 

@@ -28,6 +28,7 @@ use App\Filament\Schemas\Components\MayusculasField;
 use App\Filament\Schemas\Components\MontoField;
 use App\Filament\Schemas\Components\TelefonoHondurasField;
 use App\Filament\Support\Cuadros;
+use App\Filament\Support\DevolverLaSenia;
 use App\Models\Bloque;
 use App\Models\Cliente;
 use App\Models\Lote;
@@ -647,10 +648,27 @@ class VerPlano extends Page
                     ->required()
                     ->rows(2)
                     ->placeholder('Se vencio el plazo, el cliente desistio, ...'),
+
+                /*
+                 * Los mismos campos que la tabla de apartados: si habia seña,
+                 * hay que decir que se hizo con ella. Aca el `$record` no se
+                 * inyecta —el plano trabaja con `$arguments`— asi que el
+                 * apartado se resuelve a mano.
+                 */
+                ...DevolverLaSenia::campos(),
             ])
             ->action(function (array $arguments, array $data): void {
                 $this->conElLote($arguments, function (Lote $lote) use ($data): string {
-                    app(RegistroDeCompromisos::class)->liberar($lote, $this->texto($data, 'motivo', 'Sin motivo'));
+                    $registro = app(RegistroDeCompromisos::class);
+                    $devolucion = DevolverLaSenia::loTecleado($data, $registro->vigenteDe($lote));
+
+                    $registro->liberar(
+                        $lote,
+                        $this->texto($data, 'motivo', 'Sin motivo'),
+                        $devolucion['devuelto'],
+                        $devolucion['forma'],
+                        $devolucion['referencia'],
+                    );
 
                     return $lote->getAttribute('codigo').' volvio a estar disponible.';
                 });

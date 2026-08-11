@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Apartados\Tables;
 
 use App\Domain\Enums\EstadoCompromiso;
+use App\Domain\Enums\FormaDePago;
 use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\RegistroDeCompromisos;
+use App\Filament\Support\DevolverLaSenia;
 use App\Models\Compromiso;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -242,12 +244,24 @@ class ApartadosTable
                     ->required()
                     ->rows(2)
                     ->placeholder('Se venció el plazo, el cliente desistió, ...'),
+
+                /*
+                 * Y si había seña, qué se hizo con ella. Los campos vienen de
+                 * `DevolverLaSenia` porque la misma pregunta la hacen el plano
+                 * y el trámite suelto — ver el docblock de esa clase.
+                 */
+                ...DevolverLaSenia::campos(),
             ])
             ->action(static function (Compromiso $record, array $data): void {
+                $devolucion = DevolverLaSenia::loTecleado($data, $record);
+
                 self::corriendo(
                     static fn (): Compromiso => app(RegistroDeCompromisos::class)->liberar(
                         $record->lote()->firstOrFail(),
                         is_string($data['motivo'] ?? null) ? $data['motivo'] : 'Sin motivo',
+                        $devolucion['devuelto'],
+                        $devolucion['forma'],
+                        $devolucion['referencia'],
                     ),
                     'El lote volvió a estar disponible',
                     static fn (Compromiso $fresco): string => self::avisoDeLaSenia($fresco),
@@ -258,10 +272,14 @@ class ApartadosTable
     /**
      * R14: si el apartado se cae, la plata vuelve.
      *
-     * Esto NO es un egreso — no hay comprobante de salida todavía, y se
-     * decidió el 6-ago dejar ese módulo para después. Lo que hace es sacar
-     * el pendiente de la lista, que es lo que evita que la promesa de R14
-     * quede escrita solo en el contrato.
+     * Desde el 10-ago SÍ es un egreso: emite el comprobante de devolución
+     * con su número de serie propia, admite devolver solo una parte, y lo
+     * que no se devuelve queda a favor del proyecto.
+     *
+     * Es la puerta del día siguiente: quien libera el lote puede diferir la
+     * devolución porque el cliente no estaba, y esto la cierra cuando vuelve.
+     * Por eso acá NO se ofrece «todavía no» — si vino a buscar su dinero, esa
+     * no es una respuesta.
      */
     private static function devolverLaSenia(): Action
     {
@@ -271,24 +289,35 @@ class ApartadosTable
             ->color('success')
             ->visible(static fn (Compromiso $record): bool => $record->seniaPorDevolver() instanceof Monto
                 && auth()->user()?->can('DevolverSenia:Compromiso') === true)
-            ->modalHeading('¿Ya se le devolvió la seña?')
+            ->modalHeading('Devolver la seña')
             ->modalDescription(
-                'Queda anotado con tu usuario y la fecha, y el apartado sale de la lista de '.
-                'pendientes por devolver. La salida de caja se registra aparte.'
+                'Sale el comprobante con su número, y el apartado deja de figurar en la lista '.
+                'de pendientes por devolver.'
             )
-            ->modalSubmitActionLabel('Sí, ya se devolvió')
+            ->modalSubmitActionLabel('Registrar la devolución')
             ->schema([
-                Textarea::make('observacion')
-                    ->label('¿Cómo se devolvió?')
+                ...DevolverLaSenia::campos(puedeDiferir: false),
+
+                Textarea::make('motivo')
+                    ->label('¿Por qué?')
+                    ->required()
                     ->rows(2)
-                    ->placeholder('En efectivo en la oficina, por transferencia, ...'),
+                    ->placeholder('El apartado se venció y el cliente no volvió, ...')
+                    ->helperText('Queda en el comprobante, con tu usuario y la fecha.'),
             ])
             ->action(static function (Compromiso $record, array $data): void {
+                $devolucion = DevolverLaSenia::loTecleado($data, $record);
+
                 self::corriendo(
-                    static fn (): Compromiso => app(RegistroDeCompromisos::class)->devolverLaSenia(
-                        $record,
-                        is_string($data['observacion'] ?? null) ? $data['observacion'] : null,
-                    ),
+                    static fn (): Compromiso => tap($record, static function (Compromiso $apartado) use ($devolucion, $data): void {
+                        app(RegistroDeCompromisos::class)->devolverLaSenia(
+                            $apartado,
+                            $devolucion['devuelto'] ?? Monto::cero(),
+                            $devolucion['forma'] ?? FormaDePago::Efectivo,
+                            is_string($data['motivo'] ?? null) ? $data['motivo'] : '',
+                            $devolucion['referencia'],
+                        );
+                    })->refresh(),
                     'Seña devuelta',
                     static fn (Compromiso $fresco): string => sprintf(
                         'Ya no queda nada pendiente del apartado del lote %s.',

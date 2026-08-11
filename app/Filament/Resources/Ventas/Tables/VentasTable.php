@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Ventas\Tables;
 
 use App\Domain\Enums\EstadoVenta;
+use App\Filament\Support\CobrarUnPago;
 use App\Models\Cuota;
 use App\Models\Venta;
 use Filament\Actions\ActionGroup;
@@ -125,6 +126,12 @@ class VentasTable
                  * archivado sigue teniendo sus ventas: sin esa línea el
                  * contador de su ficha diría «1» y esta pantalla mostraría
                  * cero — que es exactamente el contador mentiroso del §9.E6.
+                 *
+                 * ⚠️ Se borró por accidente el 10-ago-2026 al agregar el botón
+                 * de cobrar, y con él se cayó en silencio el atajo desde la
+                 * ficha del cliente: la pantalla se abría ENTERA sin avisar de
+                 * nada. Lo agarró `QueTieneElClienteTest`, que abre este
+                 * listado con el filtro puesto y cuenta las filas.
                  */
                 SelectFilter::make('cliente')
                     ->label('Cliente')
@@ -136,6 +143,28 @@ class VentasTable
                     ->searchable(),
             ])
             ->recordActions([
+                /*
+                 * ═══ EL MODAL SE ABRE ACA, SIN SACAR A NADIE DE LA PANTALLA ═══
+                 *
+                 * Hasta el 10-ago-2026 esto era un link a
+                 * `…/ventas/7?action=cobrar`: el modal existía solo en el
+                 * expediente, así que cobrar desde la lista era navegar. Se
+                 * probó y Mauricio lo bajó en el acto — «acá no debe de
+                 * redirigirme a la vista de ventas, siempre en la vista de
+                 * cliente ahí debe de abrirse el modal».
+                 *
+                 * Tenía razón, y no era una preferencia visual: esta misma
+                 * tabla es la que muestra la pestaña Ventas de la ficha del
+                 * cliente —el relation manager la reusa vía
+                 * `$relatedResource`— así que el link sacaba a quien atiende
+                 * del cliente que tenía enfrente para llevarlo a otra pantalla.
+                 *
+                 * Ahora el modal se define una sola vez, en `CobrarUnPago`, y
+                 * las tres pantallas abren el MISMO. Cero código de dinero
+                 * duplicado, y quien cobra se queda donde estaba.
+                 */
+                CobrarUnPago::accion(),
+
                 ActionGroup::make([
                     ViewAction::make(),
                 ]),

@@ -235,4 +235,27 @@ final class PagoInvalidoException extends GrupoOlympoException
     {
         return new self('Para condonar la mora hace falta escribir por que. Queda en el recibo, con el nombre de quien la autorizo.');
     }
+
+    /**
+     * El modo «Ambas» con un sobrante que no llega a bajar capital.
+     *
+     * ═══ POR QUE SE RECHAZA EN VEZ DE REGISTRARLO ═══
+     *
+     * Despues de cobrar las cuotas marcadas, al lote elegido todavia le queda
+     * algo vencido y el sobrante no lo cubre. Ese dinero se aplicaria a cuotas
+     * y no bajaria un centavo de capital — o sea que «Ambas» no habria hecho lo
+     * que promete, y quedaria un recibo de abono que no abono nada.
+     *
+     * Se rechaza con el numero exacto que falta porque la pantalla sigue
+     * abierta: mover ese dinero al renglon de la cuota es un campo, y quien
+     * atiende lo hace con el cliente enfrente sin cerrar nada.
+     */
+    public static function porSobranteQueNoBajaCapital(Monto $sobrante, Monto $vencido, string $codigo): self
+    {
+        return new self(
+            "El sobrante de {$sobrante->formateado()} no baja capital: al lote {$codigo} le quedan ".
+            "{$vencido->formateado()} vencidos y hay que cubrirlos primero. Sumale esa diferencia a la ".
+            'cuota de ese lote, o abona mas.'
+        );
+    }
 }

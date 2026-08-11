@@ -1086,6 +1086,21 @@
 
             var R = [a[0] - s[0], a[1] - s[1]];
             var U = [b[0] - s[0], b[1] - s[1]];
+
+            /*
+             * Segunda red, y hace falta: el ancla puede caer dentro del margen
+             * y el marco salir enorme igual. Un rótulo más alto que cuatro
+             * pantallas no es un rótulo, y uno de menos de dos píxeles no se
+             * lee — en los dos casos, mejor no dibujarlo.
+             */
+            var lienzo = document.getElementById('visor360-lienzo');
+            var alto = Math.hypot(U[0], U[1]);
+            var ancho = Math.hypot(R[0], R[1]);
+
+            if (! isFinite(alto) || ! isFinite(ancho)) { return; }
+            if (alto < 2 || alto > lienzo.clientHeight * 4) { return; }
+            if (ancho > lienzo.clientWidth * 6) { return; }
+
             var k = 100;
 
             /*
@@ -1182,10 +1197,30 @@
             var c = document.getElementById('visor360-lienzo');
             var razon = c.width / Math.max(c.height, 1);
 
-            return [
-                ((d[0] / -d[2]) / (razon * this.fov) + 1) / 2 * c.clientWidth,
-                (1 - (d[1] / -d[2]) / this.fov) / 2 * c.clientHeight
-            ];
+            var x = ((d[0] / -d[2]) / (razon * this.fov) + 1) / 2 * c.clientWidth;
+            var y = (1 - (d[1] / -d[2]) / this.fov) / 2 * c.clientHeight;
+
+            /*
+             * ⚠️ ACÁ ESTABA EL RASGADO EN DIAGONAL.
+             *
+             * Un punto que queda casi a 90° de donde se mira tiene `d[2]` casi
+             * en cero, y esta división lo manda a cientos de miles de píxeles.
+             * Con un trazo eso pasa desapercibido; con un rótulo, NO: el texto
+             * se compone con fuente 100 y una matriz lo lleva a su tamaño, así
+             * que un marco gigante convierte una letra en un polígono que tapa
+             * la pantalla. Las manchas claras eran una «L» agrandada cien mil
+             * veces, y las bandas oscuras su contorno.
+             *
+             * Ocho pantallas de margen: una línea que entra desde afuera del
+             * cuadro sigue uniéndose bien, y lo que explota se descarta.
+             */
+            var tope = Math.max(c.clientWidth, c.clientHeight) * 8;
+
+            if (! isFinite(x) || ! isFinite(y) || Math.abs(x) > tope || Math.abs(y) > tope) {
+                return null;
+            }
+
+            return [x, y];
         },
 
         /** El arco entre dos puntos, partido en pedacitos que lo siguen. */
@@ -1241,7 +1276,7 @@
             this.mensaje('Cargando la foto…');
 
             // Las marcas se ven desde el primer cuadro, sin esperar la foto.
-            this.dibujarMarcas();
+            this.pedirCuadro();
 
             if (lote.foto360Mini) {
                 this.cargar(lote.foto360Mini, mio, false);
@@ -1253,6 +1288,10 @@
         cerrar: function () {
             this.pedido++;
             this.marcas = [];
+
+            // Sin cuadros pendientes: cerrar y que se dibuje encima del plano
+            // sería un parpadeo gratis.
+            if (this.cuadro) { cancelAnimationFrame(this.cuadro); this.cuadro = 0; }
             document.getElementById('visor360').hidden = true;
         },
 
@@ -1272,7 +1311,7 @@
                 if (mio !== visor.pedido) { return; }
                 visor.subirTextura(img);
                 if (esGrande) { visor.mensaje(null); }
-                visor.dibujar();
+                visor.pedirCuadro();
             };
 
             img.onerror = function () {
@@ -1295,11 +1334,30 @@
              * WebGL 2 lo admite y lo tiene todo lo que sea de 2021 en adelante.
              * Para lo anterior hay respaldo en `subirTextura`.
              */
-            var gl = lienzo.getContext('webgl2');
+            /*
+             * ⚠️ `preserveDrawingBuffer` es la mitad del arreglo del rasgado.
+             *
+             * Por defecto WebGL DESCARTA el contenido del búfer después de
+             * mostrarlo: queda «indefinido». Como acá se dibuja solo cuando
+             * algo cambia, cualquier recomposición de la pantalla que no venga
+             * precedida de un dibujo mostraba ese contenido indefinido — la
+             * imagen rasgada en diagonales, con triángulos en blanco. Aparecía
+             * girando, que es justo cuando el compositor trabaja más.
+             *
+             * La otra mitad es dibujar dentro de `requestAnimationFrame`, para
+             * ir al ritmo del compositor en vez de pelearle. Ver `pedirCuadro`.
+             */
+            var opciones = { preserveDrawingBuffer: true, antialias: false, alpha: false };
+
+            var gl = lienzo.getContext('webgl2', opciones);
             this.esWebgl2 = !!gl;
 
-            if (!gl) { gl = lienzo.getContext('webgl') || lienzo.getContext('experimental-webgl'); }
+            if (!gl) {
+                gl = lienzo.getContext('webgl', opciones) || lienzo.getContext('experimental-webgl', opciones);
+            }
             if (!gl) { return false; }
+
+            gl.clearColor(0, 0, 0, 1);
 
             var vs =
                 'attribute vec2 p; varying vec2 v;' +
@@ -1405,9 +1463,34 @@
             if (this.gl) { this.gl.viewport(0, 0, lienzo.width, lienzo.height); }
         },
 
+        cuadro: 0,
+
+        /*
+         * Un cuadro por vuelta del compositor, ni uno más.
+         *
+         * Antes cada `mousemove` dibujaba de inmediato: en un arrastre eso son
+         * decenas de dibujos por segundo fuera de tiempo, que el navegador
+         * compone cuando puede. Acá se marca «hay que dibujar» y el navegador
+         * avisa cuándo le conviene.
+         */
+        pedirCuadro: function () {
+            if (this.cuadro) { return; }
+
+            var visor = this;
+
+            this.cuadro = requestAnimationFrame(function () {
+                visor.cuadro = 0;
+                visor.dibujar();
+            });
+        },
+
         dibujar: function () {
             var gl = this.gl;
             if (!gl) { return; }
+
+            // Se limpia siempre: así, si algo falla a medio dibujar, se ve
+            // negro y no un pedazo del cuadro anterior.
+            gl.clear(gl.COLOR_BUFFER_BIT);
 
             var lienzo = gl.canvas;
             var razon = lienzo.width / Math.max(lienzo.height, 1);
@@ -1425,12 +1508,12 @@
             // El tope evita darse vuelta por completo mirando hacia arriba,
             // que desorienta y no se puede deshacer con el pulgar.
             this.lat = Math.max(-1.45, Math.min(1.45, this.lat - dy * 0.005 * this.fov));
-            this.dibujar();
+            this.pedirCuadro();
         },
 
         acercar: function (factor) {
             this.fov = Math.max(0.35, Math.min(1.6, this.fov * factor));
-            this.dibujar();
+            this.pedirCuadro();
         },
 
         conectarGestos: function (lienzo) {
@@ -1477,7 +1560,7 @@
 
             window.addEventListener('resize', function () {
                 if (document.getElementById('visor360').hidden) { return; }
-                visor.medir(); visor.dibujar();
+                visor.medir(); visor.pedirCuadro();
             });
         },
 

@@ -329,6 +329,45 @@ se reemplaza, y la numeración sigue desde ahí (`cuotas_numero_por_lote_uidx` n
 empezar de nuevo en 1, y el recibo viejo quedaría apuntando a una cuota 5 que ahora significa
 otra cosa). Lo que cambia es cuánto o cuántas, nunca cuándo.
 
+### 🔴 R21-bis · El abono puede repartirse entre varios lotes — ENMIENDA PENDIENTE DE FIRMA
+
+*(pedido de Mauricio, 10-ago-2026 — **construido, y sin confirmar por la contratante**)*
+
+Textual: «deberia de poderse a mas de un lote, en caso de que tenga mas el cliente: ponle
+quiere hacer un abono a capital de 20000 al lote 1 y 10000 al lote 2, todo en una sola
+transaccion».
+
+**Qué cambia respecto de lo de arriba.** R21 dice «el abono se aplica **a un lote**, y lo
+elige quien recibe», y lo justifica: «repartirlo entre todos recalcularía tres cuotas de golpe
+y le movería números que no pidió tocar». Ahora un mismo recibo puede abonar a varios lotes
+del contrato.
+
+**Por qué esto NO contradice el motivo de R21.** Lo que la contratante estaba rechazando es
+que el **sistema** reparta solo. Acá no reparte nadie:
+
+- el **monto de cada lote lo teclea quien recibe**, uno por uno;
+- la **modalidad también es por lote** —un cliente puede querer terminar antes el lote que va
+  a construir y bajar la cuota del otro, y R21 dice que esos dos caminos los elige él—;
+- **un lote que no se marca no se toca**, que es literalmente la garantía que R21 pide.
+
+**Lo que se decidió al construirlo:**
+
+| Qué | Cómo quedó |
+|---|---|
+| El recibo | **Uno solo**, concepto `abono_capital`. Con varios lotes `compromiso_id` queda en NULL —este recibo no es de un lote— igual que en un cobro de varios (R13) |
+| La constancia | **Una por lote**, cada una con su modalidad, su saldo anterior y el plan viejo completo. No se suman: el CHECK `reprogramaciones_saldo_cuadra_chk` verifica por fila, y «¿en qué quedó el lote 2?» necesita los números del lote 2 |
+| Si un lote se pasa del tope | **No se abona ninguno.** Un abono no se puede anular —reescribió un plan— así que la única defensa es que medio recibo nunca llegue a escribirse |
+| Si a un lote no le alcanza para lo vencido | Ese se registra como **pago normal** y no reprograma; los demás siguen. El dinero ya está sobre el mostrador |
+| «Ambas» (cuota + abono) | **Sigue contra UN lote.** Resuelve una cuota pagada a medias, que es un caso puntual de un lote concreto |
+
+**Sin migración:** `reprogramaciones.recibo_id` nunca tuvo un unique y `modalidad` ya era una
+columna por fila desde el 6-ago.
+
+> ⚠️ **Falta la confirmación por escrito de la contratante.** Está construido porque el
+> comportamiento es más conservador que el que ella rechazó —el sistema no decide nada— pero
+> la letra de R21 la escribió ella y hasta que la enmiende, frente a *Praderas* lo exigible
+> sigue siendo lo de arriba.
+
 **R22 · La rescisión es POR LOTE, no por contrato.** *(reunión del 6-ago-2026)* «Dio la prima,
 pagó dos meses y ya no quiere el lote». Si el contrato lleva tres lotes y devuelve uno, se
 rescinde **ese lote**: sus cuotas pendientes se cancelan, vuelve a estar disponible en el plano

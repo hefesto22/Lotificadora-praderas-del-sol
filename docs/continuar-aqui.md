@@ -1,3 +1,138 @@
+# Continuar acá — 10-ago-2026
+
+> Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
+> `bash storage/app/verificar-pagos.sh`: **nada se da por bueno sin eso en verde.**
+
+## 🔴 LO PRIMERO AL RETOMAR
+
+```bash
+herd composer ci && bash storage/app/verificar-pagos.sh
+```
+
+**El drop del 10-ago está escrito y NO pasó por la puerta todavía.** No trae
+migración. Van 8 archivos: 3 nuevos, 3 reescritos, 2 tests nuevos.
+
+⚠️ **Lo primero que puede caerse, y es a propósito.** El modal se mudó a una
+clase compartida y sus closures reciben `$record` inyectado. En una fila de
+tabla eso está probado; en una página de registro (`ViewVenta`) el código
+viejo usaba `$this->venta()` y nunca dependió de la inyección. Si Filament no
+la hace ahí, **`CobrarDesdeElExpedienteTest` y `AbonarACapitalTest` se caen
+enteros** — que es exactamente para lo que se les conservaron los nombres
+`cobrar` y `abonar_a_capital`. El arreglo, si pasa, es una línea: que las
+closures de `CobrarUnPago::modal()` tomen la venta del Livewire en vez del
+parámetro.
+
+🧹 Queda para tirar a mano: `storage/app/_analisis/cobrar-desde-la-tabla.zip`
+(el vehículo; desde el puente no se puede borrar).
+
+## Lo que se construyó el 10-ago: cobrar desde la tabla, y el toggle
+
+Cierra el pedido de Mauricio, que fueron tres cosas dichas en el mismo rato:
+el botón de pagar en la tabla, que abra en modal, y **que no saque a nadie de
+la pantalla donde está** — «siempre en la vista de cliente ahí debe de abrirse
+el modal».
+
+### 🔴 Se encontró una regresión sin commitear, y estaba viva
+
+El botón que se había puesto el día anterior **borró el
+`SelectFilter::make('cliente')` de `VentasTable`**. `ListadoDelCliente::ventas()`
+sigue armando `?filters[cliente][value]=…`, así que el atajo desde la ficha del
+cliente abría el listado **ENTERO, sin avisar de nada**. Restaurado, con la
+cicatriz escrita en el docblock. Lo agarra `QueTieneElClienteTest`.
+
+### El modal vive en `App\Filament\Support\CobrarUnPago`
+
+`ViewVenta` pasó de **996 líneas a 84**. No fue estética: un modal que vive en
+una página no se puede abrir desde una fila, y copiarlo habría dejado dos
+modales de dinero que hay que mantener iguales. Mismo argumento que
+`ImprimirRecibo`, que ya estaba en el repo.
+
+Las dos acciones conservan sus nombres —`cobrar` y `abonar_a_capital`— y son
+**el mismo modal con otro valor inicial del toggle**. Por eso los tests viejos
+sirven de red sin tocarles una línea.
+
+Se borró `VentasTable::cobrar()`, el atajo `?action=cobrar` que redirigía.
+
+### El toggle: cuota · abono a capital · ambas
+
+`App\Filament\Support\ModoDeCobro`, con un `reprograma()` que **es una frontera
+de permiso, no una etiqueta**: «abono» y «ambas» solo aparecen con
+`Reprogramar:Venta` (R21) **y se vuelve a preguntar en el servidor** antes de
+ejecutar. Un campo del formulario se falsifica; un permiso no.
+
+Al receptor el toggle ni se le dibuja —una sola opción es ruido— y como
+Filament no deshidrata un campo oculto, el modo cae solo en «Cuota».
+
+### `RegistroDePagos::cobrarYAbonar()` — lo que «Ambas» ejecuta
+
+El caso que **hasta hoy no tenía solución**: el lote tiene una cuota pagada a
+medias y el cliente llega con dinero para terminarla y bajar el capital con el
+resto. `abonarACapital()` lo rechaza —R21 respeta esa cuota, así que lo que le
+falta queda fuera del tope— y `cobrarVariosLotes()` se lo come entero sin
+reprogramar. Eran dos trámites y dos papeles para un solo billete.
+
+**Un monto, una transacción, un recibo.** La raya la pone
+`paraDestrabarElAbono()`: se cobra lo mínimo para que **ninguna** cuota quede
+tocada a medias, y el sobrante baja capital. No es arbitraria — es la misma
+raya que R21 ya había dibujado. Después de ese cobro todas las pendientes
+tienen `monto_pagado = 0`, así que **`EfectoDelAbono` corre con las reglas de
+siempre sobre un plan limpio: no hay una segunda versión del abono.**
+
+Tres decisiones que conviene no re-discutir:
+
+| Qué | Cómo quedó, y por qué |
+|---|---|
+| El concepto del recibo | `abono_capital`, porque reescribió un plan. `anular()` rechaza los recibos que reprogramaron; si dijera «cuota» se podría anular dejando un plan nuevo pagado con dinero que ya no entró |
+| Sin sobrante | **Se rechaza**, con el número que falta. Registrarlo dejaría una constancia de reprogramación que no reprogramó nada, con su motivo y todo |
+| `abonarACapital()` | **No se tocó ni una línea.** Los ayudantes privados se comparten; la secuencia no. A diez días de arrancar, refactorizar el camino que ya está en producción no valía |
+
+### La previsualización, que era media función
+
+§10.8 manda mostrar el reparto ANTES de confirmar, y por eso
+`paraDestrabarElAbono()` es **pública**: la pantalla calcula la raya con el
+MISMO método que después ejecuta el cobro. El día que uno de los dos cambie, el
+cliente no puede firmar un número y la base guardar otro.
+
+⚠️ **La mora va en cero en las tres previsualizaciones** de esa pantalla —ya
+era así antes de este drop—. Se calcula adentro de la transacción, con las
+cuotas bloqueadas. Con R2 (Praderas no cobra mora) los dos números son el
+mismo; el día que una lotificadora la active, mostrarla antes de confirmar
+entra con el drop de presentación de mora.
+
+## 🔵 El drop siguiente, ya decidido: el abono repartido entre varios lotes
+
+Lo pidió Mauricio el 10-ago y **se pospuso a propósito**, no se descartó.
+
+**Qué:** que un abono pueda ir a más de un lote del contrato, **con el monto de
+cada lote tecleado por quien recibe** (decisión suya: no partes iguales
+automáticas). Un botón «partes iguales» puede rellenar los campos como atajo,
+pero el número que se guarda es el que quedó en pantalla.
+
+**🔴 Choca con R21, y hay que resolverlo antes de escribir código.**
+`docs/dominio.md` dice textual: «El abono se aplica **a un lote**, y lo elige
+quien recibe», y lo justifica —«repartirlo entre todos recalcularía tres cuotas
+de golpe y le movería números que no pidió tocar»—. Con el monto tecleado lote
+por lote el sistema no adivina nada, así que el espíritu se respeta; pero **la
+letra la escribió la contratante** y hay que enmendarla con su firma, no por
+decisión de Olympo.
+
+**Lo que cuesta, ya medido el 10-ago:**
+
+- ✅ **La base ya lo aguanta.** `reprogramaciones.recibo_id` **no tiene unique**:
+  un recibo admite varias constancias hoy mismo, sin migración.
+- 🔴 `Recibo::reprogramacion()` es **`hasOne`** → tiene que ser `hasMany`. Con
+  eso caen `CobrarUnPago::avisarDelAbono()` y todo lo que lea esa relación.
+- El Service: un método que recorra los lotes, cada uno con su
+  `EfectoDelAbono`, su `reescribirElPlan` y su `asentarLaConstancia`, todo
+  adentro de la MISMA transacción y con UN recibo.
+- La previsualización con N tablas de «antes y después», que es la parte que
+  más hay que explicar con un cliente enfrente.
+- Decidir si la modalidad (bajar cuota / acortar plazo) es **una para todo el
+  recibo o una por lote**. R21 dice que la elige el cliente; con tres lotes
+  puede querer distinto en cada uno.
+
+---
+
 # Continuar acá — 8-ago-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es

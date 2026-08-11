@@ -77,6 +77,22 @@ class AdminPanelProvider extends PanelProvider
                 PanelsRenderHook::HEAD_END,
                 static fn (): string => view('filament.estilos-olympo')->render(),
             )
+            /*
+             * El chasis visual: neutros frios, una linea de un pixel en vez
+             * de sombra, versalitas en las etiquetas y numeros tabulares.
+             *
+             * Va por renderHook y NO por un tema de Vite a proposito: un tema
+             * compilado obliga a que el asset exista, y si falta, Filament
+             * revienta con una excepcion del manifiesto y el panel entero
+             * deja de abrir. Esto se borra sacando estas cuatro lineas.
+             *
+             * NO toca el color primario: ese lo elige cada lotificadora desde
+             * Configuracion (Ley L0). Solo se corrieron los neutros.
+             */
+            ->renderHook(
+                PanelsRenderHook::HEAD_END,
+                static fn (): string => view('filament.tema-olympo')->render(),
+            )
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
             ->pages([
                 Dashboard::class,

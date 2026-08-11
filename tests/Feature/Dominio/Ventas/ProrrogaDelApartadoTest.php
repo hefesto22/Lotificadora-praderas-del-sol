@@ -6,6 +6,7 @@ use App\Domain\Enums\EstadoCompromiso;
 use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Exceptions\CompromisoInvalidoException;
+use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\RegistroDeCompromisos;
 use App\Models\Bloque;
 use App\Models\Cliente;
@@ -224,7 +225,12 @@ describe('La seña que hay que devolver', function (): void {
         );
 
         $this->registro->liberar($lote->refresh(), 'Se vencio el plazo.');
-        $this->registro->devolverLaSenia($apartado->refresh(), 'En efectivo en la oficina.');
+        $this->registro->devolverLaSenia(
+            $apartado->refresh(),
+            new Monto('5000.00'),
+            FormaDePago::Efectivo,
+            'En efectivo en la oficina.',
+        );
 
         expect($apartado->refresh()->getAttribute('senia_devuelta_el')?->toDateString())
             ->toBe(today()->toDateString())
@@ -244,9 +250,9 @@ describe('La seña que hay que devolver', function (): void {
         );
 
         $this->registro->liberar($lote->refresh(), 'Se vencio.');
-        $this->registro->devolverLaSenia($apartado->refresh());
+        $this->registro->devolverLaSenia($apartado->refresh(), new Monto('5000.00'), FormaDePago::Efectivo, 'Se vencio.');
 
-        expect(fn () => $this->registro->devolverLaSenia($apartado->refresh()))
+        expect(fn () => $this->registro->devolverLaSenia($apartado->refresh(), new Monto('5000.00'), FormaDePago::Efectivo, 'Se vencio.'))
             ->toThrow(CompromisoInvalidoException::class, 'no tiene una seña pendiente');
     });
 
@@ -263,7 +269,7 @@ describe('La seña que hay que devolver', function (): void {
         );
 
         expect($apartado->seniaPorDevolver())->toBeNull()
-            ->and(fn () => $this->registro->devolverLaSenia($apartado))
+            ->and(fn () => $this->registro->devolverLaSenia($apartado, new Monto('5000.00'), FormaDePago::Efectivo, 'Se vencio.'))
             ->toThrow(CompromisoInvalidoException::class);
     });
 

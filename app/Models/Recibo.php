@@ -12,7 +12,6 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 use Override;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
@@ -162,17 +161,32 @@ class Recibo extends Model
     }
 
     /**
-     * La reprogramación que este abono provocó (R21).
+     * Las reprogramaciones que este abono provocó (R21).
      *
-     * Nula en la enorme mayoría de los recibos: solo un abono a capital
-     * reescribe un plan. Cuando existe, es lo que contesta «¿por qué después
-     * de este pago mi cuota cambió?».
+     * Vacía en la enorme mayoría de los recibos: solo un abono a capital
+     * reescribe un plan. Cuando hay, es lo que contesta «¿por qué después de
+     * este pago mi cuota cambió?».
      *
-     * @return HasOne<Reprogramacion, $this>
+     * ═══ POR QUE PLURAL, DESDE EL 10-AGO-2026 ═══
+     *
+     * Era `hasOne` porque un abono iba contra UN lote. Desde que se puede
+     * repartir un abono entre varios lotes del mismo contrato —L 20,000.00 al
+     * lote 1 y L 10,000.00 al lote 2, en un solo trámite— el recibo lleva una
+     * constancia POR LOTE: cada plan que se reescribe deja la suya, con su
+     * modalidad, su saldo anterior y el plan viejo completo.
+     *
+     * Una sola constancia sumada no serviría: el CHECK
+     * `reprogramaciones_saldo_cuadra_chk` verifica por fila, y «¿en qué quedó
+     * el lote 2?» necesita los números del lote 2, no un total.
+     *
+     * La base no hizo falta tocarla: `reprogramaciones.recibo_id` nunca tuvo
+     * un unique.
+     *
+     * @return HasMany<Reprogramacion, $this>
      */
-    public function reprogramacion(): HasOne
+    public function reprogramaciones(): HasMany
     {
-        return $this->hasOne(Reprogramacion::class);
+        return $this->hasMany(Reprogramacion::class);
     }
 
     // ─── Anulación ────────────────────────────────────────────────────

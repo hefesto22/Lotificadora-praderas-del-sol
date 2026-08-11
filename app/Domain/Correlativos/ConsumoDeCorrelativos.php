@@ -75,6 +75,24 @@ final readonly class ConsumoDeCorrelativos
     }
 
     /**
+     * Consume el siguiente numero de comprobante de devolucion.
+     *
+     * Serie PROPIA, no la de recibos. R12 promete que entre el 000120 y el
+     * 000130 no falta ninguno; si en esa serie se colaran documentos que no
+     * son cobros, esa promesa deja de servir para auditar la caja. Un
+     * comprobante de salida es otra cosa y lleva su propia numeracion.
+     *
+     * Sin proyecto, igual que el recibo: una sola serie para toda la
+     * lotificadora.
+     *
+     * @throws CorrelativoInvalidoException
+     */
+    public function siguienteDeDevolucion(): int
+    {
+        return $this->consumir(TipoCorrelativo::Devolucion, null);
+    }
+
+    /**
      * Arma el numero de contrato visible: `RPS-2026-0001`.
      *
      * El anio es el de la firma, no parte de la llave: el secuencial no
