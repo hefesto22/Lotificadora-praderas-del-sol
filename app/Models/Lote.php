@@ -63,6 +63,26 @@ class Lote extends Model
     public const float TOLERANCIA_DE_AREA = 2.0;
 
     /**
+     * Decimales con los que se guarda el PRECIO POR VARA².
+     *
+     * ═══ POR QUE SEIS Y NO DOS ═══
+     *
+     * Porque la lotificadora cobra un precio POR LOTE, no por vara²: el
+     * precio de la vara es el resultado de dividir lo que se cobró entre lo
+     * que mide. Y esa división casi nunca da dos decimales exactos — 325,000
+     * entre 337.5 vr² da 962.962962…
+     *
+     * Con dos decimales, `valor = ROUND(area × precio_vara, 2)` deja de
+     * cerrar y el CHECK `compromisos_valor_es_area_por_precio_chk` rebota:
+     * 337.5 × 962.96 son 324,999.00, no los 324,997.33 que se cobraron.
+     *
+     * ⚠️ **El dinero sigue con dos decimales.** Lo que gana precisión es el
+     * FACTOR con el que se calcula, nunca el resultado. Ver la migración
+     * `precio_vara_con_seis_decimales`.
+     */
+    public const int DECIMALES_DEL_PRECIO = 6;
+
+    /**
      * `area_varas`, `precio_vara` y `valor` NO se castean a decimal.
      *
      * El cast `decimal:x` de Laravel pasa por number_format(), que recibe

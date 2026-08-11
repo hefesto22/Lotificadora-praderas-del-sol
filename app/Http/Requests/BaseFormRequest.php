@@ -97,7 +97,8 @@ abstract class BaseFormRequest extends FormRequest
         return [
             $required ? 'required' : 'nullable',
             'string',
-            'regex:/^(\+?504[\s-]?)?[239][0-9]{7}$/',
+            // 2 fijos · 3 Claro · 7 Hondutel · 8 Digicel · 9 Tigo.
+            'regex:/^(\+?504[\s-]?)?[23789][0-9]{7}$/',
         ];
     }
 

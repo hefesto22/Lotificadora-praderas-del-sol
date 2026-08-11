@@ -36,7 +36,7 @@ describe('Acomodador — dibuja sin tocar el negocio', function (): void {
 
         expect($lote->getAttribute('numero'))->toBe('7')
             ->and($lote->getAttribute('area_varas'))->toBe('250.0000')
-            ->and($lote->getAttribute('precio_vara'))->toBe('1200.00')
+            ->and($lote->getAttribute('precio_vara'))->toBe('1200.000000')
             ->and($lote->getAttribute('valor'))->toBe('300000.00')
             ->and($lote->getAttribute('estado'))->toBe(EstadoLote::Disponible)
             ->and($lote->tienePoligono())->toBeTrue();

@@ -82,7 +82,7 @@ describe('Lote — un lote vendido no se edita (§8.2)', function (): void {
 
         $lote->update(['precio_vara' => '2000.00']);
 
-        expect($lote->fresh()?->getAttribute('precio_vara'))->toBe('2000.00');
+        expect($lote->fresh()?->getAttribute('precio_vara'))->toBe('2000.000000');
     });
 
     test('un lote vendido si puede cambiar de estado y observaciones', function (): void {

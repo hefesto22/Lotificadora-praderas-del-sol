@@ -88,7 +88,7 @@ describe('Activity Log v5 — registro de cambios', function (): void {
 
         $nuevos = (array) (ultimaActividadDe($lote, 'updated')->attribute_changes?->get('attributes') ?? []);
 
-        expect($nuevos['precio_vara'] ?? null)->toBe('1250.50');
+        expect($nuevos['precio_vara'] ?? null)->toBe('1250.500000');
         expect($nuevos['valor'] ?? null)->toBe('125050.00');
     });
 });

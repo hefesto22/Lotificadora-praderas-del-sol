@@ -66,8 +66,8 @@ describe('Sin negociar', function (): void {
             ->firstOrFail();
 
         expect($venta->getAttribute('valor_total'))->toBe('350000.00')
-            ->and($compromiso->getAttribute('precio_vara'))->toBe('1400.00')
-            ->and($compromiso->getAttribute('precio_vara_lista'))->toBe('1400.00')
+            ->and($compromiso->getAttribute('precio_vara'))->toBe('1400.000000')
+            ->and($compromiso->getAttribute('precio_vara_lista'))->toBe('1400.000000')
             ->and($compromiso->getAttribute('motivo_descuento'))->toBeNull();
     });
 
@@ -114,8 +114,8 @@ describe('Vendiendo mas barato', function (): void {
         // 250 x 1250 = 312,500.00, no los 350,000.00 de la lista.
         expect($venta->getAttribute('valor_total'))->toBe('312500.00')
             ->and($venta->getAttribute('saldo_financiar'))->toBe('262500.00')
-            ->and($compromiso->getAttribute('precio_vara'))->toBe('1250.00')
-            ->and($compromiso->getAttribute('precio_vara_lista'))->toBe('1400.00')
+            ->and($compromiso->getAttribute('precio_vara'))->toBe('1250.000000')
+            ->and($compromiso->getAttribute('precio_vara_lista'))->toBe('1400.000000')
             ->and($compromiso->getAttribute('valor'))->toBe('312500.00')
             ->and($compromiso->getAttribute('motivo_descuento'))->toContain('Rosa Elena');
     });
@@ -140,7 +140,7 @@ describe('Vendiendo mas barato', function (): void {
             )],
         );
 
-        expect($this->lote->fresh()?->getAttribute('precio_vara'))->toBe('1400.00');
+        expect($this->lote->fresh()?->getAttribute('precio_vara'))->toBe('1400.000000');
     });
 
     test('sin motivo no se registra nada', function (): void {
@@ -211,8 +211,8 @@ describe('Apartar', function (): void {
         $compromiso = $this->compromisos->apartar($this->lote, $this->cliente, montoSenia: '5000.00', forma: FormaDePago::Efectivo);
 
         expect($compromiso->getAttribute('tipo'))->toBe(TipoCompromiso::Apartado)
-            ->and($compromiso->getAttribute('precio_vara'))->toBe('1400.00')
-            ->and($compromiso->getAttribute('precio_vara_lista'))->toBe('1400.00');
+            ->and($compromiso->getAttribute('precio_vara'))->toBe('1400.000000')
+            ->and($compromiso->getAttribute('precio_vara_lista'))->toBe('1400.000000');
     });
 });
 

@@ -30,9 +30,13 @@ final class TelefonoHondurasField
             ->rules([
                 $required ? 'required' : 'nullable',
                 'string',
-                'regex:/^[239][0-9]{7}$/',
+                // 2 fijos · 3 Claro · 7 Hondutel · 8 Digicel · 9 Tigo.
+                // El 7 y el 8 faltaban, y con ellos dos de los cuatro
+                // operadores móviles del país. Ver la migración
+                // `telefonos_de_digicel_y_hondutel`.
+                'regex:/^[23789][0-9]{7}$/',
             ])
             ->required($required)
-            ->helperText('8 dígitos. Empieza con 2, 3 o 9.');
+            ->helperText('8 dígitos. Empieza con 2, 3, 7, 8 o 9.');
     }
 }

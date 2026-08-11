@@ -11,6 +11,21 @@ namespace App\Domain\Enums;
  * se agrega «por si acaso»: una forma de pago que el sistema ofrece es una
  * forma de pago que alguien va a usar.
  *
+ * ═══ REMESA (11-ago-2026) ═══
+ *
+ * Apareció cargando la cartera vieja: el exp. 0025 pagó su cuota de julio por
+ * **remesa**, y el sistema no la conocía. No es un caso raro — en el occidente
+ * de Honduras la remesa familiar es una de las formas normales de pagar, y una
+ * lotificadora que vende a gente con parientes afuera la va a recibir seguido.
+ *
+ * No es lo mismo que un depósito: el dinero no entra por el banco de la
+ * lotificadora, entra por una casa de cambio o un corresponsal, y quien lo
+ * cobra tiene que ir a retirarlo. Meterla como «depósito» haría que el cuadre
+ * contra el estado de cuenta bancario nunca cierre.
+ *
+ * Lleva referencia obligatoria: el número de control de la remesa es lo único
+ * con lo que se puede reclamar si algo sale mal.
+ *
  * ═══ TARJETA (8-ago-2026) ═══
  *
  * R11 contestó tres. La cuarta la agregó Mauricio pensando en las demás
@@ -37,6 +52,7 @@ enum FormaDePago: string
     case Transferencia = 'transferencia';
     case Deposito = 'deposito';
     case Tarjeta = 'tarjeta';
+    case Remesa = 'remesa';
 
     /**
      * @return list<string>
@@ -53,6 +69,7 @@ enum FormaDePago: string
             self::Transferencia => 'Transferencia',
             self::Deposito      => 'Depósito bancario',
             self::Tarjeta       => 'Tarjeta',
+            self::Remesa        => 'Remesa',
         };
     }
 
@@ -71,6 +88,7 @@ enum FormaDePago: string
             self::Transferencia => 'info',
             self::Deposito      => 'warning',
             self::Tarjeta       => 'primary',
+            self::Remesa        => 'gray',
         };
     }
 }

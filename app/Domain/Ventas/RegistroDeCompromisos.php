@@ -307,6 +307,28 @@ final readonly class RegistroDeCompromisos
         }
 
         /*
+         * 🔴 EL PRECIO SE CONGELA CON LA PRECISION DE LA COLUMNA, Y EL VALOR
+         * SE CALCULA CON ESE MISMO NUMERO.
+         *
+         * `compromisos_valor_es_area_por_precio_chk` compara
+         * `valor = ROUND(area_varas * precio_vara, 2)` contra lo que quedó
+         * GUARDADO en la fila. Si el precio se guarda redondeado a dos
+         * decimales pero el valor se calcula con el exacto, las dos cuentas
+         * parten de números distintos y el CHECK rebota.
+         *
+         * Pasó cargando la cartera vieja (11-ago-2026): tres lotes de 337.50
+         * vr² a L 325,000.00 cada uno dan un precio de 962.962962… La fila
+         * guardaba 962.96 y un valor de 324,997.33, y el CHECK esperaba
+         * 324,999.00.
+         *
+         * Redondear una sola vez, acá, y usar ese resultado para las dos
+         * cosas es lo que hace que la cuenta cierre siempre — y es la misma
+         * regla del §8.3.1: se opera exacto y se redondea UNA vez, al final.
+         */
+        $pactado = new Monto($pactado->redondeado(Lote::DECIMALES_DEL_PRECIO));
+        $lista = new Monto($lista->redondeado(Lote::DECIMALES_DEL_PRECIO));
+
+        /*
          * Y lo mismo con el precio del dinero. La tasa de lista puede venir
          * de afuera —es la del PLAZO elegido, igual que el precio— y cuando
          * no viene, la pactada ES la de lista: sin plan cargado no hay contra
@@ -350,8 +372,8 @@ final readonly class RegistroDeCompromisos
             $compromiso = $this->crear($lote, $cliente, TipoCompromiso::Venta, [
                 'observaciones'     => $observaciones,
                 'venta_id'          => $venta?->getKey(),
-                'precio_vara_lista' => $lista->redondeado(),
-                'precio_vara'       => $pactado->redondeado(),
+                'precio_vara_lista' => $lista->redondeado(Lote::DECIMALES_DEL_PRECIO),
+                'precio_vara'       => $pactado->redondeado(Lote::DECIMALES_DEL_PRECIO),
                 'valor'             => $this->valorDe($lote, $pactado),
                 /*
                  * El plazo y la prima DE ESTE LOTE. Un contrato puede llevar
@@ -776,6 +798,29 @@ final readonly class RegistroDeCompromisos
      */
     private function crear(Lote $lote, Cliente $cliente, TipoCompromiso $tipo, array $extra): Compromiso
     {
+        /*
+         * 🔴 EL PRECIO SE COPIA CON LA PRECISION DE LA COLUMNA, NO COMO VENGA.
+         *
+         * `vender()` congela `$pactado->redondeado(DECIMALES_DEL_PRECIO)`, y
+         * hasta el 11-ago-2026 esto copiaba el atributo crudo del lote. Con
+         * la columna en `numeric(14,6)` los dos caminos empezaron a escribir
+         * el MISMO numero de dos formas: un apartado dejaba '1400.00' en el
+         * modelo recien creado y '1400.000000' en la base, mientras que una
+         * venta dejaba '1400.000000' en los dos lados.
+         *
+         * Y no es cosmetico. Un precio congelado que se lee distinto segun
+         * por donde entro rompe justo lo que vino a hacer: compararlo contra
+         * el de lista, medirle el descuento, y dejar rastro en la bitacora
+         * sin inventar un cambio que nadie hizo — el primer `update()` sobre
+         * ese compromiso registraria «1400.00 -> 1400.000000».
+         *
+         * `valor` NO se recalcula: sigue siendo la copia del lote, que ya
+         * salio de este mismo precio y por eso cumple el CHECK
+         * `valor = ROUND(area_varas * precio_vara, 2)`. Recalcularlo aca
+         * daria identico y solo agregaria una cuenta que puede discrepar.
+         */
+        $precio = new Monto($this->decimalDe($lote, 'precio_vara'))->redondeado(Lote::DECIMALES_DEL_PRECIO);
+
         return Compromiso::query()->create(array_merge([
             'proyecto_id' => $lote->getAttribute('proyecto_id'),
             'lote_id'     => $lote->getKey(),
@@ -784,10 +829,10 @@ final readonly class RegistroDeCompromisos
             'estado'      => EstadoCompromiso::Vigente,
             // Copias, no referencias: es lo que congela el §8.2.
             'area_varas'  => $lote->getAttribute('area_varas'),
-            'precio_vara' => $lote->getAttribute('precio_vara'),
+            'precio_vara' => $precio,
             // El de lista del dia, para poder medir el descuento despues:
             // el del lote cambia y este ya no.
-            'precio_vara_lista' => $lote->getAttribute('precio_vara'),
+            'precio_vara_lista' => $precio,
             'valor'             => $lote->getAttribute('valor'),
             'fecha'             => today(),
         ], $extra));
@@ -802,6 +847,9 @@ final readonly class RegistroDeCompromisos
      */
     private function valorDe(Lote $lote, Monto $precioVara): string
     {
+        // ⚠️ `$precioVara` tiene que venir YA redondeado a la precisión de la
+        // columna. Si no, esta cuenta y la del CHECK parten de números
+        // distintos — ver el bloque grande de `crear()`.
         return $precioVara->multiplicarPor($this->decimalDe($lote, 'area_varas'))->redondeado();
     }
 
