@@ -41,6 +41,21 @@ final class CompromisoInvalidoException extends GrupoOlympoException
     }
 
     /**
+     * Un lote que la lotificadora saco del mercado a proposito.
+     *
+     * El mensaje dice donde mirar el porque —las observaciones del lote— en
+     * lugar de repetirlo aca: quien reservo el lote escribio su razon ahi, y
+     * copiarla al mensaje seria tener dos versiones de la misma cosa.
+     */
+    public static function porLoteReservado(string $codigo): self
+    {
+        return new self(
+            "El lote {$codigo} esta reservado y no se vende. El motivo esta en las ".
+            'observaciones del lote; si ya no aplica, hay que liberarlo desde su ficha.'
+        );
+    }
+
+    /**
      * El lote quedo comprometido antes de que existiera esta tabla.
      *
      * Es el caso de los lotes que ya estaban apartados o vendidos cuando
@@ -63,6 +78,55 @@ final class CompromisoInvalidoException extends GrupoOlympoException
             "El lote {$codigo} esta apartado a nombre de {$clienteDelApartado}. ".
             'Para venderselo a otra persona hay que liberar el apartado primero, y eso '.
             'deberia quedar conversado con quien lo tenia.'
+        );
+    }
+
+    /**
+     * Se dona lo que esta libre, y nada mas.
+     *
+     * Es una lista BLANCA y no una de rechazos: se admiten `disponible` y
+     * `reservado` —el camino normal de los herederos y de las iglesias, que se
+     * guardan mientras corre el tramite y se donan cuando se firma— y todo lo
+     * demas se contesta con esta frase. Un estado nuevo cae del lado del no,
+     * que es el lado seguro.
+     */
+    public static function porDonarLoQueNoEstaLibre(string $codigo, string $estado): self
+    {
+        return new self(
+            "El lote {$codigo} esta {$estado} y solo se puede donar un lote disponible o ".
+            'reservado. Si estaba apartado, primero hay que liberarlo y devolver la seña; '.
+            'si ya esta vendido o donado, tiene dueño y esto no lo cambia.'
+        );
+    }
+
+    /**
+     * Una donacion sin motivo escrito no se graba.
+     *
+     * De los tres compromisos, este es el que MAS lo necesita. Un apartado se
+     * explica solo y una venta deja recibos; una donacion es un lote que salio
+     * del inventario sin que entrara un lempira, y dentro de un año alguien
+     * —un socio, un heredero, un contador— va a preguntar por que. La
+     * respuesta tiene que estar escrita el dia que se hizo, no reconstruida
+     * despues.
+     */
+    public static function porDonarSinMotivo(string $codigo): self
+    {
+        return new self(
+            "Para donar el lote {$codigo} hay que escribir por que y a titulo de que. Queda ".
+            'anotado con tu usuario y la fecha, y es lo unico que despues explica por que ese '.
+            'lote no genero ningun ingreso.'
+        );
+    }
+
+    /**
+     * Un compromiso cerrado es historia, y la historia no se edita.
+     */
+    public static function porTocarUnCompromisoCerrado(string $codigo): self
+    {
+        return new self(
+            "El compromiso del lote {$codigo} ya esta cerrado —se libero, se convirtio o se rescindio— ".
+            'y lo que quedo es su historia. Si el lote se volvio a vender, hay que cambiarlo en el '.
+            'compromiso vigente.'
         );
     }
 

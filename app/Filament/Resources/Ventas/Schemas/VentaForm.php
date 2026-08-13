@@ -10,10 +10,14 @@ use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\ListaDePrecios;
 use App\Domain\Ventas\PlanDeCuotas;
+use App\Filament\Schemas\Components\DNIField;
+use App\Filament\Schemas\Components\MayusculasField;
 use App\Filament\Schemas\Components\MontoField;
+use App\Filament\Schemas\Components\TelefonoHondurasField;
 use App\Models\Cliente;
 use App\Models\Lote;
 use App\Models\Proyecto;
+use App\Models\Vendedor;
 use Carbon\CarbonImmutable;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
@@ -134,6 +138,40 @@ class VentaForm
                                                 'Este lote va por debajo del precio de lista. R4: queda '.
                                                 'guardado con tu usuario y la fecha. Sin motivo no se graba.'
                                             ),
+
+                                        /*
+                                        | ═══ A NOMBRE DE QUIEN SALEN LOS RECIBOS DE ESTE LOTE ═══
+                                        |
+                                        | Lo pidio Mauricio el 12-ago-2026: un grupo compra junto y
+                                        | firma UNA sola persona, pero cada representado tiene SU lote
+                                        | adentro del contrato y quiere el papel a su nombre.
+                                        |
+                                        | Va POR LOTE y no por contrato porque asi es como pasa: «si
+                                        | son 3 lotes debe decidir a nombre de quien sale el recibo de
+                                        | ESE lote». Vacio es el caso normal y el placeholder lo dice,
+                                        | porque un campo opcional que no explica que hace cuando se lo
+                                        | deja vacio es un campo que la gente llena por las dudas.
+                                        |
+                                        | NO se guarda en `clientes`: ahi van los del expediente, y un
+                                        | representado no compro nada a su nombre. Meterlo ahi lo
+                                        | metria tambien en la lista de este mismo formulario.
+                                        */
+                                        MayusculasField::make('titular_recibo')
+                                            ->label('Titular del recibo')
+                                            ->placeholder('El dueño del expediente')
+                                            ->maxLength(150)
+                                            ->columnSpan(8)
+                                            ->live(onBlur: true)
+                                            ->helperText(
+                                                'Opcional. Solo para el caso del representante: los recibos de '.
+                                                'ESTE lote salen a este nombre. El contrato no cambia de dueño.'
+                                            ),
+
+                                        DNIField::make('titular_recibo_dni')
+                                            ->label('DNI del titular')
+                                            ->columnSpan(4)
+                                            ->visible(fn (Get $get): bool => filled($get('titular_recibo')))
+                                            ->helperText('Opcional, pero es lo que hace que ese papel sirva de prueba.'),
                                     ])
                                     ->helperText(
                                         'Un contrato puede llevar varios lotes. Solo se listan los '.
@@ -227,6 +265,49 @@ class VentaForm
                                     ->default(fn (): string => today()->toDateString())
                                     ->native(false)
                                     ->displayFormat('d/m/Y'),
+
+                                /*
+                                 * 🔴 QUIEN VENDIO — Y POR QUE ESTA VACIO POR
+                                 * DEFECTO.
+                                 *
+                                 * Vacio quiere decir que la vendio la
+                                 * lotificadora, y ese es el caso normal: de
+                                 * los 76 expedientes del cuaderno viejo, seis
+                                 * traen vendedor. Poner uno por defecto haria
+                                 * que todas las ventas de la casa aparecieran
+                                 * a nombre de alguien, y el dia que exista la
+                                 * comision eso seria plata mal atribuida.
+                                 *
+                                 * `createOptionForm` deja darlo de alta sin
+                                 * salir de la venta: el vendedor nuevo aparece
+                                 * cuando el cliente ya esta sentado enfrente,
+                                 * no una semana antes.
+                                 */
+                                Select::make('vendedor_id')
+                                    ->label('Vendido por')
+                                    ->options(fn (): array => Vendedor::query()
+                                        ->activos()
+                                        ->orderBy('nombre')
+                                        ->pluck('nombre', 'id')
+                                        ->all())
+                                    ->searchable()
+                                    ->native(false)
+                                    ->placeholder('La lotificadora')
+                                    ->helperText('Dejalo vacío si la venta la cerró la lotificadora.')
+                                    ->createOptionForm([
+                                        MayusculasField::make('nombre')
+                                            ->label('Nombre completo')
+                                            ->required()
+                                            ->maxLength(150)
+                                            ->placeholder('Ej: JONY GERSON GARCÍA MELGAR')
+                                            ->columnSpanFull(),
+
+                                        TelefonoHondurasField::make(),
+                                    ])
+                                    ->createOptionUsing(static fn (array $data): int => (int) Vendedor::query()
+                                        ->create($data)
+                                        ->getKey())
+                                    ->columnSpan(2),
 
                                 Textarea::make('observaciones')
                                     ->label('Observaciones')

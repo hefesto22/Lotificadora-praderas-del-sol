@@ -24,6 +24,31 @@ services:
       POSTGRES_HOST_AUTH_METHOD: ${COMPOSE_POSTGRES_AUTH:-trust}
       # Consumida por el script de initdb para crear la base de tests.
       POSTGRES_TEST_DB: ${DB_DATABASE_TEST:-praderas_test}
+    # ─────────────────────────────────────────────────────────────
+    # 🔴 max_locks_per_transaction: 64 NO ALCANZA. Mordió el 12-ago-2026.
+    #
+    # Pest corre en 14 procesos paralelos y cada uno recrea SU base con un
+    # `DROP TABLE ... CASCADE` sobre las ~35 tablas del esquema. Cada tabla
+    # se lleva un lock, y con ella sus índices, sus FK y todo lo que
+    # dependa: son cientos de locks por transacción, catorce veces a la vez.
+    #
+    # Con el valor por defecto reventó en cuanto el esquema creció una tabla
+    # más —`vendedores`—, y el error no dice nada de eso: dice «out of
+    # shared memory» y se cae en siete tests cualquiera, los que hayan
+    # tocado último. Parece un bug del código y no lo es.
+    #
+    # 512 deja margen para que el esquema siga creciendo sin volver a
+    # tropezar. Es memoria compartida reservada al arrancar y con este
+    # número son unos pocos MB.
+    #
+    # ⚠️ Es un parámetro de ARRANQUE: cambiarlo pide recrear el contenedor
+    # (`docker compose up -d --force-recreate postgres`). Los datos viven en
+    # un volumen nombrado y no se pierden.
+    # ─────────────────────────────────────────────────────────────
+    command:
+      - postgres
+      - -c
+      - max_locks_per_transaction=512
     ports:
       - "${COMPOSE_POSTGRES_PORT:-5442}:5432"
     volumes:

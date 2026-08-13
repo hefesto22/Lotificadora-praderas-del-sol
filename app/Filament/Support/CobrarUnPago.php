@@ -617,7 +617,7 @@ final readonly class CobrarUnPago
         }
 
         try {
-            $recibo = match ($modo) {
+            $recibos = match ($modo) {
                 ModoDeCobro::Cuota => $this->soloLaCuota($data),
                 ModoDeCobro::Abono => $this->soloElAbono($data),
                 ModoDeCobro::Ambas => $this->laCuotaYElAbono($data),
@@ -629,19 +629,43 @@ final readonly class CobrarUnPago
             return;
         }
 
-        if ($modo === ModoDeCobro::Cuota) {
+        /*
+         * ═══ UN AVISO POR PAPEL ═══
+         *
+         * Desde el 13-ago-2026 un cobro puede salir en VARIOS recibos: si los
+         * lotes marcados tienen titulares de recibo distintos, cada uno se
+         * lleva el suyo. Cada notificación trae su propio botón de imprimir —
+         * que es lo único que evita que alguien se vaya sin su papel.
+         *
+         * En «Ambas» el abono cae en UN solo recibo, el del lote elegido; los
+         * demás son cuotas y se avisan como cuotas. Se identifica por el
+         * código del lote y no por el concepto: un abono que no alcanzó a
+         * reprogramar nada también se emite como `cuota`.
+         */
+        $codigoDelAbono = $modo === ModoDeCobro::Ambas
+            ? (string) $this->loteElegido($data)->lote()->value('codigo')
+            : null;
+
+        foreach ($recibos as $recibo) {
+            $llevaElAbono = $modo === ModoDeCobro::Abono
+                || ($codigoDelAbono !== null && in_array($codigoDelAbono, $recibo->codigosDeLotes(), true));
+
+            if ($llevaElAbono) {
+                $this->avisarDelAbono($recibo, conCuotas: $modo === ModoDeCobro::Ambas);
+
+                continue;
+            }
+
             $this->avisarDelCobro($recibo);
-
-            return;
         }
-
-        $this->avisarDelAbono($recibo, conCuotas: $modo === ModoDeCobro::Ambas);
     }
 
     /**
      * @param array<string, mixed> $data
+     *
+     * @return list<Recibo>
      */
-    private function soloLaCuota(array $data): Recibo
+    private function soloLaCuota(array $data): array
     {
         return app(RegistroDePagos::class)->cobrarVariosLotes(
             venta: $this->venta,
@@ -656,8 +680,10 @@ final readonly class CobrarUnPago
 
     /**
      * @param array<string, mixed> $data
+     *
+     * @return list<Recibo>
      */
-    private function soloElAbono(array $data): Recibo
+    private function soloElAbono(array $data): array
     {
         return app(RegistroDePagos::class)->abonarAVariosLotes(
             venta: $this->venta,
@@ -673,8 +699,10 @@ final readonly class CobrarUnPago
 
     /**
      * @param array<string, mixed> $data
+     *
+     * @return list<Recibo>
      */
-    private function laCuotaYElAbono(array $data): Recibo
+    private function laCuotaYElAbono(array $data): array
     {
         return app(RegistroDePagos::class)->cobrarYAbonar(
             venta: $this->venta,

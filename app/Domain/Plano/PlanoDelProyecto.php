@@ -118,19 +118,27 @@ final readonly class PlanoDelProyecto
                 : null;
 
             $lotesDibujados[] = [
-                'id'         => (int) $lote->getKey(),
-                'codigo'     => (string) $lote->getAttribute('codigo'),
-                'numero'     => (string) $lote->getAttribute('numero'),
-                'bloque'     => $nombreBloque,
-                'rotulo'     => Lote::componerRotulo($nombreBloque, (string) $lote->getAttribute('numero')),
-                'estado'     => $estado->value,
-                'etiqueta'   => $estado->etiqueta(),
-                'color'      => $estado->colorHex(),
-                'puntos'     => $this->comoPuntosSvg($vertices),
-                'centro'     => $this->centroDe($vertices),
-                'cliente'    => $cliente,
-                'areaVaras'  => (string) $lote->getAttribute('area_varas'),
-                'areaMetros' => $this->enMetrosCuadrados(
+                'id'       => (int) $lote->getKey(),
+                'codigo'   => (string) $lote->getAttribute('codigo'),
+                'numero'   => (string) $lote->getAttribute('numero'),
+                'bloque'   => $nombreBloque,
+                'rotulo'   => Lote::componerRotulo($nombreBloque, (string) $lote->getAttribute('numero')),
+                'estado'   => $estado->value,
+                'etiqueta' => $estado->etiqueta(),
+                /*
+                 * Que se pueda vender lo decide el ENUM, no el panel. Antes el
+                 * blade preguntaba `estado !== 'vendido'` y por eso un lote
+                 * reservado —y ahora uno donado— ofrecía «Vender este lote».
+                 */
+                'seVende'         => $estado->seVende(),
+                'seDona'          => $estado->seDona(),
+                'porQueNoSeVende' => $estado->porQueNoSeVende(),
+                'color'           => $estado->colorHex(),
+                'puntos'          => $this->comoPuntosSvg($vertices),
+                'centro'          => $this->centroDe($vertices),
+                'cliente'         => $cliente,
+                'areaVaras'       => (string) $lote->getAttribute('area_varas'),
+                'areaMetros'      => $this->enMetrosCuadrados(
                     (string) $lote->getAttribute('area_varas'),
                     $proyecto->varaEnMetros(),
                 ),

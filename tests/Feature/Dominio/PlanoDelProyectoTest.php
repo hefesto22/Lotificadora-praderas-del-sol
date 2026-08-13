@@ -145,7 +145,7 @@ describe('Plano del proyecto — lo que se dibuja', function (): void {
             ->and($lote['etiqueta'])->toBe('Apartado');
     });
 
-    test('el resumen incluye los cuatro estados aunque esten en cero', function (): void {
+    test('el resumen incluye TODOS los estados aunque esten en cero', function (): void {
         Lote::factory()->enBloque($this->bloque)->count(2)->create();
         Lote::factory()->enBloque($this->bloque)->conEstado(EstadoLote::Vendido)->create();
 
@@ -156,6 +156,8 @@ describe('Plano del proyecto — lo que se dibuja', function (): void {
             'apartado'   => 0,
             'vendido'    => 1,
             'cancelado'  => 0,
+            'reservado'  => 0,
+            'donado'     => 0,
         ]);
     });
 

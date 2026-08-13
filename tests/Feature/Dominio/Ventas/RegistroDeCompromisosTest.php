@@ -12,8 +12,10 @@ use App\Domain\Ventas\RegistroDeCompromisos;
 use App\Models\Bloque;
 use App\Models\Cliente;
 use App\Models\Compromiso;
+use App\Models\Cuota;
 use App\Models\Lote;
 use App\Models\Proyecto;
+use App\Models\Recibo;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
@@ -69,6 +71,34 @@ describe('Apartar', function (): void {
         $this->registro->vender($this->lote, $this->cliente);
 
         expect(fn () => $this->registro->apartar($this->lote->refresh(), $this->otro))
+            ->toThrow(CompromisoInvalidoException::class);
+    });
+
+    /*
+    | Los dieciseis lotes del bloque B estan reservados para los herederos y no
+    | se venden. Son DOS tests y no uno porque los dos caminos rechazan por
+    | motivos distintos:
+    |
+    |  · `apartar()` exige que el lote este DISPONIBLE, asi que rechaza
+    |    cualquier estado nuevo sin que nadie lo toque.
+    |  · `vender()` lista los estados que rechaza uno por uno, asi que un
+    |    estado nuevo pasa DERECHO si nadie lo agrega. Cuando se creo
+    |    `reservado` el 12-ago-2026 eso fue exactamente lo que pasó: la reserva
+    |    no habria servido de nada y los lotes se habrian podido vender igual.
+    |
+    | Por eso el de vender importa mas: es el que puede volver a romperse solo.
+    */
+    test('un lote reservado no se vende', function (): void {
+        $this->lote->forceFill(['estado' => EstadoLote::Reservado])->save();
+
+        expect(fn () => $this->registro->vender($this->lote->refresh(), $this->cliente))
+            ->toThrow(CompromisoInvalidoException::class);
+    });
+
+    test('un lote reservado no se aparta', function (): void {
+        $this->lote->forceFill(['estado' => EstadoLote::Reservado])->save();
+
+        expect(fn () => $this->registro->apartar($this->lote->refresh(), $this->cliente))
             ->toThrow(CompromisoInvalidoException::class);
     });
 
@@ -182,5 +212,173 @@ describe('Vender', function (): void {
             ->toThrow(LoteInmutableException::class);
 
         expect($venta->refresh()->getAttribute('valor'))->toBe('300000.00');
+    });
+});
+
+describe('Donar', function (): void {
+    /*
+    | Una donacion es un lote que sale del inventario sin que entre un lempira.
+    | Este test mira las dos mitades: que el lote se movio Y que NO se armo
+    | nada de la maquinaria de cobro. La segunda es la que importa — un plan de
+    | 48 cuotas de L 0.00 colgado de un contrato que nadie firmo es
+    | exactamente el resultado de mandar esto por `RegistroDeVentas`.
+    */
+    test('el lote sale del inventario y no queda cartera detras', function (): void {
+        $donacion = $this->registro->donar(
+            $this->lote,
+            $this->cliente,
+            'Donado a la Iglesia Congregacional, acta del 12-ago-2026.',
+        );
+
+        expect($this->lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Donado)
+            ->and($donacion->getAttribute('tipo'))->toBe(TipoCompromiso::Donacion)
+            ->and($donacion->getAttribute('estado'))->toBe(EstadoCompromiso::Vigente)
+            ->and($donacion->getAttribute('cliente_id'))->toBe($this->cliente->getKey())
+            ->and($donacion->getAttribute('motivo'))->toContain('Iglesia Congregacional')
+            // Nada de dinero: ni expediente, ni prima, ni plazo, ni seña.
+            ->and($donacion->getAttribute('venta_id'))->toBeNull()
+            ->and($donacion->getAttribute('prima'))->toBeNull()
+            ->and($donacion->getAttribute('plazo_meses'))->toBeNull()
+            ->and($donacion->getAttribute('monto_senia'))->toBeNull()
+            ->and($donacion->getAttribute('vence_el'))->toBeNull()
+            // Y ningun papel: la serie de recibos (R12) no se toca.
+            ->and(Cuota::query()->count())->toBe(0)
+            ->and(Recibo::query()->count())->toBe(0);
+    });
+
+    /*
+    | El valor se congela igual que en una venta y NO en cero: es lo que hace
+    | falta para la escritura y para contestar «cuanto valia lo que se regalo».
+    */
+    test('congela cuanto valia lo que se regalo', function (): void {
+        $donacion = $this->registro->donar($this->lote, $this->cliente, 'Area verde del proyecto.');
+
+        expect($donacion->getAttribute('valor'))->toBe('300000.00')
+            ->and($donacion->getAttribute('precio_vara'))->toBe('1200.000000')
+            // Sin descuento: se dona al precio de lista, y por eso el CHECK
+            // `compromisos_descuento_con_motivo_chk` no pide nada.
+            ->and($donacion->getAttribute('precio_vara_lista'))->toBe('1200.000000');
+    });
+
+    /*
+    | El camino normal, y la razon de que `reservado` este en la lista blanca:
+    | los dieciseis lotes del bloque B estan guardados para los herederos, y
+    | una iglesia se apalabra mucho antes de que haya escritura. Se reserva
+    | mientras el tramite corre y se dona cuando se firma.
+    */
+    test('un lote reservado si se dona: es el camino de los herederos', function (): void {
+        $this->lote->forceFill(['estado' => EstadoLote::Reservado])->save();
+
+        $this->registro->donar($this->lote->refresh(), $this->cliente, 'Adjudicacion a los herederos.');
+
+        expect($this->lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Donado);
+    });
+
+    /*
+    | Un apartado tiene una seña de por medio que hay que devolverle a alguien.
+    | `liberar()` sabe hacer eso y `donar()` no, asi que mandar a liberar
+    | primero es el tramite correcto y no un rodeo.
+    */
+    test('un lote apartado no se dona: primero hay que liberarlo', function (): void {
+        $this->registro->apartar($this->lote, $this->cliente, montoSenia: '5000.00', forma: FormaDePago::Efectivo);
+
+        expect(fn () => $this->registro->donar($this->lote->refresh(), $this->cliente, 'Cambio de idea.'))
+            ->toThrow(CompromisoInvalidoException::class);
+    });
+
+    test('un lote vendido no se dona', function (): void {
+        $this->registro->vender($this->lote, $this->cliente);
+
+        expect(fn () => $this->registro->donar($this->lote->refresh(), $this->otro, 'Regalo.'))
+            ->toThrow(CompromisoInvalidoException::class);
+    });
+
+    /*
+    | La otra mitad del guard: un lote ya donado tampoco vuelve al mercado.
+    | Son tres tests porque son tres puertas distintas, y `vender()` es la que
+    | ya se rompio sola una vez —cuando se creo `reservado` el 12-ago-2026
+    | paso derecho— asi que es la que hay que vigilar.
+    */
+    test('un lote donado no se vende, no se aparta y no se dona de nuevo', function (): void {
+        $this->registro->donar($this->lote, $this->cliente, 'Escuela del sector.');
+        $lote = $this->lote->refresh();
+
+        expect(fn () => $this->registro->vender($lote, $this->otro))
+            ->toThrow(CompromisoInvalidoException::class);
+
+        expect(fn () => $this->registro->apartar($lote, $this->otro))
+            ->toThrow(CompromisoInvalidoException::class);
+
+        expect(fn () => $this->registro->donar($lote, $this->otro, 'Otra vez.'))
+            ->toThrow(CompromisoInvalidoException::class);
+    });
+
+    /*
+    | De los tres compromisos, este es el que mas necesita el motivo escrito:
+    | un apartado se explica solo y una venta deja recibos, pero una donacion
+    | es un lote que se fue sin dejar rastro de plata. Dentro de un año alguien
+    | va a preguntar por que, y la respuesta tiene que estar escrita del dia.
+    */
+    test('sin motivo escrito no se dona', function (string $motivo): void {
+        expect(fn () => $this->registro->donar($this->lote, $this->cliente, $motivo))
+            ->toThrow(CompromisoInvalidoException::class);
+
+        expect($this->lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Disponible)
+            ->and(Compromiso::query()->count())->toBe(0);
+    })->with([[''], ['   '], ["\n\t "]]);
+
+    /*
+    | La lista de estados admitidos es BLANCA, y este test es el que lo
+    | garantiza: el dia que se agregue un estado nuevo a EstadoLote, la
+    | donacion va a rechazarlo sola. Al reves —listando los que se rechazan—
+    | pasaria derecho, que es como se rompio `vender()` con `reservado`.
+    */
+    test('solo se dona lo que esta disponible o reservado', function (): void {
+        $admitidos = [EstadoLote::Disponible, EstadoLote::Reservado];
+
+        foreach (EstadoLote::cases() as $estado) {
+            if (in_array($estado, $admitidos, true)) {
+                continue;
+            }
+
+            $lote = Lote::factory()->enBloque($this->bloque)->create(['numero' => '90'.$estado->value]);
+            $lote->forceFill(['estado' => $estado])->save();
+
+            expect(fn () => $this->registro->donar($lote->refresh(), $this->cliente, 'Motivo cualquiera.'))
+                ->toThrow(CompromisoInvalidoException::class);
+        }
+    });
+});
+
+describe('El tipo de compromiso manda el estado del lote', function (): void {
+    /*
+    | La correspondencia tipo -> estado se declara UNA vez, en
+    | `TipoCompromiso::estadoDelLote()`, y `RegistroDeCompromisos::crear()` es
+    | quien la aplica. Hasta el 12-ago-2026 cada metodo escribia el estado a
+    | mano y ese match existia al lado sin que nadie lo llamara: dos fuentes
+    | para la misma verdad.
+    |
+    | Este test recorre los TRES caminos de verdad —no compara el enum contra
+    | si mismo— asi que se pone rojo si alguno vuelve a escribir el suyo.
+    */
+    test('apartar, vender y donar dejan el lote donde dice el tipo', function (): void {
+        $caminos = [
+            TipoCompromiso::Apartado->value => fn (Lote $lote) => $this->registro->apartar($lote, $this->cliente),
+            TipoCompromiso::Venta->value    => fn (Lote $lote) => $this->registro->vender($lote, $this->cliente),
+            TipoCompromiso::Donacion->value => fn (Lote $lote) => $this->registro->donar($lote, $this->cliente, 'Motivo.'),
+        ];
+
+        // Si algun dia se agrega un tipo y no un camino, esto lo dice.
+        expect(array_keys($caminos))->toBe(TipoCompromiso::valores());
+
+        foreach ($caminos as $valor => $hacerlo) {
+            $tipo = TipoCompromiso::from($valor);
+            $lote = Lote::factory()->enBloque($this->bloque)->create(['numero' => '80'.$valor]);
+
+            $compromiso = $hacerlo($lote);
+
+            expect($compromiso->getAttribute('tipo'))->toBe($tipo)
+                ->and($lote->refresh()->getAttribute('estado'))->toBe($tipo->estadoDelLote());
+        }
     });
 });

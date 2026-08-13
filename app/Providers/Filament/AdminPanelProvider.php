@@ -47,6 +47,18 @@ class AdminPanelProvider extends PanelProvider
             ->favicon(fn (): ?string => $this->brandingValue('faviconUrl'))
             ->colors([
                 'primary' => $this->primaryColorPalette(),
+                /*
+                 * Verde azulado, para el estado `donado` de EstadoLote.
+                 *
+                 * Filament trae seis colores de fabrica y los seis ya estaban
+                 * tomados o descartados: `success` es disponible, `warning` es
+                 * apartado, `info` es vendido, `danger` es cancelado y `gray`
+                 * es reservado. Quedaba `primary`, que en este panel lo elige
+                 * cada lotificadora desde BrandingSetting — un estado que
+                 * cambia de color segun el cliente no es un estado, es un
+                 * accidente.
+                 */
+                'teal' => Color::Teal,
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
 

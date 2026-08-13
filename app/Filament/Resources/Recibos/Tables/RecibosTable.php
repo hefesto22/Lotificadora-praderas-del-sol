@@ -68,8 +68,21 @@ class RecibosTable
                     ->date('d/m/Y')
                     ->sortable(),
 
+                /*
+                 * Dice lo mismo que el papel, no lo que dice la FK.
+                 *
+                 * Desde el 12-ago-2026 un recibo puede salir a nombre de un
+                 * representado, y en ese caso `cliente.nombre` —el titular del
+                 * expediente— ya no es lo que está impreso. La segunda línea
+                 * conserva de qué contrato salió: sin ella queda un cobro a
+                 * nombre de alguien que no aparece en ningún expediente.
+                 */
                 TextColumn::make('cliente.nombre')
                     ->label('Recibí de')
+                    ->state(static fn (Recibo $record): string => $record->nombreDelPapel())
+                    ->description(static fn (Recibo $record): ?string => $record->esANombreDeOtro()
+                        ? 'por cuenta de '.($record->cliente?->getAttribute('nombre') ?? '—')
+                        : null)
                     ->searchable()
                     ->wrap()
                     ->placeholder('—'),

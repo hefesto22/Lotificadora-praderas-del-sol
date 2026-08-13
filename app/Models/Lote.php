@@ -464,7 +464,14 @@ class Lote extends Model
     }
 
     /**
-     * Lotes comprometidos con un cliente: apartados o vendidos.
+     * Lotes comprometidos con un cliente: apartados, vendidos o donados.
+     *
+     * Es la version en SQL de `EstadoLote::estaComprometido()`, y tienen que
+     * decir lo mismo: la primera vez que se separen, una pantalla va a contar
+     * distinto que otra sobre los mismos lotes.
+     *
+     * Los DONADOS entran aunque no hayan movido plata. Lo que la pregunta
+     * quiere saber es de quien es el lote, y un lote donado ya es de alguien.
      *
      * @param Builder<Lote> $query
      *
@@ -473,7 +480,10 @@ class Lote extends Model
     #[Scope]
     protected function comprometidos(Builder $query): Builder
     {
-        return $query->whereIn('estado', [EstadoLote::Apartado, EstadoLote::Vendido]);
+        return $query->whereIn('estado', array_values(array_filter(
+            EstadoLote::cases(),
+            static fn (EstadoLote $estado): bool => $estado->estaComprometido(),
+        )));
     }
 
     /**

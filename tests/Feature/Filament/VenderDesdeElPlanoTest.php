@@ -549,3 +549,73 @@ describe('Apartar', function (): void {
             ->and($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Vendido);
     });
 });
+
+/*
+|--------------------------------------------------------------------------
+| Donar DESDE EL PLANO
+|--------------------------------------------------------------------------
+| El unico camino que hay hoy para registrar una donacion, y por eso importa
+| que este probado: el dominio ya rechaza lo que no corresponde, pero un
+| formulario que no manda el motivo o que pierde el cliente deja el rechazo
+| del lado equivocado —delante de la persona que esta atendiendo—.
+*/
+describe('Donar', function (): void {
+    test('el lote sale del inventario y no queda cartera detras', function (): void {
+        $lote = ($this->lote)('1');
+
+        Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->callAction(
+                'donarLote',
+                [
+                    'cliente_id' => $this->rosa->getKey(),
+                    'motivo'     => 'Donado a la Iglesia Congregacional. Acta del 12-ago-2026.',
+                ],
+                ['lote' => $lote->getKey()],
+            )
+            ->assertHasNoActionErrors();
+
+        $donacion = Compromiso::query()->firstOrFail();
+
+        expect($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Donado)
+            ->and($donacion->getAttribute('tipo'))->toBe(TipoCompromiso::Donacion)
+            ->and($donacion->getAttribute('cliente_id'))->toBe($this->rosa->getKey())
+            ->and($donacion->getAttribute('motivo'))->toContain('Iglesia Congregacional')
+            ->and(Venta::query()->count())->toBe(0)
+            ->and(Cuota::query()->count())->toBe(0);
+    });
+
+    /*
+    | El camino de los herederos: el lote se guarda mientras corre el tramite
+    | y se dona cuando se firma. Es la razon de que `reservado` este en la
+    | lista blanca de `EstadoLote::seDona()`.
+    */
+    test('un lote reservado tambien se dona desde el plano', function (): void {
+        $lote = ($this->lote)('2');
+        $lote->forceFill(['estado' => EstadoLote::Reservado])->save();
+
+        Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->callAction(
+                'donarLote',
+                ['cliente_id' => $this->rosa->getKey(), 'motivo' => 'Adjudicacion a los herederos.'],
+                ['lote'       => $lote->getKey()],
+            )
+            ->assertHasNoActionErrors();
+
+        expect($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Donado);
+    });
+
+    /*
+    | Sin motivo el formulario ni siquiera llega al dominio: `required()` lo
+    | para antes. Se verifica que lo pare Y que no haya dejado nada a medias.
+    */
+    test('sin motivo no se dona y el lote no se mueve', function (): void {
+        $lote = ($this->lote)('3');
+
+        Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->callAction('donarLote', ['cliente_id' => $this->rosa->getKey()], ['lote' => $lote->getKey()])
+            ->assertHasActionErrors(['motivo']);
+
+        expect($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Disponible)
+            ->and(Compromiso::query()->count())->toBe(0);
+    });
+});

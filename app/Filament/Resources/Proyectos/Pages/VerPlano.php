@@ -633,6 +633,120 @@ class VerPlano extends Page
             });
     }
 
+    /**
+     * Donar: el lote sale del inventario sin que entre un lempira.
+     *
+     * ═══ POR QUE NO ES UNA PESTAÑA MAS AL LADO DE VENDER Y APARTAR ═══
+     *
+     * Porque no es una forma de vender. Vender y apartar son el mismo gesto en
+     * dos tiempos —hay un cliente que paga— y por eso comparten el conmutador,
+     * la seleccion de lotes y la cotizacion. Una donacion no cotiza nada, es
+     * de UN lote y ocurre una vez cada varios meses. Metida entre las dos
+     * pestañas, lo unico que lograria es estar un click mas cerca del error.
+     *
+     * ═══ LO QUE PREGUNTA, Y LO QUE NO ═══
+     *
+     * A nombre de quien y por que. El motivo es OBLIGATORIO: de los tres
+     * compromisos, este es el unico que se va sin dejar rastro de plata, y
+     * dentro de un año alguien —un socio, un heredero, un contador— va a
+     * preguntar por que ese lote no genero ningun ingreso.
+     *
+     * No pregunta el valor. Se congela el de lista, que es el que hace falta
+     * para la escritura; si el documento declara otro numero, va escrito en
+     * las observaciones. Dejarlo teclear obligaria a inventar un precio por
+     * vara² que cuadre con el CHECK `valor = ROUND(area_varas * precio_vara, 2)`,
+     * y ese numero inventado despues sale en los reportes de precios como si
+     * fuera real.
+     *
+     * ⚠️ El valor se muestra en un Placeholder que lee el ESTADO del
+     * formulario y no `$arguments`: Filament no inyecta los argumentos de la
+     * accion en los closures de un componente del schema. Es la misma razon
+     * por la que `apartarLote` usa campos ocultos — ver su docblock.
+     */
+    public function donarLoteAction(): Action
+    {
+        return Action::make('donarLote')
+            ->label('Donar lote')
+            ->icon(Heroicon::OutlinedGift)
+            ->color('teal')
+            ->modalHeading('Donar el lote')
+            ->modalDescription('Sale del inventario y no vuelve. No lleva prima, ni cuotas, ni recibos.')
+            ->modalSubmitActionLabel('Donar')
+            ->modalWidth('xl')
+            ->fillForm(fn (array $arguments): array => $this->datosInicialesDeDonacion($arguments))
+            ->schema([
+                Hidden::make('lote_id'),
+                Hidden::make('valor'),
+
+                Placeholder::make('lo_que_se_dona')
+                    ->label('Lo que se entrega')
+                    ->content(function (Get $get): string {
+                        $valor = $get('valor');
+
+                        return is_string($valor) && $valor !== '' ? $valor : 'Sin valor cargado';
+                    }),
+
+                $this->selectorDeCliente('¿A nombre de quién?'),
+
+                Textarea::make('motivo')
+                    ->label('¿Por qué se dona?')
+                    ->required()
+                    ->rows(3)
+                    ->placeholder('Donado a la Iglesia Congregacional. Acta de la junta directiva del ...')
+                    ->helperText('Queda anotado con tu usuario y la fecha. Es lo único que después explica por qué este lote no generó ningún ingreso.'),
+
+                Textarea::make('observaciones')
+                    ->label('Observaciones')
+                    ->rows(2)
+                    ->helperText('Si la escritura declara otro valor —el catastral, o uno simbólico—, va acá.'),
+            ])
+            ->action(function (array $arguments, array $data): void {
+                $this->conElLote($arguments, function (Lote $lote) use ($data): string {
+                    $cliente = Cliente::query()->findOrFail($this->entero($data, 'cliente_id', 0));
+
+                    app(RegistroDeCompromisos::class)->donar(
+                        $lote,
+                        $cliente,
+                        $this->texto($data, 'motivo', ''),
+                        $this->texto($data, 'observaciones', '') ?: null,
+                    );
+
+                    return sprintf(
+                        '%s quedó donado a %s.',
+                        (string) $lote->getAttribute('codigo'),
+                        (string) $cliente->getAttribute('nombre'),
+                    );
+                });
+            });
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     *
+     * @return array<string, mixed>
+     */
+    private function datosInicialesDeDonacion(array $arguments): array
+    {
+        $lote = Lote::query()->find($this->entero($arguments, 'lote', 0));
+
+        return [
+            'lote_id' => $lote?->getKey(),
+            /*
+              * Los dos decimales de siempre y no los CUATRO de la columna:
+              * `area_varas` es numeric(12,4) y crudo se lee «250.0000 v²».
+              * Pasa por Monto —bcmath sobre strings— y no por number_format,
+              * que recibe float (§8.3.1).
+              */
+            'valor' => $lote instanceof Lote
+                ? sprintf(
+                    '%s · %s v²',
+                    $lote->montoValor()->formateado(),
+                    new Monto((string) $lote->getAttribute('area_varas'))->redondeado(),
+                )
+                : null,
+        ];
+    }
+
     public function liberarLoteAction(): Action
     {
         return Action::make('liberarLote')

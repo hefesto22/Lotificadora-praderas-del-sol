@@ -21,8 +21,8 @@ use App\Models\Venta;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Los tres movimientos que puede sufrir un lote: apartarse, venderse y
- * liberarse.
+ * Los cuatro movimientos que puede sufrir un lote: apartarse, venderse,
+ * donarse y liberarse.
  *
  * Cada uno hace DOS cosas dentro de la misma transaccion: deja el registro
  * del compromiso y mueve el estado del lote. Nunca una sin la otra — un
@@ -110,8 +110,6 @@ final readonly class RegistroDeCompromisos
                 'vence_el'      => $venceEl,
                 'observaciones' => $observaciones,
             ]);
-
-            $lote->update(['estado' => EstadoLote::Apartado]);
 
             /*
              * El numero es lo ULTIMO que se quema: para cuando se pide, el
@@ -262,6 +260,8 @@ final readonly class RegistroDeCompromisos
         ?CondicionesDeMora $mora = null,
         ?TasaDeInteres $tasaLista = null,
         ?string $motivoTasa = null,
+        ?string $titularRecibo = null,
+        ?string $dniTitularRecibo = null,
     ): Compromiso {
         $estado = $this->estadoDe($lote);
         $codigo = $this->codigoDe($lote);
@@ -272,6 +272,19 @@ final readonly class RegistroDeCompromisos
 
         if ($estado === EstadoLote::Cancelado) {
             throw CompromisoInvalidoException::porLoteCancelado($codigo);
+        }
+
+        /*
+         * 🔴 UN LOTE RESERVADO NO SE VENDE, Y ESTE GUARD NO ES DECORATIVO.
+         *
+         * `apartar()` ya lo rechaza sin tocar nada, porque exige que el lote
+         * este DISPONIBLE y punto. `vender()` no: lista los estados que
+         * rechaza uno por uno, asi que un estado nuevo pasa derecho si nadie
+         * lo agrega. Los dieciseis lotes del bloque B se habrian podido vender
+         * igual que antes, y la reserva no habria servido de nada.
+         */
+        if (! $estado->seVende()) {
+            throw CompromisoInvalidoException::porLoteReservado($codigo);
         }
 
         $vigente = $this->vigenteDe($lote);
@@ -342,6 +355,12 @@ final readonly class RegistroDeCompromisos
             throw CompromisoInvalidoException::porTasaSinMotivo($codigo, $tasaDeLista, $tasaPactada);
         }
 
+        $conNombre = trim($titularRecibo ?? '');
+        $conNombre = $conNombre === '' ? null : $conNombre;
+
+        $conDni = trim($dniTitularRecibo ?? '');
+        $conDni = $conDni === '' ? null : $conDni;
+
         return DB::transaction(function () use (
             $lote,
             $cliente,
@@ -356,7 +375,9 @@ final readonly class RegistroDeCompromisos
             $tasaPactada,
             $tasaDeLista,
             $porQueBajo,
-            $mora
+            $mora,
+            $conNombre,
+            $conDni
         ): Compromiso {
             /*
              * El apartado se cierra ANTES de crear la venta. El indice
@@ -369,7 +390,7 @@ final readonly class RegistroDeCompromisos
                 'cerrado_el' => today(),
             ]);
 
-            $compromiso = $this->crear($lote, $cliente, TipoCompromiso::Venta, [
+            return $this->crear($lote, $cliente, TipoCompromiso::Venta, [
                 'observaciones'     => $observaciones,
                 'venta_id'          => $venta?->getKey(),
                 'precio_vara_lista' => $lista->redondeado(Lote::DECIMALES_DEL_PRECIO),
@@ -403,12 +424,143 @@ final readonly class RegistroDeCompromisos
                 'tasa_interes_lista' => $tasaDeLista->paraBase(),
                 'motivo_tasa'        => $porQueBajo === '' ? null : $porQueBajo,
                 ...($mora ?? CondicionesDeMora::ninguna())->paraBase(),
+                /*
+                 * A NOMBRE DE QUIEN SALEN LOS RECIBOS DE ESTE LOTE.
+                 *
+                 * Null es el caso normal: el papel sale a nombre del dueño del
+                 * expediente. Se llena cuando un grupo compra junto y firma UNA
+                 * sola persona —el contrato es del representante, pero cada
+                 * representado tiene SU lote adentro y quiere el recibo a su
+                 * nombre—.
+                 *
+                 * El DNI solo viaja si hay nombre: un DNI suelto no dice nada y
+                 * la base lo rechaza (`compromisos_dni_sin_titular_chk`).
+                 */
+                'titular_recibo'     => $conNombre,
+                'titular_recibo_dni' => $conNombre === null ? null : $conDni,
             ]);
-
-            $lote->update(['estado' => EstadoLote::Vendido]);
-
-            return $compromiso;
         });
+    }
+
+    /**
+     * Registra la donacion de un lote: sale del inventario sin que entre un
+     * lempira.
+     *
+     * ═══ POR QUE NO PASA POR RegistroDeVentas ═══
+     *
+     * Porque `activar()` existe para armar lo que una donacion no tiene:
+     * reparte la prima entre los lotes, calcula un plan de cuotas por cada uno
+     * y emite el recibo de la prima. Con cero pesos por delante, esa maquinaria
+     * no produce nada util — produce un plan de 48 cuotas de L 0.00 colgado de
+     * un contrato que nadie firmo. Una donacion es un compromiso y se termina
+     * ahi: lote, persona, fecha, valor declarado y el porque.
+     *
+     * ═══ NO ES UNA VENTA DE L 0.00 ═══
+     *
+     * El valor se congela igual que en una venta —area × precio de lista del
+     * dia— y no en cero. Es lo que hace falta para la escritura y para poder
+     * contestar «cuanto valia lo que se regalo», que es una pregunta que se
+     * hace tarde o temprano. Lo que no hay es cartera: ni prima, ni plazo, ni
+     * cuotas, ni recibos.
+     *
+     * Si la escritura declara otro numero —el catastral, o uno simbolico—, va
+     * escrito en las observaciones. Bajarlo en el compromiso obligaria a
+     * inventar un precio por vara² que cuadre con el CHECK
+     * `valor = ROUND(area_varas * precio_vara, 2)`, y ese numero inventado
+     * despues aparece en los reportes de precios como si fuera real.
+     *
+     * ═══ DE DONDE PUEDE VENIR EL LOTE ═══
+     *
+     * De `disponible` y de `reservado`, y es una lista BLANCA a proposito. El
+     * segundo es el camino normal: los dieciseis lotes del bloque B estan
+     * guardados para los herederos y las iglesias se apalabran mucho antes de
+     * que haya escritura. Se reserva mientras el tramite corre y se dona
+     * cuando se firma.
+     *
+     * Un lote APARTADO se rechaza aunque sea de la misma persona, y no es un
+     * descuido: ese apartado tiene una seña de por medio que hay que devolver.
+     * `liberar()` sabe hacer eso y esto no, asi que el mensaje manda a
+     * liberarlo primero — que es el tramite correcto, no un rodeo.
+     *
+     * ⚠️ La fecha es `today()`, igual que en `apartar()` y en `vender()`: la
+     * pone `crear()`. Cargar donaciones viejas con su fecha real es cosa del
+     * seeder, por el mismo camino que ya usa para el resto de la cartera.
+     *
+     * @param string $motivo por que se dona y a titulo de que. Obligatorio.
+     *
+     * @throws CompromisoInvalidoException
+     */
+    public function donar(
+        Lote $lote,
+        Cliente $cliente,
+        string $motivo,
+        ?string $observaciones = null,
+    ): Compromiso {
+        $estado = $this->estadoDe($lote);
+        $codigo = $this->codigoDe($lote);
+
+        if (! $estado->seDona()) {
+            throw CompromisoInvalidoException::porDonarLoQueNoEstaLibre($codigo, $estado->etiqueta());
+        }
+
+        $porQue = trim($motivo);
+
+        if ($porQue === '') {
+            throw CompromisoInvalidoException::porDonarSinMotivo($codigo);
+        }
+
+        /*
+         * La transaccion es por `crear()`, que escribe DOS filas: el
+         * compromiso y el estado del lote. Un lote donado sin donacion
+         * registrada es el mismo problema que un lote apartado sin saber de
+         * quien, que es lo que esta tabla vino a resolver.
+         */
+        return DB::transaction(fn (): Compromiso => $this->crear($lote, $cliente, TipoCompromiso::Donacion, [
+            'motivo'        => $porQue,
+            'observaciones' => $observaciones,
+        ]));
+    }
+
+    /**
+     * A nombre de quien salen los recibos de ESTE lote, de aca en adelante.
+     *
+     * ═══ POR QUE SE PUEDE CAMBIAR DESPUES ═══
+     *
+     * Porque el caso llega tarde. Un grupo firma en junio con el representante
+     * y recien en septiembre aparece uno de los representados pidiendo que su
+     * recibo salga a su nombre. Sin esto, la unica forma seria rescindir el
+     * contrato y volverlo a hacer.
+     *
+     * ⚠️ NO toca los papeles ya emitidos, y eso es deliberado: el recibo se
+     * quedo con una COPIA congelada del nombre (§8.2). Un recibo entregado no
+     * se corrige — se anula y se emite otro—, asi que cambiar esto vale para
+     * los cobros que vengan, no para los que ya se fueron en la mano de
+     * alguien.
+     *
+     * @param ?string $nombre null o vacio devuelve el lote al dueño del expediente
+     *
+     * @throws CompromisoInvalidoException
+     */
+    public function ponerElTitularDelRecibo(Compromiso $lote, ?string $nombre, ?string $dni = null): Compromiso
+    {
+        if (! $lote->estaVigente()) {
+            throw CompromisoInvalidoException::porTocarUnCompromisoCerrado(
+                (string) $lote->lote()->value('codigo')
+            );
+        }
+
+        $limpio = trim($nombre ?? '');
+        $limpio = $limpio === '' ? null : $limpio;
+
+        $suDni = trim($dni ?? '');
+
+        $lote->update([
+            'titular_recibo' => $limpio,
+            // Un DNI sin nombre no dice nada, y la base lo rechaza.
+            'titular_recibo_dni' => $limpio === null || $suDni === '' ? null : $suDni,
+        ]);
+
+        return $lote;
     }
 
     /**
@@ -821,7 +973,7 @@ final readonly class RegistroDeCompromisos
          */
         $precio = new Monto($this->decimalDe($lote, 'precio_vara'))->redondeado(Lote::DECIMALES_DEL_PRECIO);
 
-        return Compromiso::query()->create(array_merge([
+        $compromiso = Compromiso::query()->create(array_merge([
             'proyecto_id' => $lote->getAttribute('proyecto_id'),
             'lote_id'     => $lote->getKey(),
             'cliente_id'  => $cliente->getKey(),
@@ -836,6 +988,23 @@ final readonly class RegistroDeCompromisos
             'valor'             => $lote->getAttribute('valor'),
             'fecha'             => today(),
         ], $extra));
+
+        /*
+         * 🔴 Y MUEVE EL LOTE. Las dos cosas o ninguna.
+         *
+         * Hasta el 12-ago-2026 esto lo hacia cada metodo por su cuenta:
+         * `apartar()` escribia `Apartado` a mano y `vender()` escribia
+         * `Vendido`, mientras `TipoCompromiso::estadoDelLote()` existia al
+         * lado sin que nadie lo llamara. Dos fuentes para la misma verdad, y
+         * la que mandaba era la que estaba lejos de donde se decide.
+         *
+         * Ahora el estado sale del TIPO, que es de donde siempre debio salir:
+         * agregar un tipo nuevo sin decidir en que estado deja al lote ya no
+         * compila, porque ese `match` no tiene default.
+         */
+        $lote->update(['estado' => $tipo->estadoDelLote()]);
+
+        return $compromiso;
     }
 
     /**

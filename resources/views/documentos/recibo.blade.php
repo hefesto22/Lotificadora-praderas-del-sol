@@ -204,8 +204,27 @@
     <div class="datos">
         <div class="dato">
             <div class="rotulo">Recibí de</div>
-            <div class="valor">{{ $recibo->cliente?->getAttribute('nombre') ?? '—' }}</div>
+            <div class="valor">{{ $recibo->nombreDelPapel() }}</div>
         </div>
+        @if ($recibo->dniDelPapel())
+            <div class="dato">
+                <div class="rotulo">Identidad</div>
+                <div class="valor">{{ $recibo->dniDelPapel() }}</div>
+            </div>
+        @endif
+        @if ($recibo->esANombreDeOtro())
+            {{--
+                Cuando el recibo sale a nombre de un representado, el papel
+                tiene que decir TAMBIEN de qué expediente es. Si no, queda un
+                comprobante a nombre de alguien que no aparece en ningún
+                contrato — y dentro de dos años nadie puede decir contra qué
+                deuda entró ese dinero.
+            --}}
+            <div class="dato">
+                <div class="rotulo">Por cuenta de</div>
+                <div class="valor">{{ $recibo->cliente?->getAttribute('nombre') ?? '—' }}</div>
+            </div>
+        @endif
         <div class="dato">
             <div class="rotulo">Contrato</div>
             <div class="valor">{{ $recibo->venta?->getAttribute('numero_contrato') ?? '—' }}</div>

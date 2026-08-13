@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
+use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\ModalidadDeReprogramacion;
 use App\Domain\Enums\TipoCorrelativo;
@@ -15,6 +16,7 @@ use App\Models\Cliente;
 use App\Models\Compromiso;
 use App\Models\Lote;
 use App\Models\Proyecto;
+use App\Models\Vendedor;
 use App\Models\Venta;
 use Carbon\CarbonImmutable;
 use Database\Seeders\Cartera\ExpedientesHistoricos;
@@ -95,7 +97,6 @@ class CarteraHistoricaSeeder extends Seeder
 
         $cargados = 0;
         $salteados = 0;
-        $recibos = [];
 
         foreach (ExpedientesHistoricos::todos() as $datos) {
             $numero = (int) $datos['expediente'];
@@ -107,13 +108,14 @@ class CarteraHistoricaSeeder extends Seeder
                 continue;
             }
 
-            $recibos = [...$recibos, ...$this->cargar($proyecto, $datos)];
+            $this->cargar($proyecto, $datos);
             $cargados++;
 
             $this->command?->info("   ✓ Expediente {$this->folio($numero)} — {$this->nombre($datos)}");
         }
 
-        $this->dejarLasSeriesDondeVan($proyecto, $recibos);
+        $this->reservarLosQueNoSeVenden($proyecto);
+        $this->dejarLasSeriesDondeVan($proyecto);
 
         $this->command?->newLine();
         $this->command?->info("Cartera histórica: {$cargados} expedientes cargados, {$salteados} ya estaban.");
@@ -122,17 +124,19 @@ class CarteraHistoricaSeeder extends Seeder
     // ─── Un expediente ────────────────────────────────────────────────
 
     /**
-     * Carga una venta con todo su historial. Devuelve los números de recibo
-     * que consumió, para poder dejar la serie donde va al final.
+     * Carga una venta con todo su historial.
+     *
+     * ⚠️ El correlativo de recibos NO se toca acá: el sistema numera de
+     * corrido y la serie se deja donde va al final, una sola vez. Ver
+     * `config('lotificadora.cartera.proximo_recibo')`.
      *
      * @param array<string, mixed> $datos
-     *
-     * @return list<int>
      */
-    private function cargar(Proyecto $proyecto, array $datos): array
+    private function cargar(Proyecto $proyecto, array $datos): void
     {
         $lotes = $this->lotes($proyecto, $datos);
         $cliente = $this->cliente($datos);
+        $vendedor = $this->vendedor($datos);
         $fecha = CarbonImmutable::parse((string) $datos['fecha']);
 
         /*
@@ -140,7 +144,6 @@ class CarteraHistoricaSeeder extends Seeder
          * `activar()`. Se acomoda la serie para que salga el del cuaderno.
          */
         $this->ponerLaSerieEn(TipoCorrelativo::Contrato, (int) $datos['expediente'] - 1, $proyecto);
-        $this->ponerLaSerieEn(TipoCorrelativo::ReciboInterno, (int) $datos['recibo_prima'] - 1, null);
 
         $venta = resolve(RegistroDeVentas::class)->activar(
             proyecto: $proyecto,
@@ -154,18 +157,15 @@ class CarteraHistoricaSeeder extends Seeder
             precios: $this->precios($lotes, $datos),
             formaPrima: $this->forma((string) ($datos['forma_prima'] ?? 'efectivo')),
             referenciaPrima: is_string($datos['ref_prima'] ?? null) ? $datos['ref_prima'] : null,
+            vendedor: $vendedor,
         );
-
-        $consumidos = [(int) $datos['recibo_prima']];
 
         /** @var list<array<string, mixed>> $pagos */
         $pagos = is_array($datos['pagos'] ?? null) ? $datos['pagos'] : [];
 
         foreach ($pagos as $pago) {
-            $consumidos[] = $this->pagar($venta, $cliente, $lotes, $pago);
+            $this->pagar($venta, $cliente, $lotes, $pago);
         }
-
-        return $consumidos;
     }
 
     /**
@@ -174,12 +174,8 @@ class CarteraHistoricaSeeder extends Seeder
      * @param array<string, Lote> $lotes
      * @param array<string, mixed> $pago
      */
-    private function pagar(Venta $venta, Cliente $cliente, array $lotes, array $pago): int
+    private function pagar(Venta $venta, Cliente $cliente, array $lotes, array $pago): void
     {
-        $numero = (int) $pago['recibo'];
-
-        $this->ponerLaSerieEn(TipoCorrelativo::ReciboInterno, $numero - 1, null);
-
         $renglones = $this->renglones($venta, $lotes, $pago);
         $forma = $this->forma((string) $pago['forma']);
         $referencia = is_string($pago['referencia'] ?? null) ? $pago['referencia'] : null;
@@ -210,7 +206,7 @@ class CarteraHistoricaSeeder extends Seeder
                 observaciones: $nota,
             );
 
-            return $numero;
+            return;
         }
 
         $servicio->cobrarVariosLotes(
@@ -222,11 +218,39 @@ class CarteraHistoricaSeeder extends Seeder
             fecha: $fecha,
             observaciones: $nota,
         );
-
-        return $numero;
     }
 
     // ─── Las piezas ───────────────────────────────────────────────────
+
+    /**
+     * El vendedor que anota el cuaderno, si anota alguno.
+     *
+     * ═══ EL NOMBRE SE NORMALIZA ANTES DE LLEGAR ACA ═══
+     *
+     * El cuaderno escribe «Jony Gerson García Melgar», «Jony Gerson García»,
+     * «Jony García» y «Yoni García» para la misma persona. Los cuatro entran
+     * al archivo de datos con la grafía completa —lo confirmó Mauricio el
+     * 11-ago-2026— así que acá el `firstOrCreate` encuentra siempre la misma
+     * fila y no hay cuatro vendedores donde hay uno.
+     *
+     * Sin vendedor la venta la cerró la lotificadora, que es el caso normal:
+     * seis expedientes de setenta y seis traen nombre.
+     *
+     * @param array<string, mixed> $datos
+     */
+    private function vendedor(array $datos): ?Vendedor
+    {
+        $nombre = trim((string) ($datos['vendedor'] ?? ''));
+
+        if ($nombre === '') {
+            return null;
+        }
+
+        return Vendedor::query()->firstOrCreate(
+            ['nombre' => $nombre],
+            ['observaciones' => 'Registrado con la carga de la cartera anterior al sistema.'],
+        );
+    }
 
     /**
      * Los lotes del expediente, indexados por «bloque-numero».
@@ -364,10 +388,38 @@ class CarteraHistoricaSeeder extends Seeder
              * expediente y se explica. Inventar un motivo para todos los demás
              * llenaría la bitácora de descuentos que nunca existieron.
              */
+            /*
+             * 🔴 LA PRIMA PUEDE SER DE ESTE LOTE Y NO DEL CONTRATO.
+             *
+             * Null es «repartime la del contrato en proporción al valor», que
+             * es el caso normal y el que sirvió para los primeros 24
+             * expedientes. Pero el cuaderno también lleva expedientes donde
+             * cada lote pactó SU prima: el exp. 0050 tiene el K-7 con
+             * L 16,000.00 y el K-8 con L 10,000.00, escritos en renglones
+             * distintos y con cuotas distintas —L 8,000.00 y L 5,000.00—.
+             *
+             * Sin esto, el reparto proporcional le daría al K-8 su parte de
+             * los 16,000 y su cuota saldría de L 5,208.33 en lugar de los
+             * L 5,000.00 que dice el papel. Y esa diferencia no es de una vez:
+             * se repite en las 47 cuotas que faltan.
+             */
+            /*
+             * 🔴 Y EL PLAZO TAMBIEN PUEDE SER DE ESTE LOTE.
+             *
+             * Va de la mano con la prima: cuando la prima de un lote cubre su
+             * valor entero, ese lote se vendió AL CONTADO y su plazo es 0. El
+             * exp. 0049 es el caso —los lotes I-1 e I-2 se pagaron enteros el
+             * día de firmar, mientras el I-3 quedó a 48 meses—, y sin esto
+             * `RegistroDeVentas` lo rechaza con razón: «la prima cubre el
+             * valor completo, así que no queda saldo que financiar, pero se
+             * pidieron 48 cuotas».
+             */
             $precios[] = new PrecioPactado(
                 loteId: (int) $lote->getKey(),
                 precioVara: $precioVara,
                 motivo: is_string($fila['motivo'] ?? null) ? $fila['motivo'] : null,
+                plazoMeses: is_int($fila['plazo'] ?? null) ? $fila['plazo'] : null,
+                prima: is_string($fila['prima'] ?? null) ? new Monto($fila['prima']) : null,
             );
         }
 
@@ -447,6 +499,43 @@ class CarteraHistoricaSeeder extends Seeder
 
         if ($compromisos === []) {
             throw new RuntimeException("El recibo {$pago['recibo']} apunta a una venta sin lotes.");
+        }
+
+        /*
+         * 🔴 VARIOS LOTES CON SU MONTO, EN UN SOLO RECIBO.
+         *
+         * El exp. 0051 lo trajo: el recibo 00000328 son L 15,000.00 que
+         * cubren la cuota de julio de los lotes 1, 2 y 11 del bloque J —cinco
+         * mil cada uno—, y los otros tres lotes del contrato no se tocan.
+         *
+         * Sin esto habría que elegir entre repartir los 15,000 entre los SEIS
+         * lotes (y dejar seis saldos equivocados) o partir el recibo en tres
+         * (y inventar dos números de talonario que no existen). El cuaderno
+         * dice qué lote y cuánto: se carga tal cual.
+         */
+        $porLote = is_array($pago['lotes'] ?? null) ? $pago['lotes'] : null;
+
+        if ($porLote !== null) {
+            $renglones = [];
+
+            foreach ($porLote as $codigo => $cuanto) {
+                $buscado = isset($lotes[$codigo]) ? (int) $lotes[$codigo]->getKey() : 0;
+                $renglon = null;
+
+                foreach ($compromisos as $compromiso) {
+                    if ((int) $compromiso->getAttribute('lote_id') === $buscado) {
+                        $renglon = $compromiso;
+                    }
+                }
+
+                if (! $renglon instanceof Compromiso) {
+                    throw new RuntimeException("El recibo {$pago['recibo']} apunta al lote {$codigo}, que no está en la venta.");
+                }
+
+                $renglones[] = ['lote' => $renglon, 'monto' => new Monto((string) $cuanto)];
+            }
+
+            return $renglones;
         }
 
         // Un lote declarado: todo va ahí.
@@ -557,14 +646,75 @@ class CarteraHistoricaSeeder extends Seeder
     }
 
     /**
-     * Al terminar, las series quedan en el número más alto que usó el cuaderno.
+     * Saca del mercado los lotes que la lotificadora guardó para alguien.
      *
-     * Sin esto, el primer recibo que emita alguien en producción repetiría un
-     * número que ya está impreso y entregado.
+     * Va DESPUES de cargar los expedientes a propósito: si un lote reservado
+     * apareciera además vendido en el cuaderno, la venta manda y el aviso lo
+     * dice. Al revés —reservar primero— la venta se caería con un error que
+     * parecería un bug del seeder.
      *
-     * @param list<int> $recibos
+     * No usa un Service porque no hay ninguno: reservar no es un compromiso
+     * con nadie, es la lotificadora marcando su propio inventario. El día que
+     * eso se haga desde la pantalla, este método se cambia por esa llamada.
      */
-    private function dejarLasSeriesDondeVan(Proyecto $proyecto, array $recibos): void
+    private function reservarLosQueNoSeVenden(Proyecto $proyecto): void
+    {
+        foreach (ExpedientesHistoricos::RESERVADOS as $grupo => $datos) {
+            $reservados = 0;
+            $ocupados = [];
+
+            foreach ($datos['lotes'] as $codigo) {
+                [$bloque, $numero] = explode('-', $codigo, 2);
+
+                $lote = Lote::query()
+                    ->where('proyecto_id', $proyecto->getKey())
+                    ->where('numero', $numero)
+                    ->whereIn('bloque_id', DB::table('bloques')
+                        ->where('proyecto_id', $proyecto->getKey())
+                        ->where('nombre', $bloque)
+                        ->pluck('id'))
+                    ->first();
+
+                if (! $lote instanceof Lote) {
+                    throw new RuntimeException("El lote reservado {$codigo} no existe en el plano.");
+                }
+
+                $estado = $lote->getAttribute('estado');
+
+                if ($estado instanceof EstadoLote && $estado->estaComprometido()) {
+                    $ocupados[] = $codigo;
+
+                    continue;
+                }
+
+                $lote->forceFill([
+                    'estado'        => EstadoLote::Reservado,
+                    'observaciones' => $datos['motivo'],
+                ])->save();
+
+                $reservados++;
+            }
+
+            $this->command?->info("   ✓ {$reservados} lotes reservados — {$grupo}.");
+
+            if ($ocupados !== []) {
+                $this->command?->warn('   ⚠️  Estos ya estaban vendidos o apartados y NO se reservaron: '
+                    .implode(', ', $ocupados).'.');
+            }
+        }
+    }
+
+    /**
+     * Al terminar, las series quedan donde tienen que quedar.
+     *
+     * La de CONTRATOS, en el expediente más alto del cuaderno: el próximo que
+     * se abra sigue la cuenta.
+     *
+     * La de RECIBOS, en el número que se le diga — no en el que dejó la carga.
+     * Sin eso, el primer recibo que emita alguien en producción repetiría un
+     * número que ya está impreso y entregado en papel.
+     */
+    private function dejarLasSeriesDondeVan(Proyecto $proyecto): void
     {
         $expedientes = array_map(
             static fn (array $datos): int => (int) $datos['expediente'],
@@ -575,9 +725,48 @@ class CarteraHistoricaSeeder extends Seeder
             $this->ponerLaSerieEn(TipoCorrelativo::Contrato, max($expedientes), $proyecto);
         }
 
-        if ($recibos !== []) {
-            $this->ponerLaSerieEn(TipoCorrelativo::ReciboInterno, max($recibos), null);
+        /*
+         * 🔴 EL CORRELATIVO DE RECIBOS SE FIJA ACA, UNA SOLA VEZ, Y ES LO QUE
+         * EVITA REPETIRLE UN NUMERO A LA CONTRATANTE.
+         *
+         * La carga histórica numeró de corrido —1, 2, 3…— porque los recibos
+         * viejos no llevan el número del talonario. Si la serie quedara ahí, el
+         * primer recibo que el sistema emita en producción llevaría un número
+         * que ella YA entregó en papel, y habría dos documentos distintos con
+         * el mismo número.
+         *
+         * `OLYMPO_PROXIMO_RECIBO` es el próximo número en blanco de su talonario. La
+         * serie se deja en ese menos uno, así el primero que salga es
+         * exactamente ese.
+         *
+         * En null no se toca nada: sirve para probar en local. Antes de
+         * producción hay que ponerlo — `olympo:verificar-produccion` no lo
+         * revisa todavía.
+         */
+        /*
+         * ⚠️ VIENE DE `config()` Y NO DE UNA CONSTANTE, Y NO ES ESTILO.
+         *
+         * Estuvo como `ExpedientesHistoricos::PROXIMO_RECIBO = null` y PHPStan
+         * tenía razón en rechazarlo: una constante de clase se resuelve en el
+         * análisis, así que `!== null` era siempre falso y todo este bloque era
+         * código muerto que nadie iba a ejecutar nunca. El aviso amarillo
+         * habría salido en producción igual que en local.
+         *
+         * Y de paso queda donde va: el número del talonario es una
+         * configuración del servidor, no un dato del cuaderno.
+         */
+        $proximo = config('lotificadora.cartera.proximo_recibo');
+
+        if (is_int($proximo) && $proximo > 0) {
+            $this->ponerLaSerieEn(TipoCorrelativo::ReciboInterno, $proximo - 1, null);
+
+            $this->command?->line("   · El próximo recibo del sistema será el {$proximo}.");
+
+            return;
         }
+
+        $this->command?->warn('   ⚠️  El correlativo de recibos quedó donde lo dejó la carga. '
+            .'Antes de producción hay que poner OLYMPO_PROXIMO_RECIBO en el .env.');
     }
 
     // ─── Interno ──────────────────────────────────────────────────────

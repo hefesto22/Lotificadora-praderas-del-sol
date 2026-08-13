@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Domain\Enums\EstadoLote;
 use App\Domain\Exceptions\ProyectoConMovimientoException;
+use App\Domain\ValueObjects\Monto;
 use App\Traits\HasAuditFields;
 use Database\Factories\ProyectoFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -336,6 +337,55 @@ class Proyecto extends Model
     public function lotes(): HasMany
     {
         return $this->hasMany(Lote::class);
+    }
+
+    /**
+     * Los dueños del PROYECTO y la parte que le toca a cada uno.
+     *
+     * No son clientes: un cliente compra un lote, un socio puso el terreno o el
+     * dinero. Ordenados de mayor a menor parte, que es como se lee un reparto.
+     *
+     * @return HasMany<Socio, $this>
+     */
+    public function socios(): HasMany
+    {
+        return $this->hasMany(Socio::class)->orderByDesc('porcentaje');
+    }
+
+    /**
+     * Cuánto suman las partes de los socios activos.
+     *
+     * Tiene que dar 100. No lo puede garantizar un CHECK —mira una fila y esto
+     * es la suma de todas— así que lo pregunta la pantalla y lo tendrá que
+     * exigir el reparto: repartir con 90 deja 10 sin dueño.
+     */
+    public function partesDeLosSocios(): Monto
+    {
+        $total = Monto::cero();
+
+        foreach ($this->socios()->activos()->get() as $socio) {
+            $total = $total->sumar($socio->porcentaje());
+        }
+
+        return $total;
+    }
+
+    /**
+     * ¿Las partes cierran en 100?
+     *
+     * Un proyecto SIN socios cargados también devuelve true: no es que el
+     * reparto esté mal, es que no hay reparto. Avisar ahí sería pedirle a todo
+     * el mundo que cargue socios que quizá no tenga.
+     */
+    public function elRepartoCierra(): bool
+    {
+        $total = $this->partesDeLosSocios();
+
+        if ($total->esCero()) {
+            return true;
+        }
+
+        return $total->igualA(new Monto('100'));
     }
 
     /**

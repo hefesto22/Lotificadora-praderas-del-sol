@@ -108,7 +108,7 @@ final readonly class RegistroDePagos
         bool $condonarMora = false,
         ?string $motivoCondonacion = null,
     ): Recibo {
-        return $this->cobrarVariosLotes(
+        return $this->unSoloRecibo($this->cobrarVariosLotes(
             venta: $venta,
             cliente: $cliente,
             renglones: [['lote' => $lote, 'monto' => $monto]],
@@ -118,7 +118,7 @@ final readonly class RegistroDePagos
             observaciones: $observaciones,
             condonarMora: $condonarMora,
             motivoCondonacion: $motivoCondonacion,
-        );
+        ));
     }
 
     /**
@@ -162,6 +162,8 @@ final readonly class RegistroDePagos
      *
      * @param list<array{lote: Compromiso, monto: Monto}> $renglones
      *
+     * @return list<Recibo> un papel por cada titular de recibo
+     *
      * @throws PagoInvalidoException
      */
     public function cobrarVariosLotes(
@@ -174,6 +176,44 @@ final readonly class RegistroDePagos
         ?string $observaciones = null,
         bool $condonarMora = false,
         ?string $motivoCondonacion = null,
+    ): array {
+        return $this->porCadaNombre(
+            $renglones,
+            fn (array $suyos): Recibo => $this->cobrarLosDeUnMismoNombre(
+                $venta,
+                $cliente,
+                $suyos,
+                $forma,
+                $referencia,
+                $fecha,
+                $observaciones,
+                $condonarMora,
+                $motivoCondonacion,
+            ),
+        );
+    }
+
+    /**
+     * El cobro de los lotes que comparten titular de recibo: UN solo papel.
+     *
+     * Es el cuerpo de siempre. Lo unico que cambio el 13-ago-2026 es quien lo
+     * llama: antes era la puerta publica y ahora `cobrarVariosLotes()` lo
+     * invoca una vez por cada nombre.
+     *
+     * @param list<array{lote: Compromiso, monto: Monto}> $renglones
+     *
+     * @throws PagoInvalidoException
+     */
+    private function cobrarLosDeUnMismoNombre(
+        Venta $venta,
+        Cliente $cliente,
+        array $renglones,
+        FormaDePago $forma,
+        ?string $referencia,
+        ?CarbonImmutable $fecha,
+        ?string $observaciones,
+        bool $condonarMora,
+        ?string $motivoCondonacion,
     ): Recibo {
         if ($renglones === []) {
             throw PagoInvalidoException::porNoElegirNingunLote();
@@ -274,6 +314,7 @@ final readonly class RegistroDePagos
                 $limpia,
                 $cuando,
                 $observaciones,
+                array_map(static fn (array $renglon): Compromiso => $renglon['lote'], $renglones),
             );
 
             // 4. Mora → interés → capital, FIFO adentro de cada lote.
@@ -452,7 +493,7 @@ final readonly class RegistroDePagos
         ?CarbonImmutable $fecha = null,
         ?string $observaciones = null,
     ): Recibo {
-        return $this->abonarAVariosLotes(
+        return $this->unSoloRecibo($this->abonarAVariosLotes(
             venta: $venta,
             cliente: $cliente,
             renglones: [['lote' => $lote, 'monto' => $monto, 'modalidad' => $modalidad]],
@@ -461,7 +502,7 @@ final readonly class RegistroDePagos
             referencia: $referencia,
             fecha: $fecha,
             observaciones: $observaciones,
-        );
+        ));
     }
 
     /**
@@ -521,6 +562,8 @@ final readonly class RegistroDePagos
      * @param list<array{lote: Compromiso, monto: Monto, modalidad: ModalidadDeReprogramacion}> $renglones
      * @param string $motivo obligatorio (R21); la base tambien lo exige
      *
+     * @return list<Recibo> un papel por cada titular de recibo
+     *
      * @throws PagoInvalidoException
      */
     public function abonarAVariosLotes(
@@ -532,6 +575,40 @@ final readonly class RegistroDePagos
         ?string $referencia = null,
         ?CarbonImmutable $fecha = null,
         ?string $observaciones = null,
+    ): array {
+        return $this->porCadaNombre(
+            $renglones,
+            fn (array $suyos): Recibo => $this->abonarEnLosDeUnMismoNombre(
+                $venta,
+                $cliente,
+                $suyos,
+                $motivo,
+                $forma,
+                $referencia,
+                $fecha,
+                $observaciones,
+            ),
+        );
+    }
+
+    /**
+     * El abono de los lotes que comparten titular de recibo: UN solo papel.
+     *
+     * Es el cuerpo de siempre; lo que cambio el 13-ago-2026 es quien lo llama.
+     *
+     * @param list<array{lote: Compromiso, monto: Monto, modalidad: ModalidadDeReprogramacion}> $renglones
+     *
+     * @throws PagoInvalidoException
+     */
+    private function abonarEnLosDeUnMismoNombre(
+        Venta $venta,
+        Cliente $cliente,
+        array $renglones,
+        string $motivo,
+        FormaDePago $forma,
+        ?string $referencia,
+        ?CarbonImmutable $fecha,
+        ?string $observaciones,
     ): Recibo {
         if ($renglones === []) {
             throw PagoInvalidoException::porNoElegirNingunLote();
@@ -682,6 +759,7 @@ final readonly class RegistroDePagos
                 $limpia,
                 $cuando,
                 $observaciones,
+                array_map(static fn (array $renglon): Compromiso => $renglon['lote'], $renglones),
             );
 
             $moraCobrada = Monto::cero();
@@ -797,6 +875,8 @@ final readonly class RegistroDePagos
      * @param list<array{lote: Compromiso, monto: Monto}> $cuotas los renglones que se cobran
      * @param string $motivo obligatorio (R21); la base tambien lo exige
      *
+     * @return list<Recibo> un papel por cada titular de recibo
+     *
      * @throws PagoInvalidoException
      */
     public function cobrarYAbonar(
@@ -811,6 +891,103 @@ final readonly class RegistroDePagos
         ?string $referencia = null,
         ?CarbonImmutable $fecha = null,
         ?string $observaciones = null,
+    ): array {
+        /*
+         * El abono viaja con las cuotas de SU MISMO nombre: es plata del mismo
+         * lote, y separarlo en otro papel seria partir en dos algo que la
+         * persona entrego junta. Las cuotas de los otros nombres salen en sus
+         * propios recibos, sin abono.
+         */
+        $suNombre = $loteDelAbono->titularDelRecibo() ?? '';
+        $grupos = $this->agruparPorNombre($cuotas);
+        $recibos = [];
+
+        return DB::transaction(function () use (
+            $grupos,
+            $suNombre,
+            $venta,
+            $cliente,
+            $loteDelAbono,
+            $aCapital,
+            $modalidad,
+            $motivo,
+            $forma,
+            $referencia,
+            $fecha,
+            $observaciones,
+            $recibos
+        ): array {
+            foreach ($grupos as $nombre => $suyas) {
+                $recibos[] = $nombre === $suNombre
+                    ? $this->cobrarYAbonarEnUnMismoNombre(
+                        $venta,
+                        $cliente,
+                        $suyas,
+                        $loteDelAbono,
+                        $aCapital,
+                        $modalidad,
+                        $motivo,
+                        $forma,
+                        $referencia,
+                        $fecha,
+                        $observaciones,
+                    )
+                    : $this->cobrarLosDeUnMismoNombre(
+                        $venta,
+                        $cliente,
+                        $suyas,
+                        $forma,
+                        $referencia,
+                        $fecha,
+                        $observaciones,
+                        false,
+                        null,
+                    );
+            }
+
+            // El abono es de un lote que no tenia ninguna cuota marcada: se va
+            // solo, en su propio papel y a su propio nombre.
+            if (! array_key_exists($suNombre, $grupos)) {
+                $recibos[] = $this->cobrarYAbonarEnUnMismoNombre(
+                    $venta,
+                    $cliente,
+                    [],
+                    $loteDelAbono,
+                    $aCapital,
+                    $modalidad,
+                    $motivo,
+                    $forma,
+                    $referencia,
+                    $fecha,
+                    $observaciones,
+                );
+            }
+
+            return $recibos;
+        });
+    }
+
+    /**
+     * Las cuotas y el abono de un mismo titular de recibo: UN solo papel.
+     *
+     * Es el cuerpo de siempre; lo que cambio el 13-ago-2026 es quien lo llama.
+     *
+     * @param list<array{lote: Compromiso, monto: Monto}> $cuotas
+     *
+     * @throws PagoInvalidoException
+     */
+    private function cobrarYAbonarEnUnMismoNombre(
+        Venta $venta,
+        Cliente $cliente,
+        array $cuotas,
+        Compromiso $loteDelAbono,
+        Monto $aCapital,
+        ModalidadDeReprogramacion $modalidad,
+        string $motivo,
+        FormaDePago $forma,
+        ?string $referencia,
+        ?CarbonImmutable $fecha,
+        ?string $observaciones,
     ): Recibo {
         $this->verificar($venta, $loteDelAbono, $aCapital, $forma, $referencia);
 
@@ -899,6 +1076,7 @@ final readonly class RegistroDePagos
                 $limpia,
                 $cuando,
                 $observaciones,
+                [...array_map(static fn (array $renglon): Compromiso => $renglon['lote'], $cuotas), $loteDelAbono],
             );
 
             // 3. La mitad de cuota: FIFO, mora → interes → capital.
@@ -1193,6 +1371,9 @@ final readonly class RegistroDePagos
      * sería peor que dejarla vacía. El CHECK
      * `recibos_cuelgan_de_un_compromiso_chk` la deja pasar porque `venta_id`
      * está puesto — R13: todo pago cuelga de algo.
+     *
+     * @param list<Compromiso> $lotesDelRecibo los lotes que cubre este papel,
+     *                                         para saber a nombre de quien sale
      */
     private function emitir(
         Venta $venta,
@@ -1204,19 +1385,156 @@ final readonly class RegistroDePagos
         string $referencia,
         CarbonImmutable $cuando,
         ?string $observaciones,
+        array $lotesDelRecibo = [],
     ): Recibo {
+        $aNombreDe = $this->aNombreDeQuien($lotesDelRecibo);
+
         return Recibo::query()->create([
             'numero'        => $this->correlativos->siguienteDeReciboInterno(),
             'venta_id'      => $venta->getKey(),
             'compromiso_id' => $lote?->getKey(),
             'cliente_id'    => $cliente->getKey(),
-            'concepto'      => $concepto,
-            'forma_pago'    => $forma,
-            'referencia'    => $referencia === '' ? null : $referencia,
-            'monto'         => $monto->redondeado(),
-            'fecha'         => $cuando->toDateString(),
-            'observaciones' => $observaciones,
+            /*
+             * 🔴 UNA COPIA CONGELADA, NO UNA LECTURA DEL LOTE.
+             *
+             * A nombre de quien sale el papel lo dice la configuracion del lote
+             * (`compromisos.titular_recibo`), pero el recibo se queda con su
+             * propia copia — igual que el area y el precio en §8.2. Si mañana
+             * se corrige ese nombre, los papeles ya entregados tienen que
+             * seguir diciendo lo que decian: un recibo entregado no se corrige,
+             * se anula y se emite otro.
+             */
+            'a_nombre_de'     => $aNombreDe['nombre'],
+            'a_nombre_de_dni' => $aNombreDe['dni'],
+            'concepto'        => $concepto,
+            'forma_pago'      => $forma,
+            'referencia'      => $referencia === '' ? null : $referencia,
+            'monto'           => $monto->redondeado(),
+            'fecha'           => $cuando->toDateString(),
+            'observaciones'   => $observaciones,
         ]);
+    }
+
+    /**
+     * Un papel por cada titular de recibo, y uno solo si todos comparten.
+     *
+     * ═══ QUE PIDIO MAURICIO, TEXTUAL (13-AGO-2026) ═══
+     *
+     * «Si pagan la cuota de 3 lotes y tienen nombre de recibo distinto se
+     * imprimen 3 recibos con la cuota de su lote. Si son 3 lotes sin nombre de
+     * recibo se imprime uno solo. Y así sucesivamente, y en abono de capital
+     * también».
+     *
+     * Es la respuesta correcta y es mejor que la que yo habia puesto el dia
+     * anterior, que era RECHAZAR el cobro mezclado. Rechazarlo le pasaba el
+     * trabajo a quien esta en ventanilla —«volvé a entrar tres veces»— cuando
+     * el sistema tiene toda la informacion para partirlo solo.
+     *
+     * ═══ 🔴 LOS PAPELES SE EMITEN TODOS O NINGUNO ═══
+     *
+     * La transaccion abarca los tres. Cada uno quema su numero de la serie
+     * unica (R12), y quedarse a mitad —dos recibos emitidos y el tercero
+     * caido— dejaria plata cobrada sin comprobante y un hueco en el
+     * correlativo. Con un solo grupo no se abre nada: el trabajador ya trae su
+     * propia transaccion.
+     *
+     * @template TRenglon of array{lote: Compromiso}
+     *
+     * @param list<TRenglon> $renglones
+     * @param callable(list<TRenglon>): Recibo $emitir
+     *
+     * @return list<Recibo>
+     */
+    private function porCadaNombre(array $renglones, callable $emitir): array
+    {
+        $grupos = $this->agruparPorNombre($renglones);
+
+        // Con cero grupos —la lista vino vacia— tambien pasa por aca: el
+        // trabajador es quien tiene el mensaje de «no elegiste ningun lote».
+        if (count($grupos) <= 1) {
+            return [$emitir($renglones)];
+        }
+
+        return DB::transaction(fn (): array => array_values(array_map($emitir, $grupos)));
+    }
+
+    /**
+     * Los renglones repartidos por el titular de recibo de su lote.
+     *
+     * La clave es el NOMBRE, y la cadena vacia representa «el dueño del
+     * expediente» — que tambien es un nombre distinto de «Jose». Un lote
+     * configurado y otro sin configurar son dos papeles, no uno.
+     *
+     * @template TRenglon of array{lote: Compromiso}
+     *
+     * @param list<TRenglon> $renglones
+     *
+     * @return array<string, list<TRenglon>>
+     */
+    private function agruparPorNombre(array $renglones): array
+    {
+        $grupos = [];
+
+        foreach ($renglones as $renglon) {
+            $grupos[$renglon['lote']->titularDelRecibo() ?? ''][] = $renglon;
+        }
+
+        return $grupos;
+    }
+
+    /**
+     * El unico recibo de un cobro de UN solo lote.
+     *
+     * `cobrarCuotas()` y `abonarACapital()` trabajan sobre un lote, asi que su
+     * reparto por nombre siempre da un grupo. Devuelven `Recibo` y no una lista
+     * porque su llamador pidio un papel, no un conjunto.
+     *
+     * @param list<Recibo> $recibos
+     *
+     * @throws PagoInvalidoException
+     */
+    private function unSoloRecibo(array $recibos): Recibo
+    {
+        $recibo = $recibos[0] ?? null;
+
+        if (! $recibo instanceof Recibo) {
+            throw PagoInvalidoException::porNoElegirNingunLote();
+        }
+
+        return $recibo;
+    }
+
+    /**
+     * A nombre de quien sale este papel, mirando los lotes que cubre.
+     *
+     * ═══ POR QUE ES DEL LOTE Y NO DEL CONTRATO ═══
+     *
+     * Lo pidio asi Mauricio (12-ago-2026): «si son 3 lotes debe decidir a
+     * nombre de quien sale el recibo de ESE lote; si no colocan ningun nombre,
+     * sale a nombre del dueño del expediente». Un grupo compra junto, firma UNA
+     * sola persona, y cada representado tiene su lote adentro del contrato.
+     *
+     * ⚠️ Para cuando esto corre, TODOS los lotes del papel comparten titular:
+     * `porCadaNombre()` ya los separo. Por eso alcanza con mirar el primero —y
+     * por eso no hay ninguna decision que tomar aca sobre a quien se le niega
+     * el comprobante.
+     *
+     * @param list<Compromiso> $lotes
+     *
+     * @return array{nombre: ?string, dni: ?string}
+     */
+    private function aNombreDeQuien(array $lotes): array
+    {
+        $lote = $lotes[0] ?? null;
+
+        if (! $lote instanceof Compromiso) {
+            return ['nombre' => null, 'dni' => null];
+        }
+
+        return [
+            'nombre' => $lote->titularDelRecibo(),
+            'dni'    => $lote->dniDelTitularDelRecibo(),
+        ];
     }
 
     /**

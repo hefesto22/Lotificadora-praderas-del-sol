@@ -67,6 +67,21 @@ final readonly class PrecioPactado
          */
         public ?TasaDeInteres $tasa = null,
         public ?string $motivoTasa = null,
+
+        /*
+         * ═══ A NOMBRE DE QUIEN SALEN LOS RECIBOS DE ESTE LOTE ═══
+         *
+         * Null es el caso normal y quiere decir «a nombre del dueño del
+         * expediente». Se llena cuando un grupo compra junto y firma UNA sola
+         * persona: el contrato es del representante, pero cada representado
+         * tiene SU lote adentro y quiere el papel a su nombre.
+         *
+         * Texto y no un cliente, por decision de Mauricio (12-ago-2026): en
+         * `clientes` van los del expediente, y un representado no compro nada a
+         * su nombre. El DNI es opcional.
+         */
+        public ?string $titularRecibo = null,
+        public ?string $dniTitularRecibo = null,
     ) {}
 
     /**
@@ -96,6 +111,37 @@ final readonly class PrecioPactado
         $motivo = trim($this->motivo ?? '');
 
         return $motivo === '' ? null : $motivo;
+    }
+
+    /**
+     * El titular del recibo limpio, o null si lo que vino eran espacios.
+     *
+     * El CHECK `compromisos_titular_recibo_no_vacio_chk` no admite una cadena
+     * en blanco: un nombre de espacios se leeria como «hay titular» y el papel
+     * saldria a nombre de nadie.
+     */
+    public function titularReciboLimpio(): ?string
+    {
+        $nombre = trim($this->titularRecibo ?? '');
+
+        return $nombre === '' ? null : $nombre;
+    }
+
+    /**
+     * El DNI del titular del recibo, y solo si hay titular.
+     *
+     * Un DNI sin nombre no dice nada y la base lo rechaza
+     * (`compromisos_dni_sin_titular_chk`).
+     */
+    public function dniTitularReciboLimpio(): ?string
+    {
+        if ($this->titularReciboLimpio() === null) {
+            return null;
+        }
+
+        $dni = trim($this->dniTitularRecibo ?? '');
+
+        return $dni === '' ? null : $dni;
     }
 
     public function motivoDeTasaLimpio(): ?string

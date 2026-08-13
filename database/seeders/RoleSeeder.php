@@ -63,7 +63,7 @@ class RoleSeeder extends Seeder
      */
     public const array RECURSOS = [
         'Proyecto', 'Bloque', 'Calle', 'Lote', 'Cliente', 'Compromiso', 'Venta', 'PlanDePago',
-        'Recibo', 'Documento',
+        'Recibo', 'Documento', 'Vendedor',
     ];
 
     /**

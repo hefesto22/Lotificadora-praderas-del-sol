@@ -151,9 +151,23 @@ describe('Lote — scopes y estados', function (): void {
             ->and(Lote::query()->comprometidos()->count())->toBe(2);
     });
 
-    test('el enum expone exactamente los cuatro estados del contrato', function (): void {
+    /*
+    | Este test NO es una formalidad: es el que avisa cuando alguien agrega un
+    | estado. La lista de `EstadoLote` sale en los reportes con los que la
+    | contratante decide y alimenta el CHECK de la base, asi que un caso nuevo
+    | tiene que ser una decision tomada y no un descubrimiento.
+    |
+    | Cuando falle, la pregunta no es «como lo hago pasar» sino «quien autorizo
+    | el estado nuevo y esta escrito en el enum». El 12-ago-2026 fallo por
+    | `reservado`, que autorizo Mauricio para sacar del mercado los dieciseis
+    | lotes del bloque B.
+    |
+    | ⚠️ Agregar un caso al enum NO actualiza el CHECK de `lotes`: eso pide su
+    | propia migracion, o la base sigue rechazando el estado nuevo.
+    */
+    test('el enum expone exactamente los estados autorizados', function (): void {
         expect(EstadoLote::valores())
-            ->toBe(['disponible', 'apartado', 'vendido', 'cancelado']);
+            ->toBe(['disponible', 'apartado', 'vendido', 'cancelado', 'reservado', 'donado']);
     });
 
     test('solo el estado vendido bloquea la edicion de valores', function (): void {

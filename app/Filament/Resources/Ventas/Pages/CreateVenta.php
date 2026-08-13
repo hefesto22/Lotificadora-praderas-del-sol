@@ -13,6 +13,7 @@ use App\Filament\Resources\Ventas\VentaResource;
 use App\Models\Cliente;
 use App\Models\Lote;
 use App\Models\Proyecto;
+use App\Models\Vendedor;
 use Carbon\CarbonImmutable;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
@@ -66,6 +67,7 @@ class CreateVenta extends CreateRecord
                 precios: $this->precios($data),
                 formaPrima: FormaDePago::tryFrom((string) ($data['forma_pago_prima'] ?? '')) ?? FormaDePago::Efectivo,
                 referenciaPrima: is_string($data['referencia_prima'] ?? null) ? $data['referencia_prima'] : null,
+                vendedor: $this->vendedor($data),
             );
         } catch (GrupoOlympoException $e) {
             Notification::make()
@@ -117,6 +119,13 @@ class CreateVenta extends CreateRecord
                 loteId: $fila['lote_id'],
                 precioVara: new Monto($fila['precio_vara']),
                 motivo: $fila['motivo_descuento'],
+                /*
+                 * A nombre de quien salen los recibos de ESTE lote. Null es el
+                 * caso normal —el dueño del expediente— y el Service lo limpia
+                 * antes de grabarlo: un nombre de espacios no es un nombre.
+                 */
+                titularRecibo: is_string($fila['titular_recibo'] ?? null) ? $fila['titular_recibo'] : null,
+                dniTitularRecibo: is_string($fila['titular_recibo_dni'] ?? null) ? $fila['titular_recibo_dni'] : null,
             );
         }
 
@@ -154,15 +163,43 @@ class CreateVenta extends CreateRecord
             }
             $precio = $fila['precio_vara'] ?? null;
             $motivo = $fila['motivo_descuento'] ?? null;
+            $titular = $fila['titular_recibo'] ?? null;
+            $dni = $fila['titular_recibo_dni'] ?? null;
 
             $filas[] = [
                 'lote_id'          => (int) $fila['lote_id'],
                 'precio_vara'      => is_string($precio) || is_int($precio) ? (string) $precio : '0',
                 'motivo_descuento' => is_string($motivo) && trim($motivo) !== '' ? trim($motivo) : null,
+                // A nombre de quien salen los recibos de ESTE lote, si no es
+                // el dueño del expediente. El DNI solo viaja si hay nombre.
+                'titular_recibo'     => is_string($titular) && trim($titular) !== '' ? trim($titular) : null,
+                'titular_recibo_dni' => is_string($dni) && trim($dni) !== '' ? trim($dni) : null,
             ];
         }
 
         return $filas;
+    }
+
+    /**
+     * El vendedor elegido, si se eligió alguno.
+     *
+     * Null es la respuesta normal: la venta la cerró la lotificadora. No se
+     * usa `findOrFail` a propósito — un id que ya no existe (alguien borró al
+     * vendedor mientras el formulario estaba abierto) no puede tumbar una
+     * venta con el cliente enfrente. Se registra sin vendedor y se corrige
+     * después, que es lo único que se pierde.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function vendedor(array $data): ?Vendedor
+    {
+        $id = $data['vendedor_id'] ?? null;
+
+        if (! is_numeric($id)) {
+            return null;
+        }
+
+        return Vendedor::query()->whereKey((int) $id)->first();
     }
 
     /**

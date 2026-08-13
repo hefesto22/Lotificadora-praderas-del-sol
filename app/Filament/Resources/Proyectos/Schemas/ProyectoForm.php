@@ -5,11 +5,16 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Proyectos\Schemas;
 
 use App\Domain\Enums\ServicioDelProyecto;
+use App\Domain\ValueObjects\Monto;
+use App\Filament\Schemas\Components\DNIField;
 use App\Filament\Schemas\Components\MayusculasField;
+use App\Filament\Schemas\Components\TelefonoHondurasField;
 use App\Models\Proyecto;
 use Carbon\CarbonInterface;
+use Closure;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -17,7 +22,9 @@ use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Illuminate\Support\HtmlString;
 
 /**
  * Patrón aprobado del §10: tabs persistentes en el query string, y un tab
@@ -98,6 +105,130 @@ class ProyectoForm
                                     ->columnSpanFull(),
                             ])
                             ->columns(2),
+
+                        /*
+                        |--------------------------------------------------
+                        | Socios — 13-ago-2026
+                        |--------------------------------------------------
+                        | «Pueden ser dos propietarios, no de compra de un
+                        | lote sino del proyecto en sí» — Mauricio. Es quién
+                        | es dueño de qué parte del proyecto, para saber
+                        | después cómo se reparte el dinero del mes.
+                        |
+                        | Un socio NO es un cliente: no compra un lote, no
+                        | tiene expediente ni saldo. Por eso vive en su
+                        | propia tabla y no en `clientes` — meterlo ahí lo
+                        | metería también en el formulario de ventas y en el
+                        | contador de clientes de la lotificadora.
+                        |
+                        | Va acá adentro y no como pestaña de abajo —al lado
+                        | de Bloques y Lotes— porque no se administra: se
+                        | acuerda una vez al armar el proyecto y casi nunca
+                        | se toca. Es identidad del proyecto, como su nombre.
+                        */
+                        Tab::make('Socios')
+                            ->icon('heroicon-o-users')
+                            ->schema([
+                                Placeholder::make('reparto')
+                                    ->hiddenLabel()
+                                    ->columnSpanFull()
+                                    ->content(fn (Get $get): HtmlString => self::comoVaElReparto($get)),
+
+                                Repeater::make('socios')
+                                    ->relationship()
+                                    ->hiddenLabel()
+                                    ->addActionLabel('Agregar socio')
+                                    ->columnSpanFull()
+                                    ->columns(12)
+                                    ->live(onBlur: true)
+                                    ->defaultItems(0)
+                                    ->itemLabel(fn (array $state): ?string => self::rotuloDelSocio($state))
+                                    /*
+                                    | ═══ SIN 100% NO SE GUARDA ═══
+                                    |
+                                    | «Siempre debe estar distribuido el 100, si
+                                    | no, no deja guardar» — Mauricio, 13-ago.
+                                    |
+                                    | Vive acá y no en un CHECK porque un CHECK
+                                    | mira UNA fila y esto es la suma de todas.
+                                    | Y no en un trigger diferido porque el
+                                    | repetidor guarda fila por fila: al
+                                    | reemplazar un socio del 50% habría un
+                                    | instante con 50% y el trigger tumbaría un
+                                    | guardado correcto.
+                                    |
+                                    | Cero socios SÍ se guarda: no es un reparto
+                                    | mal hecho, es que no hay reparto. Exigirlo
+                                    | obligaría a conocer a los socios antes de
+                                    | poder crear el proyecto.
+                                    */
+                                    ->rules([
+                                        static fn (): Closure => self::lasPartesSuman100(...),
+                                    ])
+                                    ->schema([
+                                        MayusculasField::make('nombre')
+                                            ->label('Nombre completo')
+                                            ->required()
+                                            ->maxLength(150)
+                                            ->columnSpan(8),
+
+                                        /*
+                                        | Enteros o medios: 0.5, 10, 20.5.
+                                        | Regla de Mauricio, y simplifica el
+                                        | reparto — tres socios se acomodan en
+                                        | 33.5 + 33.5 + 33 y no queda un tercio
+                                        | periódico dejando centavos sueltos.
+                                        |
+                                        | La base lo repite en un CHECK: un
+                                        | seeder o un import tampoco pueden
+                                        | meter 33.3.
+                                        */
+                                        TextInput::make('porcentaje')
+                                            ->label('Le toca')
+                                            ->numeric()
+                                            ->required()
+                                            ->minValue(0.5)
+                                            ->maxValue(100)
+                                            ->step(0.5)
+                                            ->suffix('%')
+                                            ->columnSpan(4)
+                                            ->live(onBlur: true)
+                                            ->helperText('Enteros o medios: 0.5, 10, 20.5.')
+                                            ->rules([
+                                                static fn (): Closure => self::soloEnterosOMedios(...),
+                                            ]),
+
+                                        DNIField::make('dni')
+                                            ->columnSpan(4)
+                                            ->helperText('Opcional.'),
+
+                                        TelefonoHondurasField::make('telefono', 'Teléfono')
+                                            ->columnSpan(4),
+
+                                        TextInput::make('correo')
+                                            ->label('Correo')
+                                            ->email()
+                                            ->maxLength(150)
+                                            ->columnSpan(4),
+
+                                        Toggle::make('activo')
+                                            ->label('Participa del reparto')
+                                            ->default(true)
+                                            ->onColor('success')
+                                            ->columnSpanFull()
+                                            ->live()
+                                            ->helperText(
+                                                'Un socio que salió no se borra —lo que ya cobró es historia— '.
+                                                'pero deja de contar en el reparto.'
+                                            ),
+
+                                        Textarea::make('observaciones')
+                                            ->label('Observaciones')
+                                            ->rows(2)
+                                            ->columnSpanFull(),
+                                    ]),
+                            ])
+                            ->columns(1),
 
                         Tab::make('Estado')
                             ->icon('heroicon-o-power')
@@ -308,5 +439,159 @@ class ProyectoForm
                             ]),
                     ]),
             ]);
+    }
+
+    /**
+     * Cuánto suman las partes cargadas, y el aviso si no cierran.
+     *
+     * ═══ POR QUE NO ES UNA VALIDACION QUE IMPIDA GUARDAR ═══
+     *
+     * Porque mientras se carga el segundo socio el total va en 50, y eso no es
+     * un error: es un formulario a medio llenar. Bloquear ahí obligaría a
+     * cargar los tres de una sentada o a inventar porcentajes provisorios.
+     *
+     * Lo que sí hace falta es que NADIE se vaya creyendo que quedó bien. Por
+     * eso el aviso es rojo y dice cuánto falta o cuánto sobra, con el número
+     * puesto: «faltan 10%» se corrige, «revise los porcentajes» no.
+     *
+     * ⚠️ La suma va por Monto —bcmath sobre strings— y no con `array_sum()`:
+     * tres partes de 33.3333 sumadas en float dan 99.99990000000001 y el aviso
+     * saldría rojo sobre un reparto que está bien (§8.3.1).
+     */
+    private static function comoVaElReparto(Get $get): HtmlString
+    {
+        $total = self::sumaDeLasPartes($get('socios'));
+
+        if (! $total instanceof Monto) {
+            return new HtmlString(
+                '<span style="color:rgb(113 113 122)">Sin socios cargados. Si el proyecto es de una sola '.
+                'persona no hace falta poner nada acá.</span>'
+            );
+        }
+
+        $cien = new Monto('100');
+
+        if ($total->igualA($cien)) {
+            return new HtmlString('<strong style="color:#15803d">Las partes cierran en 100%</strong>');
+        }
+
+        $falta = $total->menorQue($cien);
+        $diferencia = $falta ? $cien->restar($total) : $total->restar($cien);
+
+        return new HtmlString(sprintf(
+            '<strong style="color:#b91c1c">Las partes suman %s%% y no 100%%: %s %s%%.</strong> '.
+            '<span style="color:rgb(113 113 122)">Así no se puede guardar.</span>',
+            self::comoSeLee($total),
+            $falta ? 'faltan' : 'sobran',
+            self::comoSeLee($diferencia),
+        ));
+    }
+
+    /**
+     * La suma de las partes de los socios que participan, o null si no hay
+     * ninguno cargado.
+     *
+     * ⚠️ Por Monto —bcmath sobre strings— y no con `array_sum()`: sumar
+     * porcentajes en float deja restos que hacen fallar una comparación contra
+     * 100 sobre un reparto que está bien (§8.3.1).
+     */
+    private static function sumaDeLasPartes(mixed $filas): ?Monto
+    {
+        if (! is_array($filas)) {
+            return null;
+        }
+
+        $total = Monto::cero();
+        $cuantos = 0;
+
+        foreach ($filas as $fila) {
+            if (! is_array($fila)) {
+                continue;
+            }
+
+            // Un socio que no participa no cuenta, igual que en el reparto.
+            if (array_key_exists('activo', $fila) && $fila['activo'] === false) {
+                continue;
+            }
+
+            $parte = $fila['porcentaje'] ?? null;
+
+            if (! is_numeric($parte)) {
+                continue;
+            }
+
+            $total = $total->sumar(new Monto((string) $parte));
+            $cuantos++;
+        }
+
+        return $cuantos === 0 ? null : $total;
+    }
+
+    /**
+     * Un porcentaje sin ceros de relleno: 33.5 y no 33.50, 20 y no 20.0.
+     */
+    private static function comoSeLee(Monto $porcentaje): string
+    {
+        return rtrim(rtrim($porcentaje->redondeado(1), '0'), '.');
+    }
+
+    /**
+     * El porcentaje va en enteros o medios. Por dos tiene que dar entero.
+     *
+     * Se compara sobre el string y no sobre el float: `20.5 * 2` en coma
+     * flotante no es exactamente 41 en todas las máquinas (§8.3.1).
+     */
+    private static function soloEnterosOMedios(string $campo, mixed $valor, Closure $fallar): void
+    {
+        if (! is_numeric($valor)) {
+            return;
+        }
+
+        $doble = new Monto((string) $valor)->multiplicarPor('2')->redondeado(4);
+
+        if (! str_ends_with($doble, '.0000')) {
+            $fallar('El porcentaje va en enteros o medios: 0.5, 10, 20.5.');
+        }
+    }
+
+    /**
+     * Sin 100% no se guarda. Cero socios sí: ahí no hay reparto que cerrar.
+     */
+    private static function lasPartesSuman100(string $campo, mixed $valor, Closure $fallar): void
+    {
+        $total = self::sumaDeLasPartes($valor);
+
+        if (! $total instanceof Monto || $total->igualA(new Monto('100'))) {
+            return;
+        }
+
+        $fallar(sprintf(
+            'Las partes de los socios suman %s%% y tienen que sumar 100%%.',
+            self::comoSeLee($total),
+        ));
+    }
+
+    /**
+     * El renglón plegado del repetidor: el nombre y su parte.
+     *
+     * @param array<string, mixed> $estado
+     */
+    private static function rotuloDelSocio(array $estado): ?string
+    {
+        $nombre = $estado['nombre'] ?? null;
+
+        if (! is_string($nombre) || trim($nombre) === '') {
+            return null;
+        }
+
+        $parte = $estado['porcentaje'] ?? null;
+
+        if (! is_string($parte) && ! is_int($parte) && ! is_float($parte)) {
+            return trim($nombre);
+        }
+
+        $limpio = rtrim(rtrim(new Monto((string) $parte)->redondeado(4), '0'), '.');
+
+        return sprintf('%s · %s%%', trim($nombre), $limpio);
     }
 }

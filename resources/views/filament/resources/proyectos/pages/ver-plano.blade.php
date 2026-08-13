@@ -10,6 +10,8 @@
             ['etiqueta' => 'Apartados',   'valor' => $resumen['apartado'],   'color' => EstadoLote::Apartado->colorHex()],
             ['etiqueta' => 'Vendidos',    'valor' => $resumen['vendido'],    'color' => EstadoLote::Vendido->colorHex()],
             ['etiqueta' => 'Cancelados',  'valor' => $resumen['cancelado'],  'color' => EstadoLote::Cancelado->colorHex()],
+            ['etiqueta' => 'Reservados',  'valor' => $resumen['reservado'],  'color' => EstadoLote::Reservado->colorHex()],
+            ['etiqueta' => 'Donados',     'valor' => $resumen['donado'],     'color' => EstadoLote::Donado->colorHex()],
             ['etiqueta' => 'Sin dibujar', 'valor' => $plano['sinDibujar'],   'color' => null],
         ];
 
@@ -198,6 +200,11 @@
         .dark .plano-accion-apartar { border-color: rgba(217, 119, 6, .5); color: #fbbf24; }
         .plano-accion-vender { border-color: #2563eb; color: #1d4ed8; }
         .dark .plano-accion-vender { border-color: rgba(37, 99, 235, .5); color: #93c5fd; }
+        /* El mismo verde azulado de EstadoLote::Donado, con borde punteado:
+           donar no es el gesto de todos los dias y el boton no tiene por que
+           pesar lo mismo que Vender. */
+        .plano-accion-donar { border-style: dashed; border-color: #0d9488; color: #0f766e; }
+        .dark .plano-accion-donar { border-color: rgba(13, 148, 136, .55); color: #5eead4; }
 
         .plano-detalle-vacio { font-size: .875rem; color: rgb(113 113 122); }
         .dark .plano-detalle-vacio { color: rgb(161 161 170); }
@@ -1523,7 +1530,7 @@ get hayInteres() {
                                     el de Filament se monta al final del <body> y
                                     no tiene por que pelear por quien va encima.
                                 --}}
-                                <template x-if="seleccionado.estado !== 'vendido'">
+                                <template x-if="seleccionado.seVende">
                                     <div>
                                         <div class="plano-toggle">
                                             <button
@@ -1789,11 +1796,29 @@ get hayInteres() {
                                     </div>
                                 </template>
 
-                                <template x-if="seleccionado.estado === 'vendido'">
-                                    <p class="plano-detalle-vacio">
-                                        Lote vendido. Deshacer una venta es una rescisión y ese trámite
-                                        todavía no está en el sistema.
-                                    </p>
+                                <template x-if="! seleccionado.seVende">
+                                    <p class="plano-detalle-vacio" x-text="seleccionado.porQueNoSeVende"></p>
+                                </template>
+
+                                {{-- Donar vive FUERA del conmutador Vender/Apartar y eso es
+                                     a proposito. Esas dos son el mismo gesto en dos tiempos
+                                     —hay alguien que paga— y por eso comparten la seleccion
+                                     de lotes y la cotizacion. Una donacion no cotiza nada, es
+                                     de un lote y pasa una vez cada varios meses: metida entre
+                                     las pestañas solo estaria un click mas cerca del error.
+
+                                     Aparece para los DISPONIBLES y para los RESERVADOS, que
+                                     es el camino normal —el lote se guarda mientras corre el
+                                     tramite y se dona cuando se firma la escritura—. Lo
+                                     decide `seDona()`, en el enum, no este blade. --}}
+                                <template x-if="seleccionado.seDona">
+                                    <button
+                                        type="button"
+                                        class="plano-accion plano-accion-ancha plano-accion-donar"
+                                        x-on:click="$wire.mountAction('donarLote', { lote: seleccionado.id }); abierto = false"
+                                    >
+                                        Donar este lote
+                                    </button>
                                 </template>
 
                                 <template x-if="seleccionado.desalineado">

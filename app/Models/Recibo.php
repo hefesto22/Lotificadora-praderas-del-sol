@@ -8,7 +8,9 @@ use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\ValueObjects\Monto;
 use App\Traits\HasAuditFields;
+use Database\Factories\ReciboFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -36,6 +38,8 @@ use Spatie\Activitylog\Support\LogOptions;
     'venta_id',
     'compromiso_id',
     'cliente_id',
+    'a_nombre_de',
+    'a_nombre_de_dni',
     'concepto',
     'forma_pago',
     'referencia',
@@ -53,6 +57,10 @@ use Spatie\Activitylog\Support\LogOptions;
 class Recibo extends Model
 {
     use HasAuditFields;
+
+    /** @use HasFactory<ReciboFactory> */
+    use HasFactory;
+
     use LogsActivity;
 
     /**
@@ -116,11 +124,65 @@ class Recibo extends Model
     }
 
     /**
+     * El titular del expediente: de quien es el contrato.
+     *
      * @return BelongsTo<Cliente, $this>
      */
     public function cliente(): BelongsTo
     {
         return $this->belongsTo(Cliente::class);
+    }
+
+    /**
+     * ¿Este recibo sale a nombre de alguien que no firmo el contrato?
+     */
+    public function esANombreDeOtro(): bool
+    {
+        return $this->textoDe('a_nombre_de') !== null;
+    }
+
+    /**
+     * El DNI del titular del recibo, si se cargo.
+     *
+     * Opcional a proposito: un representado puede no tenerlo a mano el dia que
+     * paga, y eso no puede impedir que se lleve su papel.
+     */
+    public function dniDelPapel(): ?string
+    {
+        return $this->textoDe('a_nombre_de_dni');
+    }
+
+    /**
+     * El nombre que va impreso en el «Recibi de».
+     *
+     * Vive en el modelo y no en la plantilla porque lo preguntan el papel, la
+     * tabla de recibos y el estado de cuenta. Tres lugares que tienen que decir
+     * lo mismo terminan no diciendolo si cada uno arma la frase.
+     */
+    public function nombreDelPapel(): string
+    {
+        $otro = $this->textoDe('a_nombre_de');
+
+        if ($otro !== null) {
+            return $otro;
+        }
+
+        $titular = $this->cliente?->getAttribute('nombre');
+
+        return is_string($titular) && trim($titular) !== '' ? $titular : '—';
+    }
+
+    /**
+     * Un campo de texto del recibo, o null si esta vacio.
+     *
+     * Los CHECK de la base ya impiden guardar una cadena en blanco, pero un
+     * modelo recien construido en memoria todavia no paso por ahi.
+     */
+    private function textoDe(string $campo): ?string
+    {
+        $valor = $this->getAttribute($campo);
+
+        return is_string($valor) && trim($valor) !== '' ? trim($valor) : null;
     }
 
     /**

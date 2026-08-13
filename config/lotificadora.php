@@ -216,4 +216,33 @@ return [
         'digitos_contrato'  => 4,
         'reinicia_por_anio' => false,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | La cartera anterior al sistema
+    |--------------------------------------------------------------------------
+    |
+    | 🔴 `proximo_recibo` es el número con el que el sistema va a EMPEZAR a
+    | emitir recibos después de cargar la cartera vieja, y es el próximo
+    | número en blanco del talonario de papel de la lotificadora.
+    |
+    | Los recibos históricos se cargan con la numeración del sistema, de
+    | corrido, porque el cuaderno llevaba dos talonarios en paralelo y el
+    | mismo número aparece en dos papeles distintos. Si la serie quedara donde
+    | la deja la carga, el primer recibo que se emita en producción llevaría
+    | un número que la contratante YA entregó en papel.
+    |
+    | Vacío en local, a propósito: el seeder avisa en amarillo cuando falta.
+    | Se pone en el `.env` del servidor antes de la primera carga real.
+    |
+    | ⚠️ `filter_var` y no un cast: `env()` devuelve el STRING del `.env`, así
+    | que un `(int)` a secas convertiría cualquier cosa —incluso «mañana»— en
+    | cero, y el seeder no tendría cómo distinguir «no está puesto» de «está
+    | puesto mal». Con esto, lo que no es un entero de verdad vuelve null y el
+    | aviso amarillo sale, que es lo correcto.
+    |
+    */
+    'cartera' => [
+        'proximo_recibo' => filter_var(env('OLYMPO_PROXIMO_RECIBO'), FILTER_VALIDATE_INT) ?: null,
+    ],
 ];

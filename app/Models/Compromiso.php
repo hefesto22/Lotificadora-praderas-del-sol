@@ -44,6 +44,8 @@ use Spatie\Activitylog\Support\LogOptions;
     'proyecto_id',
     'lote_id',
     'cliente_id',
+    'titular_recibo',
+    'titular_recibo_dni',
     'venta_id',
     'tipo',
     'estado',
@@ -199,6 +201,39 @@ class Compromiso extends Model
         return $this->hasMany(Recibo::class)->orderBy('numero');
     }
 
+    /**
+     * A nombre de quien salen los recibos de ESTE lote, si no es el titular.
+     *
+     * Null es el caso normal: el papel sale a nombre del dueño del expediente.
+     * Se llena en el caso del representante —un grupo compra junto, firma uno
+     * solo, y cada representado quiere el recibo de SU lote a su nombre—.
+     *
+     * ⚠️ Es una configuracion, no una decision de cada cobro: `RegistroDePagos`
+     * la lee al emitir y guarda una COPIA en el recibo. Corregirla despues no
+     * reescribe los papeles ya entregados, que es justamente lo que no debe
+     * pasar (§8.2).
+     */
+    public function titularDelRecibo(): ?string
+    {
+        $nombre = $this->getAttribute('titular_recibo');
+
+        return is_string($nombre) && trim($nombre) !== '' ? trim($nombre) : null;
+    }
+
+    /**
+     * Su DNI, si se cargo. Nunca sin nombre: lo impide un CHECK.
+     */
+    public function dniDelTitularDelRecibo(): ?string
+    {
+        if ($this->titularDelRecibo() === null) {
+            return null;
+        }
+
+        $dni = $this->getAttribute('titular_recibo_dni');
+
+        return is_string($dni) && trim($dni) !== '' ? trim($dni) : null;
+    }
+
     public function montoValor(): Monto
     {
         $valor = $this->getAttribute('valor');
@@ -349,6 +384,22 @@ class Compromiso extends Model
     protected function apartados(Builder $query): Builder
     {
         return $query->where('tipo', TipoCompromiso::Apartado);
+    }
+
+    /**
+     * Los lotes que salieron del inventario sin dejar un lempira.
+     *
+     * Existe para que los reportes de cartera puedan SACARLOS en vez de
+     * explicar despues por que hay lotes comprometidos con saldo cero.
+     *
+     * @param Builder<Compromiso> $query
+     *
+     * @return Builder<Compromiso>
+     */
+    #[Scope]
+    protected function donaciones(Builder $query): Builder
+    {
+        return $query->where('tipo', TipoCompromiso::Donacion);
     }
 
     /**

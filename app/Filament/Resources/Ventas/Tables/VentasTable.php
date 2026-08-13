@@ -67,6 +67,19 @@ class VentasTable
                     ->alignCenter()
                     ->sortable(),
 
+                /*
+                 * Oculta por defecto: la mayoría de las ventas las cierra la
+                 * lotificadora y una columna casi vacía solo roba ancho. Quien
+                 * necesite ver quién vendió la prende, y ahí sí ordena y filtra.
+                 */
+                TextColumn::make('vendedor.nombre')
+                    ->label('Vendido por')
+                    ->placeholder('La lotificadora')
+                    ->searchable()
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true)
+                    ->wrap(),
+
                 TextColumn::make('valor_total')
                     ->label('Valor')
                     ->formatStateUsing(static fn (Venta $record): string => $record->montoValorTotal()->formateado())

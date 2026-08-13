@@ -20,6 +20,7 @@ use App\Models\Lote;
 use App\Models\PlanDePago;
 use App\Models\Proyecto;
 use App\Models\Recibo;
+use App\Models\Vendedor;
 use App\Models\Venta;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -98,6 +99,7 @@ final readonly class RegistroDeVentas
         array $precios = [],
         FormaDePago $formaPrima = FormaDePago::Efectivo,
         ?string $referenciaPrima = null,
+        ?Vendedor $vendedor = null,
     ): Venta {
         $this->verificarConjuntos($proyecto, $lotes, $clientes);
 
@@ -122,6 +124,7 @@ final readonly class RegistroDeVentas
             $diaPago,
             $fecha,
             $observaciones,
+            $vendedor,
             $pactados,
             $formaPrima,
             $referenciaPrima
@@ -190,7 +193,12 @@ final readonly class RegistroDeVentas
 
             // 6. La venta.
             $venta = Venta::query()->create([
-                'proyecto_id'       => $proyecto->getKey(),
+                'proyecto_id' => $proyecto->getKey(),
+                /*
+                 * Quien cerro la venta. Null es lo normal —la vendio la
+                 * lotificadora— y no es un hueco: ver `Vendedor`.
+                 */
+                'vendedor_id'       => $vendedor?->getKey(),
                 'numero_expediente' => $secuencial,
                 'numero_contrato'   => $this->correlativos->numeroDeContrato($proyecto, $secuencial, $fecha->year),
                 'fecha_contrato'    => $fecha->toDateString(),
@@ -232,6 +240,8 @@ final readonly class RegistroDeVentas
                     mora: $renglon['mora'],
                     tasaLista: $renglon['tasaLista'],
                     motivoTasa: $renglon['motivoTasa'],
+                    titularRecibo: $renglon['titularRecibo'],
+                    dniTitularRecibo: $renglon['dniTitularRecibo'],
                 );
 
                 // 8. El plan congelado (§9.D6), el de ESTE lote.
@@ -493,7 +503,7 @@ final readonly class RegistroDeVentas
      * @param list<Lote> $lotes
      * @param array<int, PrecioPactado> $pactados por id de lote
      *
-     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora}>
+     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora, titularRecibo: string|null, dniTitularRecibo: string|null}>
      *
      * @throws VentaInvalidaException
      */
@@ -570,7 +580,14 @@ final readonly class RegistroDeVentas
                 'tasa'       => $tasa,
                 'tasaLista'  => $tasaLista,
                 'motivoTasa' => $motivoTasa,
-                'mora'       => $delPlazo instanceof PlanDePago ? $delPlazo->condicionesDeMora() : CondicionesDeMora::ninguna(),
+                /*
+                 * A nombre de quien salen los recibos de ESTE lote. Null es el
+                 * caso normal —el dueño del expediente— y se llena cuando un
+                 * grupo compra junto y firma una sola persona.
+                 */
+                'titularRecibo'    => $acuerdo?->titularReciboLimpio(),
+                'dniTitularRecibo' => $acuerdo?->dniTitularReciboLimpio(),
+                'mora'             => $delPlazo instanceof PlanDePago ? $delPlazo->condicionesDeMora() : CondicionesDeMora::ninguna(),
             ];
         }
 
@@ -600,10 +617,10 @@ final readonly class RegistroDeVentas
      * dejaria, con muchos lotes y una prima chica, una ultima parte negativa
      * — y Monto rechaza negativos, con razon.
      *
-     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora}> $renglones
+     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora, titularRecibo: string|null, dniTitularRecibo: string|null}> $renglones
      * @param array<int, PrecioPactado> $pactados
      *
-     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora, prima: Monto}>
+     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora, titularRecibo: string|null, dniTitularRecibo: string|null, prima: Monto}>
      *
      * @throws VentaInvalidaException
      */
@@ -679,17 +696,19 @@ final readonly class RegistroDeVentas
 
         foreach ($renglones as $indice => $renglon) {
             $conPrima[] = [
-                'lote'       => $renglon['lote'],
-                'lista'      => $renglon['lista'],
-                'precio'     => $renglon['precio'],
-                'motivo'     => $renglon['motivo'],
-                'plazo'      => $renglon['plazo'],
-                'valor'      => $renglon['valor'],
-                'tasa'       => $renglon['tasa'],
-                'tasaLista'  => $renglon['tasaLista'],
-                'motivoTasa' => $renglon['motivoTasa'],
-                'mora'       => $renglon['mora'],
-                'prima'      => $suyas[$indice] ?? Monto::cero(),
+                'lote'             => $renglon['lote'],
+                'lista'            => $renglon['lista'],
+                'precio'           => $renglon['precio'],
+                'motivo'           => $renglon['motivo'],
+                'plazo'            => $renglon['plazo'],
+                'valor'            => $renglon['valor'],
+                'tasa'             => $renglon['tasa'],
+                'tasaLista'        => $renglon['tasaLista'],
+                'motivoTasa'       => $renglon['motivoTasa'],
+                'mora'             => $renglon['mora'],
+                'titularRecibo'    => $renglon['titularRecibo'],
+                'dniTitularRecibo' => $renglon['dniTitularRecibo'],
+                'prima'            => $suyas[$indice] ?? Monto::cero(),
             ];
         }
 
@@ -703,9 +722,9 @@ final readonly class RegistroDeVentas
      * lote: con tres plazos distintos, «el saldo es demasiado chico para 60
      * meses» obliga a adivinar cual de los tres es.
      *
-     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora, prima: Monto}> $renglones
+     * @param list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora, titularRecibo: string|null, dniTitularRecibo: string|null, prima: Monto}> $renglones
      *
-     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora, prima: Monto, plan: PlanDeCuotas}>
+     * @return list<array{lote: Lote, lista: Monto, precio: Monto, motivo: string|null, plazo: int, valor: Monto, tasa: TasaDeInteres, tasaLista: TasaDeInteres, motivoTasa: string|null, mora: CondicionesDeMora, titularRecibo: string|null, dniTitularRecibo: string|null, prima: Monto, plan: PlanDeCuotas}>
      *
      * @throws VentaInvalidaException
      */
@@ -732,18 +751,20 @@ final readonly class RegistroDeVentas
             }
 
             $conPlan[] = [
-                'lote'       => $renglon['lote'],
-                'lista'      => $renglon['lista'],
-                'precio'     => $renglon['precio'],
-                'motivo'     => $renglon['motivo'],
-                'plazo'      => $renglon['plazo'],
-                'valor'      => $renglon['valor'],
-                'tasa'       => $renglon['tasa'],
-                'tasaLista'  => $renglon['tasaLista'],
-                'motivoTasa' => $renglon['motivoTasa'],
-                'mora'       => $renglon['mora'],
-                'prima'      => $renglon['prima'],
-                'plan'       => $plan,
+                'lote'             => $renglon['lote'],
+                'lista'            => $renglon['lista'],
+                'precio'           => $renglon['precio'],
+                'motivo'           => $renglon['motivo'],
+                'plazo'            => $renglon['plazo'],
+                'valor'            => $renglon['valor'],
+                'tasa'             => $renglon['tasa'],
+                'tasaLista'        => $renglon['tasaLista'],
+                'motivoTasa'       => $renglon['motivoTasa'],
+                'mora'             => $renglon['mora'],
+                'titularRecibo'    => $renglon['titularRecibo'],
+                'dniTitularRecibo' => $renglon['dniTitularRecibo'],
+                'prima'            => $renglon['prima'],
+                'plan'             => $plan,
             ];
         }
 

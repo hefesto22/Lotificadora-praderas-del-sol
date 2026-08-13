@@ -43,6 +43,7 @@ use Spatie\Activitylog\Support\LogOptions;
  */
 #[Fillable([
     'proyecto_id',
+    'vendedor_id',
     'numero_expediente',
     'numero_contrato',
     'fecha_contrato',
@@ -124,6 +125,19 @@ class Venta extends Model
     public function proyecto(): BelongsTo
     {
         return $this->belongsTo(Proyecto::class);
+    }
+
+    /**
+     * Quien cerro la venta, cuando no la cerro la lotificadora.
+     *
+     * Null es la respuesta normal y no es un hueco: la mayoria de los
+     * contratos los cierra la lotificadora misma. Ver `Vendedor`.
+     *
+     * @return BelongsTo<Vendedor, $this>
+     */
+    public function vendedor(): BelongsTo
+    {
+        return $this->belongsTo(Vendedor::class);
     }
 
     /**
