@@ -1,3 +1,124 @@
+# Continuar acá — 14-ago-2026
+
+> Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
+> `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## ✅ Todo lo del 13 y 14 está commiteado y pusheado
+
+`c67991a` — **122 archivos, 11,610 líneas.** 1,014 tests verdes (4,743
+assertions), PHPStan 411/411 nivel 7, Pint y Rector limpios sobre 814
+archivos. El árbol quedó limpio por primera vez desde el 11-ago.
+
+🧹 Quedan para tirar a mano en `storage/app/` (gitignoreados, ya no sirven):
+`diagnostico-factura.php`, `puerta-14ago.sh`, `puerta-14ago.log`,
+`commit-14ago.sh`, `mensaje-14ago.txt`.
+
+## 🔴 LA LECCIÓN DEL DÍA, Y ES LA MÁS CARA
+
+**El bug más grave del día no lo encontró ninguno de los 1,014 tests. Lo
+encontró abrir el sistema y cobrar una cuota como lo va a hacer Rosa Elena.**
+
+Cobrar desde la **tabla de Ventas** emitía **recibo interno** en un desarrollo
+que factura con CAI. Sin error, sin aviso, sin consumir correlativo: el papel
+equivocado, entregado, y nadie se entera hasta una fiscalización.
+
+La causa: `VentasTable` cargaba `'proyecto:id,nombre,codigo'` —sin
+`facturacion_id`, porque la tabla no lo necesita— y el `belongsTo` de la
+facturación buscaba por una llave que no estaba en memoria.
+
+**La regla que queda: un Service del dominio NO puede confiar en las columnas
+que trajo la pantalla.** Si una decisión depende de una columna, se relee de
+la base. `ConsumoDeFacturas::facturacionDe()` es ahora el único lugar donde se
+decide si un cobro factura, y relee. Mismo criterio que
+`RegistroDeVentas::bloquearYVerificar()`: *lo que decía la pantalla no vale*.
+
+**Y el patrón de test que faltaba:** `FacturarConElProyectoAMediasTest` carga
+el proyecto **a propósito** con las columnas exactas de la tabla. El test
+tiene que reproducir cómo carga la PANTALLA, no cómo carga un test.
+
+## Qué entró
+
+### 1. La rescisión por lote — R22
+
+«Dio la prima, pagó dos meses y ya no quiere el lote». El lote suelta sus
+cuotas pendientes, vuelve al plano, y queda el acta con los tres montos:
+cuánto entró, cuánto se devolvió, cuánto quedó retenido. Se rescinde un LOTE,
+no el contrato. **Lo retenido NO vuelve a sumar en caja** — ya entró el día
+que se cobró.
+
+🔴 Tres cosas que estaban vivas y salieron revisando:
+
+1. **`anular()` devuelve `monto_pagado` a cero y DEJA viva la aplicación de
+   pago.** Como la FK es `restrictOnDelete`, borrar esa cuota reventaba con un
+   23503 de Postgres a mitad de la transacción. La pregunta que manda es
+   `whereDoesntHave('aplicaciones')`.
+2. **La cuota que sobrevive conserva saldo**, y ese saldo seguía contando como
+   deuda en OCHO pantallas. Lo resuelve el scope `Cuota::deLotesVivos()`.
+   🔴 Toda suma nueva de `monto - monto_pagado` tiene que llevarlo.
+3. **Se le podía cobrar a un lote rescindido**: el dominio miraba el estado de
+   la venta y nunca el del compromiso.
+
+De paso entró el **comprobante imprimible del egreso**, pendiente desde el
+10-ago: una sola vista para la devolución de seña y para el acta.
+
+### 2. La facturación con CAI, de punta a punta
+
+Configuración (13-ago) + emisión (14-ago) + **la alerta de agotamiento** que
+el contrato pide por nombre (Cláusula Segunda, g-ii). El aviso sale en el
+Escritorio y en el momento del cobro, y **cuando no hay nada que avisar no se
+dibuja nada** — a propósito.
+
+**Las notas de crédito quedaron como interruptor opcional, apagado**: facturar
+y emitir NC son dos permisos distintos del SAR y la mayoría no tiene el
+segundo. Apagado no bloquea nada; el acta le avisa al contador.
+
+Y el modal de cobro ahora dice **qué papel va a salir antes de cobrar**, en
+rojo cuando el desarrollo está configurado para facturar y hoy no puede.
+
+⚠️ De paso: el schema del modal se armaba en **dos lugares** —el del plano
+traía los avisos y el de la tabla no—, así que la alerta del talonario no se
+veía por donde se cobra todos los días. Unificado.
+
+### 3. La unidad del área, los cupos y el membrete
+
+Varas² o metros² por proyecto, trabado al vender el primer lote. Cupos de
+donación y herencia. Búsqueda de clientes sin acentos. Y el recibo interno
+toma logo, nombre, dirección y teléfonos **del proyecto**, con la config solo
+de respaldo: con dos urbanizaciones, un membrete para toda la instalación
+dejó de alcanzar.
+
+## Lo verificado EN PANTALLA, y lo que sigue sin verificar
+
+✅ Los expedientes **0066, 0067 y 0068** de la cartera anterior cuadran contra
+el cuaderno. En el 0068 el cuaderno lleva **dos saldos en paralelo por pares
+de lotes** (480,000 + 470,000) y el sistema uno solo de 950,000 — la misma
+plata contada de dos formas. No es una diferencia.
+
+⚠️ En el **0066** el cuaderno dice cuota **L 13,605.00** y el sistema
+**L 13,604.17** (653,000 ÷ 48 = 13,604.1666…). El sistema tiene razón y la
+última cuota absorbe el residuo, pero **Rosa Elena tiene que saberlo** antes
+de que un cliente compare los dos papeles.
+
+❌ **La rescisión NO se probó en pantalla.** El botón aparece y el dominio
+tiene 17 tests, pero nadie abrió ese modal todavía. Es lo primero del próximo
+ensayo.
+
+## Lo que sigue, en este orden
+
+1. 🔴 **Pedirle a Rosa Elena los precios reales de los 301 lotes y la cartera
+   vendida vieja.** Es el único bloqueante que no depende de nosotros y está
+   anotado desde el 8-ago. Sin eso, el 20 hay un sistema impecable y vacío.
+2. **Repetir el ensayo de punta a punta** con los tres expedientes reales,
+   incluida una rescisión. El del 14-ago destapó tres bugs en una tarde.
+3. Recién después: la nota de crédito completa, o costo contra ingreso en el
+   Escritorio.
+
+**Contra el contrato no falta nada**: la Cláusula Segunda está completa,
+incluido el módulo g-ii que era el último con deuda. Lo que queda es puesta en
+marcha.
+
+---
+
 # Continuar acá — 11-ago-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
