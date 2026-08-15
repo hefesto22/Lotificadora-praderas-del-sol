@@ -94,11 +94,12 @@ describe('Plano del proyecto — lo que se dibuja', function (): void {
     });
 
     /*
-    | En el mapa cada lote se rotula con su numero y la letra de su
-    | bloque pegada: 12B. El codigo entero no entra en 2.4 unidades de
-    | alto, y un "12" solo no dice de cual de las 24 manzanas es.
+    | En el mapa cada lote se rotula con su manzana adelante: A-12. El
+    | codigo entero no entra en 2.4 unidades de alto, un "12" solo no dice
+    | de cual de las 24 manzanas es, y al derecho se lee igual que como lo
+    | dice la oficina por telefono.
     */
-    test('el rotulo del mapa lleva el numero con la letra del bloque', function (): void {
+    test('el rotulo del mapa lleva la manzana adelante del numero', function (): void {
         Lote::factory()->enBloque($this->bloque)->create([
             'numero'   => '12',
             'poligono' => [[0, 0], [10, 0], [10, 25], [0, 25]],
@@ -106,7 +107,7 @@ describe('Plano del proyecto — lo que se dibuja', function (): void {
 
         $lote = new PlanoDelProyecto()->para($this->proyecto)['lotes'][0];
 
-        expect($lote['rotulo'])->toBe('12A')
+        expect($lote['rotulo'])->toBe('A-12')
             ->and($lote['bloque'])->toBe('A')
             ->and($lote['numero'])->toBe('12')
             // El codigo NO cambia: es el del contrato, con su relleno.
@@ -130,7 +131,7 @@ describe('Plano del proyecto — lo que se dibuja', function (): void {
 
         $rotulos = array_column(new PlanoDelProyecto()->para($this->proyecto)['lotes'], 'rotulo');
 
-        expect($rotulos)->toBe(['1A', '1N']);
+        expect($rotulos)->toBe(['A-1', 'N-1']);
     });
 
     test('el color sale del estado del lote', function (): void {

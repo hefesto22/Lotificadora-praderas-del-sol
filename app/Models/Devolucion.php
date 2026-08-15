@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Domain\Enums\FormaDePago;
+use App\Domain\Enums\TipoDeDevolucion;
 use App\Domain\ValueObjects\Monto;
 use App\Traits\HasAuditFields;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -40,10 +41,12 @@ use Override;
  *
  * ═══ CUELGA DE UN APARTADO O DE UNA VENTA ═══
  *
- * Hoy siempre de un apartado. La rescisión por lote (R22) va a colgar de una
- * venta —ahí también se pregunta cuánto se le devolvió al cliente y ahí
- * también la respuesta puede ser cero— y por eso las dos llaves nacen
- * nullable con un CHECK que exige exactamente una.
+ * Las dos cosas, desde el 14-ago-2026: una devolución de seña trae solo el
+ * compromiso del apartado; una **rescisión** (R22) trae el compromiso del
+ * lote que se cayó Y la venta de la que salió. El compromiso es obligatorio
+ * en los dos casos —la plata siempre entró por un lote— y `tipo` dice cuál de
+ * los dos trámites fue, porque el título de un papel que el cliente firma no
+ * debería depender de si una llave vino nula.
  *
  * ═══ EL NOMBRE DE LA TABLA VA ESCRITO ═══
  *
@@ -52,6 +55,7 @@ use Override;
  */
 #[Fillable([
     'numero',
+    'tipo',
     'compromiso_id',
     'venta_id',
     'cliente_id',
@@ -70,6 +74,20 @@ class Devolucion extends Model
     use HasAuditFields;
 
     /**
+     * El default en memoria, no solo en la base.
+     *
+     * ⚠️ Sin esto, una devolución recién construida no trae tipo y el papel
+     * no sabría cómo titularse antes del primer `save()`. Es la misma cicatriz
+     * que `tipo_documento` en `Recibo`.
+     *
+     * @var array<string, mixed>
+     */
+    #[Override]
+    protected $attributes = [
+        'tipo' => 'senia',
+    ];
+
+    /**
      * Los montos NO se castean a `decimal:x`: ese cast pasa por
      * `number_format()`, que recibe float (§8.3.1). PDO de Postgres ya
      * entrega NUMERIC como string, que es lo que consume bcmath.
@@ -80,6 +98,7 @@ class Devolucion extends Model
     protected function casts(): array
     {
         return [
+            'tipo'       => TipoDeDevolucion::class,
             'forma_pago' => FormaDePago::class,
             'fecha'      => 'date',
         ];
@@ -169,5 +188,26 @@ class Devolucion extends Model
         $valor = $this->getAttribute($columna);
 
         return new Monto(is_string($valor) || is_int($valor) ? (string) $valor : '0');
+    }
+
+    // ─── Qué trámite fue ──────────────────────────────────────────────
+
+    /**
+     * El tipo, ya como enum y nunca nulo.
+     *
+     * Las filas anteriores al 14-ago-2026 son todas devoluciones de seña —era
+     * lo único que el sistema sabía hacer— y la migración las dejó rotuladas
+     * así. Este método es la red por si alguna llega de otro lado.
+     */
+    public function tipoDeDevolucion(): TipoDeDevolucion
+    {
+        $tipo = $this->getAttribute('tipo');
+
+        return $tipo instanceof TipoDeDevolucion ? $tipo : TipoDeDevolucion::Senia;
+    }
+
+    public function esRescision(): bool
+    {
+        return $this->tipoDeDevolucion() === TipoDeDevolucion::Rescision;
     }
 }

@@ -7,7 +7,7 @@ namespace App\Filament\Resources\Proyectos\Pages;
 use App\Domain\Lotes\FijacionDePrecios;
 use App\Domain\ValueObjects\Monto;
 use App\Filament\Resources\Proyectos\ProyectoResource;
-use App\Filament\Schemas\Components\MontoField;
+use App\Filament\Schemas\Components\PrecioPorAreaField;
 use App\Models\Bloque;
 use App\Models\Proyecto;
 use Filament\Actions\Action;
@@ -63,10 +63,10 @@ class ViewProyecto extends ViewRecord
     private function fijarPrecio(): Action
     {
         return Action::make('fijar_precio')
-            ->label('Fijar precio por vara²')
+            ->label(fn (Proyecto $record): string => 'Fijar precio '.$record->unidadDeArea()->porUnidad())
             ->icon(Heroicon::OutlinedBanknotes)
             ->color('warning')
-            ->modalHeading('Fijar el precio por vara²')
+            ->modalHeading(fn (Proyecto $record): string => 'Fijar el precio '.$record->unidadDeArea()->porUnidad())
             ->modalDescription('Se aplica a todos los lotes elegidos y recalcula su valor. Los lotes vendidos no se tocan.')
             ->modalSubmitActionLabel('Aplicar')
             ->schema([
@@ -81,7 +81,8 @@ class ViewProyecto extends ViewRecord
                         ->all())
                     ->helperText('Dejalo vacío para aplicar a todos los bloques.'),
 
-                MontoField::make('precio_vara', 'Precio por vara²')
+                PrecioPorAreaField::make('precio_vara')
+                    ->label(fn (Proyecto $record): string => 'Precio '.$record->unidadDeArea()->porUnidad())
                     ->required(),
             ])
             ->action(function (array $data, Proyecto $record): void {

@@ -226,7 +226,7 @@ class CorteDeCajaDeHoy extends StatsOverviewWidget
         }
 
         if (! $devoluciones->esCero()) {
-            $partes[] = 'Devoluciones de seña '.$devoluciones->formateado();
+            $partes[] = 'Devoluciones y rescisiones '.$devoluciones->formateado();
         }
 
         return implode(' · ', $partes);

@@ -238,16 +238,19 @@ describe('Lote — código legible', function (): void {
     ]);
 
     /*
-    | El rótulo del mapa es lo contrario del código: sin proyecto, sin
-    | guiones y SIN relleno de ceros. Ahí manda que se lea de un vistazo
-    | dentro de un polígono chico, no que ordene alfabéticamente.
+    | El rótulo del mapa es el código sin el proyecto y SIN relleno de
+    | ceros: ahí manda que se lea de un vistazo dentro de un polígono
+    | chico, no que ordene alfabéticamente. La manzana va ADELANTE, que es
+    | como lo dice la oficina —«el A-1», «el H-9»— y como están escritos
+    | los expedientes de la cartera vieja.
     */
-    test('el rotulo del mapa pega la letra del bloque al numero', function (string $numero, string $esperado): void {
+    test('el rotulo del mapa lleva la manzana adelante', function (string $numero, string $esperado): void {
         expect(Lote::componerRotulo('B', $numero))->toBe($esperado);
     })->with([
-        ['1', '1B'],
-        ['12', '12B'],
-        ['200', '200B'],
+        ['1', 'B-1'],
+        ['12', 'B-12'],
+        ['200', 'B-200'],
+        ['12-A', 'B-12-A'],   // el sufijo del numero se conserva entero
     ]);
 
     test('el código se genera solo al crear el lote', function (): void {

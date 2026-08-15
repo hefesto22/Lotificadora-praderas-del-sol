@@ -11,11 +11,13 @@ use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\TipoCompromiso;
 use App\Domain\Exceptions\CompromisoInvalidoException;
+use App\Domain\Facturacion\ConsumoDeFacturas;
 use App\Domain\ValueObjects\Monto;
 use App\Models\Cliente;
 use App\Models\Compromiso;
 use App\Models\Devolucion;
 use App\Models\Lote;
+use App\Models\Proyecto;
 use App\Models\Recibo;
 use App\Models\Venta;
 use Illuminate\Support\Facades\DB;
@@ -48,7 +50,10 @@ use Illuminate\Support\Facades\DB;
  */
 final readonly class RegistroDeCompromisos
 {
-    public function __construct(private ConsumoDeCorrelativos $correlativos) {}
+    public function __construct(
+        private ConsumoDeCorrelativos $correlativos,
+        private ConsumoDeFacturas $facturas,
+    ) {}
 
     /**
      * Aparta un lote disponible a nombre de un cliente.
@@ -316,7 +321,7 @@ final readonly class RegistroDeCompromisos
         $motivo = trim($motivoDescuento ?? '');
 
         if (PrecioPactado::exigeMotivo($lista, $pactado, $motivo)) {
-            throw CompromisoInvalidoException::porDescuentoSinMotivo($codigo, $lista, $pactado);
+            throw CompromisoInvalidoException::porDescuentoSinMotivo($codigo, $lista, $pactado, $lote->unidadDeArea());
         }
 
         /*
@@ -503,6 +508,23 @@ final readonly class RegistroDeCompromisos
             throw CompromisoInvalidoException::porDonarLoQueNoEstaLibre($codigo, $estado->etiqueta());
         }
 
+        /*
+         * El cupo del desarrollo, verificado ACA y no solo en el boton del
+         * plano: donar tambien se llama desde un seeder, desde tinker o
+         * desde la proxima pantalla que alguien escriba, y cuantos lotes
+         * se regalan es una decision de la lotificadora y no del camino
+         * por el que se entra (13-ago-2026).
+         */
+        $proyecto = $lote->proyecto;
+
+        if ($proyecto instanceof Proyecto && ! $proyecto->puedeDonarOtroLote()) {
+            throw CompromisoInvalidoException::porCupoDeDonacionesLleno(
+                $codigo,
+                $proyecto->cupoDeDonaciones(),
+                $proyecto->lotesDonados(),
+            );
+        }
+
         $porQue = trim($motivo);
 
         if ($porQue === '') {
@@ -561,6 +583,77 @@ final readonly class RegistroDeCompromisos
         ]);
 
         return $lote;
+    }
+
+    /**
+     * Corrige una donación que quedó registrada por error.
+     *
+     * ═══ POR QUE ESTO NO ES «DEVOLVER UNA DONACION» ═══
+     *
+     * Lo pidió Mauricio el 13-ago-2026 con el caso exacto: «iban a donar
+     * 5, los donaron, pero hubo un error, así que solo se donarían 3; esos
+     * 2 deben quedar disponibles para la venta». No se está deshaciendo
+     * una entrega que ocurrió: se le está sacando la marca a un lote que
+     * NUNCA se regaló y quedó anotado como si sí.
+     *
+     * ═══ POR QUE ES TAN SIMPLE, Y POR QUE NO PASA POR liberar() ═══
+     *
+     * Porque **una donación no mueve un lempira**. No hay seña que
+     * devolver, ni recibos que anular, ni plan de cuotas que desarmar, ni
+     * cartera que recalcular: el valor se congela para la escritura y para
+     * poder contestar «¿cuánto valía lo que se regaló?», pero nunca entró
+     * plata. Soltar el lote es todo lo que hay que hacer.
+     *
+     * `liberar()` no sirve justamente porque sabe MAS de la cuenta: sabe
+     * de señas pendientes y de devoluciones, y arrastrar esa maquinaria
+     * hasta acá abriría la puerta a que una donación pida una devolución
+     * que no existe. Por eso `TipoCompromiso::seLibera()` sigue diciendo
+     * que no, y este es un camino aparte.
+     *
+     * ⚠️ El compromiso NO se borra: se cierra como Liberado con su motivo.
+     * Que el lote haya figurado como donado y haya vuelto es exactamente
+     * lo que alguien va a querer entender dentro de un año.
+     */
+    public function deshacerDonacion(Lote $lote, string $motivo): Compromiso
+    {
+        $estado = $this->estadoDe($lote);
+        $codigo = $this->codigoDe($lote);
+
+        if (! $estado->seDeshaceLaDonacion()) {
+            throw CompromisoInvalidoException::porDeshacerLoQueNoEsDonacion($codigo, $estado->etiqueta());
+        }
+
+        $porQue = trim($motivo);
+
+        if ($porQue === '') {
+            throw CompromisoInvalidoException::porDeshacerDonacionSinMotivo($codigo);
+        }
+
+        $vigente = $this->vigenteDe($lote);
+
+        if (! $vigente instanceof Compromiso) {
+            throw CompromisoInvalidoException::porFaltarCompromisoVigente($codigo, $estado->etiqueta());
+        }
+
+        $tipo = $vigente->getAttribute('tipo');
+
+        if ($tipo !== TipoCompromiso::Donacion) {
+            throw CompromisoInvalidoException::porDeshacerLoQueNoEsDonacion($codigo, $estado->etiqueta());
+        }
+
+        return DB::transaction(function () use ($lote, $vigente, $porQue): Compromiso {
+            $vigente->update([
+                'estado'     => EstadoCompromiso::Liberado,
+                'cerrado_el' => today(),
+                'motivo'     => $porQue,
+            ]);
+
+            // A DISPONIBLE y no a reservado: lo que se pidio es que vuelva
+            // a estar a la venta, que es de donde salio.
+            $lote->update(['estado' => EstadoLote::Disponible]);
+
+            return $vigente;
+        });
     }
 
     /**
@@ -929,6 +1022,8 @@ final readonly class RegistroDeCompromisos
         string $referencia,
         ?string $observaciones,
     ): void {
+        $factura = $this->facturas->paraElProyecto($compromiso->proyecto);
+
         Recibo::query()->create([
             'numero'        => $this->correlativos->siguienteDeReciboInterno(),
             'compromiso_id' => $compromiso->getKey(),
@@ -939,6 +1034,18 @@ final readonly class RegistroDeCompromisos
             'monto'         => $senia->redondeado(),
             'fecha'         => $compromiso->getAttribute('fecha'),
             'observaciones' => $observaciones,
+            /*
+             * ═══ LA FACTURA CON CAI, DESDE EL 14-AGO-2026 ═══
+             *
+             * Si el desarrollo tiene una facturación encendida, acá se consume
+             * el correlativo del SAR y el papel sale como FACTURA. Si no, no
+             * agrega nada y el papel sale como el recibo interno de siempre.
+             *
+             * El número interno de arriba NO se saltea en ninguno de los dos
+             * casos: es el que cuadra la caja, y una serie con huecos deja de
+             * servir para eso (R12).
+             */
+            ...($factura?->paraElRecibo() ?? []),
         ]);
     }
 

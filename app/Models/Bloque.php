@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Domain\Enums\UnidadDeArea;
 use App\Traits\HasAuditFields;
 use Database\Factories\BloqueFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -97,6 +98,22 @@ class Bloque extends Model
     public function lotes(): HasMany
     {
         return $this->hasMany(Lote::class);
+    }
+
+    /**
+     * La unidad de área del proyecto de este bloque.
+     *
+     * Va por la RELACIÓN, no por una consulta fresca como
+     * calcularCodigo(): las tablas la piden una vez por fila y sin
+     * `with('proyecto')` esto es el N+1 del §4.L4. Los listados que la
+     * usan cargan la relación; el `?? UnidadDeArea::Varas` es para el
+     * modelo suelto de un test, no una excusa para no cargarla.
+     */
+    public function unidadDeArea(): UnidadDeArea
+    {
+        $proyecto = $this->proyecto;
+
+        return $proyecto instanceof Proyecto ? $proyecto->unidadDeArea() : UnidadDeArea::Varas;
     }
 
     /**

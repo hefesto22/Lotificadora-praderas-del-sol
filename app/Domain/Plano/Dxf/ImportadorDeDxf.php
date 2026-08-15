@@ -35,6 +35,20 @@ use Illuminate\Support\Facades\DB;
  * Las tres se aplican con UNA sola transformacion global, calculada sobre
  * lotes y calles juntos. Si cada capa usara la suya, el plano quedaria
  * despedazado.
+ *
+ * ═══ POR QUE UN PLANO DE VARIAS MANZANAS ENTRA DE UNA SOLA VEZ ═══
+ *
+ * Esa transformacion es tambien la razon por la que existe la opcion
+ * `bloquePorRotulo` (13-ago-2026, con el plano de EL BAMBU: 84 lotes en
+ * seis manzanas, A1..A36, B1..B7, C1..C8, D1..D17, E1..E8, F1..F8).
+ *
+ * La salida obvia —partir el DXF y hacer seis importaciones, una por
+ * bloque— NO funciona: cada importacion calcula su propio minX/maxY y
+ * lleva SUS lotes al origen, asi que las seis manzanas terminan apiladas
+ * una encima de la otra en la esquina del plano. Para que las posiciones
+ * relativas sobrevivan, los 84 tienen que pasar por la MISMA
+ * transformacion, y entonces el reparto en bloques tiene que hacerlo el
+ * importador leyendo la letra del rotulo.
  */
 final readonly class ImportadorDeDxf
 {
@@ -110,14 +124,21 @@ final readonly class ImportadorDeDxf
 
         $transformar = $this->transformacion($deLotes, $deCalles, $opciones->varasPorUnidad());
 
+        $proyectoId = (int) $bloque->getAttribute('proyecto_id');
+        $bloquePorDefecto = (string) $bloque->getAttribute('nombre');
+
+        $candidatos = $this->candidatos($rotulos, $opciones);
+        $bloquesDelProyecto = $this->bloquesDelProyecto($proyectoId);
+        $usados = $this->numerosOcupadosPorBloque($bloquesDelProyecto);
+
         $advertencias = [];
-        $usados = $this->numerosOcupados($bloque);
         $sinRotulo = 0;
         $descartados = 0;
         $repetidos = 0;
+        $conLetra = 0;
         $areaTotal = 0.0;
 
-        /** @var list<array{numero: string, area: string, puntos: list<array{float, float}>}> $planificados */
+        /** @var list<array{bloque: string, numero: string, area: string, puntos: list<array{float, float}>}> $planificados */
         $planificados = [];
 
         foreach ($deLotes as $poligono) {
@@ -130,22 +151,38 @@ final readonly class ImportadorDeDxf
                 continue;
             }
 
-            $numero = $this->numeroPara($poligono, $rotulos, $opciones);
+            $rotulo = $this->rotuloPara($poligono, $candidatos);
+            $numero = $rotulo === null ? null : $rotulo['numero'];
+            $destino = $bloquePorDefecto;
+
+            /*
+             * La letra del rotulo manda sobre el bloque elegido en el
+             * formulario, y solo si se pidio: un plano rotulado "12B"
+             * —que es como el propio sistema dibuja el mapa— diria bloque
+             * "12" con la opcion prendida sin querer. Ver RotuloDxf.
+             */
+            if ($opciones->bloquePorRotulo && $rotulo !== null && $rotulo['bloque'] !== null) {
+                $destino = $rotulo['bloque'];
+                $conLetra++;
+            }
+
+            $usados[$destino] ??= [];
 
             if ($numero === null) {
                 $sinRotulo++;
-                $numero = $this->siguienteLibre($usados);
+                $numero = $this->siguienteLibre($usados[$destino]);
             }
 
-            if (isset($usados[$numero])) {
+            if (isset($usados[$destino][$numero])) {
                 $repetidos++;
-                $numero = $this->siguienteLibre($usados);
+                $numero = $this->siguienteLibre($usados[$destino]);
             }
 
-            $usados[$numero] = true;
+            $usados[$destino][$numero] = true;
             $areaTotal += $area;
 
             $planificados[] = [
+                'bloque' => $destino,
                 'numero' => $numero,
                 // Unico lugar del sistema donde un area nace de un float:
                 // la fuente es geometria y no hay otra manera. Se fija a los
@@ -156,8 +193,19 @@ final readonly class ImportadorDeDxf
             ];
         }
 
+        /** @var array<string, int> $lotesPorBloque */
+        $lotesPorBloque = [];
+
+        foreach ($planificados as $plan) {
+            $lotesPorBloque[$plan['bloque']] = ($lotesPorBloque[$plan['bloque']] ?? 0) + 1;
+        }
+
+        // Por nombre y no por orden de aparicion en el DXF: el aviso lo lee
+        // una persona, y "36 en A, 7 en B" se contrasta con el plano impreso.
+        ksort($lotesPorBloque);
+
         if ($repetidos > 0) {
-            $advertencias[] = "{$repetidos} numeros ya estaban ocupados en el bloque y se renumeraron. ".
+            $advertencias[] = "{$repetidos} numeros ya estaban ocupados en su bloque y se renumeraron. ".
                 'Suele significar que el plano se importo dos veces.';
         }
 
@@ -169,14 +217,23 @@ final readonly class ImportadorDeDxf
             $advertencias[] = "{$descartados} contornos se descartaron por tener area despreciable.";
         }
 
+        if ($opciones->bloquePorRotulo && $conLetra === 0) {
+            $advertencias[] = "Ningun rotulo traia la letra de su bloque, asi que todo entro en {$bloquePorDefecto}. ".
+                'Revisa que la capa de los numeros sea la correcta.';
+        }
+
         $creados = 0;
         $calles = 0;
+        /** @var list<string> $bloquesCreados */
+        $bloquesCreados = [];
 
-        DB::transaction(function () use ($bloque, $planificados, $deCalles, $opciones, $transformar, &$creados, &$calles): void {
+        DB::transaction(function () use ($bloque, $bloquesDelProyecto, $lotesPorBloque, $planificados, $deCalles, $opciones, $transformar, &$creados, &$calles, &$bloquesCreados): void {
+            $destinos = $this->bloquesDestino($bloque, $bloquesDelProyecto, $lotesPorBloque, $bloquesCreados);
+
             foreach ($planificados as $plan) {
                 Lote::query()->create([
                     'proyecto_id' => $bloque->getAttribute('proyecto_id'),
-                    'bloque_id'   => $bloque->getKey(),
+                    'bloque_id'   => $destinos[$plan['bloque']]->getKey(),
                     'numero'      => $plan['numero'],
                     'area_varas'  => $plan['area'],
                     'precio_vara' => $opciones->precioVara,
@@ -221,6 +278,8 @@ final readonly class ImportadorDeDxf
             descartados: $descartados,
             areaTotalVaras: $areaTotal,
             advertencias: $advertencias,
+            lotesPorBloque: $lotesPorBloque,
+            bloquesCreados: $bloquesCreados,
         );
     }
 
@@ -252,42 +311,159 @@ final readonly class ImportadorDeDxf
     }
 
     /**
-     * Numero de lote a partir del rotulo que cae adentro del contorno.
+     * Los rotulos que SI nombran un lote, leidos una sola vez.
      *
-     * Si hay varios, gana el mas cercano al centro: en un plano suele
-     * haber tambien el area rotulada, y el numero va al medio.
+     * Se resuelven antes del bucle y no adentro porque rotuloPara()
+     * recorre todos los rotulos por cada contorno: en el plano de EL BAMBU
+     * son 84 x 540 lecturas del mismo texto, que no cambia entre una y
+     * otra. Aca tambien queda filtrada la capa, que es constante.
      *
      * @param list<RotuloDxf> $rotulos
+     *
+     * @return list<array{numero: string, bloque: ?string, x: float, y: float}>
      */
-    private function numeroPara(PoligonoDxf $poligono, array $rotulos, OpcionesDeImportacion $opciones): ?string
+    private function candidatos(array $rotulos, OpcionesDeImportacion $opciones): array
     {
-        [$centroX, $centroY] = $poligono->centro();
-
-        $mejor = null;
-        $distanciaMenor = INF;
+        $candidatos = [];
 
         foreach ($rotulos as $rotulo) {
             if ($opciones->capaDeRotulos !== null && ! $opciones->usaCapa($rotulo->capa, $opciones->capaDeRotulos)) {
                 continue;
             }
 
-            if ($rotulo->numeroDeLote() === null) {
+            $numero = $rotulo->numeroDeLote();
+
+            if ($numero === null) {
                 continue;
             }
 
-            if (! $poligono->contiene($rotulo->x, $rotulo->y)) {
+            $candidatos[] = [
+                'numero' => $numero,
+                'bloque' => $rotulo->bloqueDeLote(),
+                'x'      => $rotulo->x,
+                'y'      => $rotulo->y,
+            ];
+        }
+
+        return $candidatos;
+    }
+
+    /**
+     * El rotulo que le corresponde al contorno, o null si no hay ninguno.
+     *
+     * Si hay varios adentro, gana el mas cercano al centro: en un plano
+     * suele haber tambien el area rotulada, y el numero va al medio.
+     *
+     * @param list<array{numero: string, bloque: ?string, x: float, y: float}> $candidatos
+     *
+     * @return array{numero: string, bloque: ?string}|null
+     */
+    private function rotuloPara(PoligonoDxf $poligono, array $candidatos): ?array
+    {
+        [$centroX, $centroY] = $poligono->centro();
+
+        $mejor = null;
+        $distanciaMenor = INF;
+
+        foreach ($candidatos as $candidato) {
+            if (! $poligono->contiene($candidato['x'], $candidato['y'])) {
                 continue;
             }
 
-            $distancia = hypot($rotulo->x - $centroX, $rotulo->y - $centroY);
+            $distancia = hypot($candidato['x'] - $centroX, $candidato['y'] - $centroY);
 
             if ($distancia < $distanciaMenor) {
                 $distanciaMenor = $distancia;
-                $mejor = $rotulo->numeroDeLote();
+                $mejor = ['numero' => $candidato['numero'], 'bloque' => $candidato['bloque']];
             }
         }
 
         return $mejor;
+    }
+
+    /**
+     * Los bloques que ya tiene el proyecto, por nombre.
+     *
+     * @return array<string, Bloque>
+     */
+    private function bloquesDelProyecto(int $proyectoId): array
+    {
+        $porNombre = [];
+
+        foreach (Bloque::query()->where('proyecto_id', $proyectoId)->orderBy('orden')->get() as $bloque) {
+            $porNombre[(string) $bloque->getAttribute('nombre')] = $bloque;
+        }
+
+        return $porNombre;
+    }
+
+    /**
+     * A que bloque va a parar cada nombre del plan, creando los que falten.
+     *
+     * Corre DENTRO de la transaccion: si la creacion de un lote revienta,
+     * los bloques que se hayan creado para el se van con ella y no queda
+     * un bloque vacio de recuerdo.
+     *
+     * `lotes_planificados` se escribe solo en los que nacen aca —es lo que
+     * dice el plano que trae ese bloque— y nunca se pisa en uno que ya
+     * existia, porque ese numero pudo haberlo declarado alguien a mano.
+     *
+     * @param array<string, Bloque> $existentes
+     * @param array<string, int> $lotesPorBloque
+     * @param list<string> $creados
+     *
+     * @return array<string, Bloque>
+     */
+    private function bloquesDestino(Bloque $elegido, array $existentes, array $lotesPorBloque, array &$creados): array
+    {
+        $proyectoId = (int) $elegido->getAttribute('proyecto_id');
+        $nombres = array_keys($lotesPorBloque);
+        sort($nombres);
+
+        $orden = 0;
+
+        foreach ($existentes as $bloque) {
+            $orden = max($orden, (int) $bloque->getAttribute('orden'));
+        }
+
+        $destinos = [];
+
+        foreach ($nombres as $nombre) {
+            if (isset($existentes[$nombre])) {
+                $destinos[$nombre] = $existentes[$nombre];
+
+                continue;
+            }
+
+            $orden++;
+
+            $destinos[$nombre] = Bloque::query()->create([
+                'proyecto_id'        => $proyectoId,
+                'nombre'             => $nombre,
+                'orden'              => $orden,
+                'lotes_planificados' => $lotesPorBloque[$nombre],
+            ]);
+
+            $creados[] = $nombre;
+        }
+
+        return $destinos;
+    }
+
+    /**
+     * @param array<string, Bloque> $bloques
+     *
+     * @return array<string, array<string, bool>>
+     */
+    private function numerosOcupadosPorBloque(array $bloques): array
+    {
+        $ocupados = [];
+
+        foreach ($bloques as $nombre => $bloque) {
+            $ocupados[$nombre] = $this->numerosOcupados($bloque);
+        }
+
+        return $ocupados;
     }
 
     /**

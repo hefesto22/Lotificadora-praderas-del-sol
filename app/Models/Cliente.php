@@ -189,6 +189,7 @@ class Cliente extends Model
     {
         return Cuota::query()
             ->reorder()
+            ->deLotesVivos()
             ->selectRaw('COALESCE(SUM(monto - monto_pagado), 0)')
             ->whereIn('venta_id', Venta::query()
                 ->vigentes()

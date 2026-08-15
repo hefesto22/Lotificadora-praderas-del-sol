@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\FormaDePago;
+use App\Domain\Enums\TipoDocumento;
 use App\Domain\ValueObjects\Monto;
 use App\Traits\HasAuditFields;
 use Database\Factories\ReciboFactory;
@@ -21,9 +22,18 @@ use Spatie\Activitylog\Support\LogOptions;
 /**
  * El documento que se le entrega al cliente cuando paga.
  *
- * Es interno: no hay CAI (R10). Lo que lo hace serio no es el papel sino su
- * número —uno solo para toda la lotificadora (R12)— y su detalle de
- * aplicación, que dice a qué cuota le tocó cada lempira.
+ * Puede ser de dos clases, y lo dice `tipo_documento`:
+ *
+ *  - **Recibo interno.** Sin CAI (R10). Lo que lo hace serio no es el papel
+ *    sino su número —uno solo para toda la lotificadora (R12)— y su detalle
+ *    de aplicación, que dice a qué cuota le tocó cada lempira.
+ *  - **Factura con CAI.** Desde el 14-ago-2026. Lleva ADEMÁS el número de
+ *    dieciséis dígitos del SAR, con la CAI, el rango autorizado y la fecha
+ *    límite de emisión copiados de la autorización con la que salió.
+ *
+ * ⚠️ Una factura consume las DOS series. El número interno no se saltea: es
+ * el que cuadra la caja, y una serie con huecos deja de servir para eso. Ver
+ * la migración `2026_08_14_090000_la_factura_toma_el_rango`.
  *
  * ═══ NO SE EDITA ═══
  *
@@ -35,6 +45,14 @@ use Spatie\Activitylog\Support\LogOptions;
 #[Fillable([
     'numero',
     'tipo_documento',
+    'facturacion_id',
+    'autorizacion_id',
+    'numero_factura',
+    'correlativo_factura',
+    'cai',
+    'rango_desde',
+    'rango_hasta',
+    'fecha_limite_emision',
     'venta_id',
     'compromiso_id',
     'cliente_id',
@@ -64,6 +82,20 @@ class Recibo extends Model
     use LogsActivity;
 
     /**
+     * Los defaults en memoria, no solo en la base.
+     *
+     * ⚠️ Sin esto, un recibo recién construido no trae tipo de documento y la
+     * primera edición registra en el ActivityLog un cambio que nadie hizo. Ya
+     * mordió cuatro veces en este repo con otras columnas.
+     *
+     * @var array<string, mixed>
+     */
+    #[Override]
+    protected $attributes = [
+        'tipo_documento' => 'recibo_interno',
+    ];
+
+    /**
      * Sin cast `decimal:x` en los montos: pasa por `number_format()`, que
      * recibe float (§8.3.1).
      *
@@ -73,18 +105,20 @@ class Recibo extends Model
     protected function casts(): array
     {
         return [
-            'concepto'   => ConceptoDeRecibo::class,
-            'forma_pago' => FormaDePago::class,
-            'fecha'      => 'date',
-            'anulado_el' => 'datetime',
+            'concepto'             => ConceptoDeRecibo::class,
+            'forma_pago'           => FormaDePago::class,
+            'tipo_documento'       => TipoDocumento::class,
+            'fecha'                => 'date',
+            'fecha_limite_emision' => 'date',
+            'anulado_el'           => 'datetime',
         ];
     }
 
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['numero', 'concepto', 'forma_pago', 'referencia', 'monto', 'fecha', 'cliente_id',
-                'anulado_el', 'anulado_por', 'motivo_anulacion'])
+            ->logOnly(['numero', 'tipo_documento', 'numero_factura', 'concepto', 'forma_pago', 'referencia',
+                'monto', 'fecha', 'cliente_id', 'anulado_el', 'anulado_por', 'motivo_anulacion'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges()
             ->setDescriptionForEvent(fn (string $evento): string => "Recibo {$evento}");
@@ -345,15 +379,6 @@ class Recibo extends Model
     }
 
     /**
-     * Lo que este recibo bajó del capital, sin pasar por ninguna cuota (R21).
-     *
-     * En un cobro normal es cero: todo el dinero se repartió entre cuotas. En
-     * un abono a capital es la diferencia, porque el mismo papel puede haber
-     * puesto al día lo vencido y bajado el saldo con el sobrante. Los dos
-     * renglones tienen que verse impresos, o el cliente no entiende por qué
-     * pagó L 100,000.00 y sus cuotas solo bajaron L 50,000.00.
-     */
-    /**
      * De lo que este recibo le aplicó a las cuotas, cuánto fue interés.
      *
      * Sale de los RENGLONES y no de la cuota: el recibo acredita este pago, y
@@ -392,6 +417,15 @@ class Recibo extends Model
         return ! $this->interesDeCuotas()->esCero();
     }
 
+    /**
+     * Lo que este recibo bajó del capital, sin pasar por ninguna cuota (R21).
+     *
+     * En un cobro normal es cero: todo el dinero se repartió entre cuotas. En
+     * un abono a capital es la diferencia, porque el mismo papel puede haber
+     * puesto al día lo vencido y bajado el saldo con el sobrante. Los dos
+     * renglones tienen que verse impresos, o el cliente no entiende por qué
+     * pagó L 100,000.00 y sus cuotas solo bajaron L 50,000.00.
+     */
     public function montoACapital(): Monto
     {
         return $this->montoTotal()->restar($this->montoAplicadoACuotas());
@@ -403,6 +437,144 @@ class Recibo extends Model
     public function folio(): string
     {
         return str_pad((string) $this->getAttribute('numero'), 6, '0', STR_PAD_LEFT);
+    }
+
+    // ─── Factura con CAI ──────────────────────────────────────────────
+
+    /**
+     * Qué clase de papel es este. Nunca null: la columna tiene default y CHECK.
+     *
+     * Se lee por acá y no por el atributo crudo para que un recibo recién
+     * construido con `new Recibo` —sin pasar por la base— también conteste.
+     */
+    public function tipoDeDocumento(): TipoDocumento
+    {
+        $tipo = $this->getAttribute('tipo_documento');
+
+        return $tipo instanceof TipoDocumento ? $tipo : TipoDocumento::ReciboInterno;
+    }
+
+    public function esFactura(): bool
+    {
+        return $this->tipoDeDocumento() === TipoDocumento::Factura;
+    }
+
+    /**
+     * El número GRANDE del papel.
+     *
+     * En una factura es el de dieciséis dígitos, que es el que existe para el
+     * SAR. En un recibo interno es el folio de siempre. El otro número no
+     * desaparece: la factura también imprime su folio, abajo y chiquito, como
+     * control interno — es el que cuadra la caja.
+     */
+    public function numeroDelPapel(): string
+    {
+        $factura = $this->getAttribute('numero_factura');
+
+        return is_string($factura) && trim($factura) !== '' ? trim($factura) : $this->folio();
+    }
+
+    /**
+     * El rango autorizado, como va impreso.
+     *
+     * Acuerdo 481-2017, Art. 10: la factura tiene que decir entre qué números
+     * está autorizada a moverse. Con los ocho dígitos, porque los ceros de
+     * adelante son parte del número.
+     */
+    public function rangoAutorizado(): ?string
+    {
+        $desde = $this->getAttribute('rango_desde');
+        $hasta = $this->getAttribute('rango_hasta');
+
+        if (! is_int($desde) || ! is_int($hasta)) {
+            return null;
+        }
+
+        return sprintf('%08d al %08d', $desde, $hasta);
+    }
+
+    /**
+     * El RTN o la identidad de quien se lleva el papel.
+     *
+     * La factura los pide (Art. 10): sin uno de los dos, el documento no
+     * identifica al adquiriente. Se prefiere el RTN porque es lo que sirve
+     * para crédito fiscal; el DNI es el respaldo de quien no tiene RTN, que
+     * es la mayoría de los compradores de lote.
+     *
+     * Cuando el recibo sale a nombre de un representado se usa el documento
+     * que se cargó en ventanilla —el de esa persona—, no el del titular del
+     * expediente: el papel dice «recibí de» esa persona.
+     */
+    public function identidadDelPapel(): ?string
+    {
+        $propio = $this->dniDelPapel();
+
+        if ($propio !== null || $this->esANombreDeOtro()) {
+            return $propio;
+        }
+
+        foreach (['rtn', 'dni'] as $columna) {
+            $valor = $this->cliente?->getAttribute($columna);
+
+            if (is_string($valor) && trim($valor) !== '') {
+                return trim($valor);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * El desglose del impuesto, como va impreso en la factura.
+     *
+     * ═══ 🔴 ESTO LO TIENE QUE CONFIRMAR UN CONTADOR ═══
+     *
+     * El Art. 10 pide que la factura separe importe exento, exonerado,
+     * gravado al 15%, gravado al 18% e ISV. Acá va TODO a exento y el ISV en
+     * cero, y la razón es que lo que se vende es TIERRA: la transferencia de
+     * bienes inmuebles no está sujeta al ISV, que grava bienes muebles y
+     * servicios. Los intereses del financiamiento tampoco.
+     *
+     * Eso es lo que dice la ley leída de frente, y es lo que hace hoy el
+     * papel. Pero no es una opinión que este archivo pueda firmar: si el
+     * contador de la lotificadora dice que alguna parte del cobro —una mora,
+     * un gasto administrativo— sí grava, se cambia ACÁ, en un solo lugar, y
+     * el papel entero se acomoda. Por eso el desglose vive en el modelo y no
+     * repartido en la plantilla.
+     *
+     * @return array<string, Monto>
+     */
+    public function desgloseFiscal(): array
+    {
+        return [
+            'Importe exento'      => $this->montoTotal(),
+            'Importe gravado 15%' => Monto::cero(),
+            'Importe gravado 18%' => Monto::cero(),
+            'I.S.V.'              => Monto::cero(),
+        ];
+    }
+
+    /**
+     * Con qué facturación salió esta. Null en un recibo interno.
+     *
+     * @return BelongsTo<Facturacion, $this>
+     */
+    public function facturacion(): BelongsTo
+    {
+        return $this->belongsTo(Facturacion::class);
+    }
+
+    /**
+     * Con qué autorización del SAR se numeró.
+     *
+     * ⚠️ No sirve para armar el papel —eso sale de las columnas congeladas—
+     * sino para contestar al revés: «¿qué facturas emitimos con esta CAI?».
+     *
+     * @return BelongsTo<AutorizacionDeImpresion, $this>
+     */
+    public function autorizacion(): BelongsTo
+    {
+        return $this->belongsTo(AutorizacionDeImpresion::class, 'autorizacion_id');
     }
 
     // ─── Mora ─────────────────────────────────────────────────────────

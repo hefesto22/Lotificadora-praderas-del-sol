@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Support;
 
+use App\Domain\Enums\UnidadDeArea;
 use App\Domain\ValueObjects\Monto;
 use Illuminate\Support\HtmlString;
 
@@ -32,11 +33,16 @@ final class Cuadros
      *
      * @param list<array{codigo: string, area: string, plazo: int, precio: Monto, valor: Monto, prima: Monto, cuota: Monto|null}> $renglones
      */
-    public static function lotes(array $renglones, string $vacio = 'Todavía no hay ningún lote marcado.'): HtmlString
+    public static function lotes(array $renglones, string $vacio = 'Todavía no hay ningún lote marcado.', ?UnidadDeArea $unidad = null): HtmlString
     {
         if ($renglones === []) {
             return new HtmlString('<p class="olympo-vacio">'.e($vacio).'</p>');
         }
+
+        // Sin unidad explícita manda la del sistema, que es la de los
+        // proyectos que existían antes de que la unidad fuera por
+        // desarrollo (13-ago-2026).
+        $corta = ($unidad ?? UnidadDeArea::Varas)->abreviada();
 
         $filas = '';
 
@@ -77,7 +83,7 @@ final class Cuadros
          */
         return new HtmlString(
             '<div class="olympo-scroll"><table class="olympo-tabla"><thead><tr>'
-            .'<th>Lote</th><th>vr²</th><th>Precio vr²</th><th>Plazo</th>'
+            .'<th>Lote</th><th>'.$corta.'</th><th>Precio '.$corta.'</th><th>Plazo</th>'
             .'<th>Valor</th><th>Prima</th><th>Cuota</th>'
             .'</tr></thead><tbody>'.$filas.'</tbody></table></div>'
         );

@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Lotes\Schemas;
 
 use App\Domain\Enums\EstadoLote;
+use App\Filament\Support\Unidades;
 use App\Models\Lote;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Database\Eloquent\Model;
 
 class LoteInfolist
 {
@@ -36,8 +38,8 @@ class LoteInfolist
                     ->icon('heroicon-o-calculator')
                     ->columns(3)
                     ->schema([
-                        TextEntry::make('area_varas')->label('Área')->suffix(' varas²'),
-                        TextEntry::make('precio_vara')->label('Precio por vara²')->prefix('L '),
+                        TextEntry::make('area_varas')->label('Área')->suffix(static fn (?Model $record): string => ' '.Unidades::de($record)->plural()),
+                        TextEntry::make('precio_vara')->label(static fn (?Model $record): string => 'Precio '.Unidades::de($record)->porUnidad())->prefix('L '),
                         TextEntry::make('valor_formateado')
                             ->label('Valor')
                             ->state(fn (Lote $record): string => $record->montoValor()->formateado())
@@ -52,7 +54,7 @@ class LoteInfolist
                             ->label('Estado')
                             ->badge()
                             ->color(fn (EstadoLote $state): string => $state->color())
-                            ->formatStateUsing(fn (EstadoLote $state): string => $state->etiqueta()),
+                            ->formatStateUsing(fn (EstadoLote $state): string => $state->etiquetaInterna()),
 
                         TextEntry::make('editabilidad')
                             ->label('Área y precio')

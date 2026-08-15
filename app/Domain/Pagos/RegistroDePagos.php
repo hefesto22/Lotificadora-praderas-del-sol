@@ -6,10 +6,12 @@ namespace App\Domain\Pagos;
 
 use App\Domain\Correlativos\ConsumoDeCorrelativos;
 use App\Domain\Enums\ConceptoDeRecibo;
+use App\Domain\Enums\EstadoCompromiso;
 use App\Domain\Enums\EstadoVenta;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\ModalidadDeReprogramacion;
 use App\Domain\Exceptions\PagoInvalidoException;
+use App\Domain\Facturacion\ConsumoDeFacturas;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\CondicionesDeMora;
 use App\Domain\Ventas\PlanDeCuotas;
@@ -85,7 +87,10 @@ use Illuminate\Support\Facades\DB;
  */
 final readonly class RegistroDePagos
 {
-    public function __construct(private ConsumoDeCorrelativos $correlativos) {}
+    public function __construct(
+        private ConsumoDeCorrelativos $correlativos,
+        private ConsumoDeFacturas $facturas,
+    ) {}
 
     /**
      * Cobrar cuotas de un lote.
@@ -1196,6 +1201,12 @@ final readonly class RegistroDePagos
             );
         }
 
+        // R22: un lote rescindido puede conservar una cuota con saldo, asi
+        // que «debe» no alcanza para dejar cobrar. Ver el mensaje.
+        if ($lote->getAttribute('estado') !== EstadoCompromiso::Vigente) {
+            throw PagoInvalidoException::porLoteRescindido($this->codigo($lote));
+        }
+
         // R11. La base tiene el mismo CHECK; esto es para que el mensaje lo
         // escriba alguien y no Postgres.
         if ($forma->exigeReferencia() && trim($referencia ?? '') === '') {
@@ -1388,6 +1399,7 @@ final readonly class RegistroDePagos
         array $lotesDelRecibo = [],
     ): Recibo {
         $aNombreDe = $this->aNombreDeQuien($lotesDelRecibo);
+        $factura = $this->facturas->paraElProyecto($venta->proyecto);
 
         return Recibo::query()->create([
             'numero'        => $this->correlativos->siguienteDeReciboInterno(),
@@ -1412,6 +1424,18 @@ final readonly class RegistroDePagos
             'monto'           => $monto->redondeado(),
             'fecha'           => $cuando->toDateString(),
             'observaciones'   => $observaciones,
+            /*
+             * ═══ LA FACTURA CON CAI, DESDE EL 14-AGO-2026 ═══
+             *
+             * Si el desarrollo tiene una facturación encendida, acá se consume
+             * el correlativo del SAR y el papel sale como FACTURA. Si no, no
+             * agrega nada y el papel sale como el recibo interno de siempre.
+             *
+             * El número interno de arriba NO se saltea en ninguno de los dos
+             * casos: es el que cuadra la caja, y una serie con huecos deja de
+             * servir para eso (R12).
+             */
+            ...($factura?->paraElRecibo() ?? []),
         ]);
     }
 

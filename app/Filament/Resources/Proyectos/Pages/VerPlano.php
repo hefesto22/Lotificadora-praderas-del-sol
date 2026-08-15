@@ -6,7 +6,9 @@ namespace App\Filament\Resources\Proyectos\Pages;
 
 use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\FormaDePago;
+use App\Domain\Enums\UnidadDeArea;
 use App\Domain\Exceptions\GrupoOlympoException;
+use App\Domain\Lotes\RegistroDeReservas;
 use App\Domain\Plano\AcomodadorDelPlano;
 use App\Domain\Plano\Dxf\ImportadorDeDxf;
 use App\Domain\Plano\Dxf\OpcionesDeImportacion;
@@ -23,10 +25,13 @@ use App\Domain\Ventas\RegistroDeCompromisos;
 use App\Domain\Ventas\RegistroDeVentas;
 use App\Domain\Ventas\TasaDeInteres;
 use App\Filament\Resources\Proyectos\ProyectoResource;
+use App\Filament\Resources\Ventas\VentaResource;
 use App\Filament\Schemas\Components\DNIField;
 use App\Filament\Schemas\Components\MayusculasField;
 use App\Filament\Schemas\Components\MontoField;
+use App\Filament\Schemas\Components\PrecioPorAreaField;
 use App\Filament\Schemas\Components\TelefonoHondurasField;
+use App\Filament\Support\CobrarUnPago;
 use App\Filament\Support\Cuadros;
 use App\Filament\Support\DevolverLaSenia;
 use App\Models\Bloque;
@@ -44,6 +49,7 @@ use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Concerns\InteractsWithRecord;
 use Filament\Resources\Pages\Page;
@@ -475,7 +481,8 @@ class VerPlano extends Page
                             ->dehydratedWhenHidden()
                             ->helperText('0 es contado, sin cuotas.'),
 
-                        MontoField::make('precio_vara', 'Precio por vara²')
+                        PrecioPorAreaField::make('precio_vara')
+                            ->label('Precio '.$this->unidad()->porUnidad())
                             ->live(onBlur: true)
                             ->visible(fn (Get $get): bool => ! $get('cotizado'))
                             ->dehydratedWhenHidden(),
@@ -634,6 +641,52 @@ class VerPlano extends Page
     }
 
     /**
+     * Corregir una donación que quedó registrada por error.
+     *
+     * El caso de Mauricio, 13-ago-2026: «iban a donar 5, los donaron, pero
+     * hubo un error, así que solo se donarían 3; esos 2 deben quedar
+     * disponibles para la venta».
+     *
+     * La palabra del botón importa y por eso NO dice «devolver»: no se
+     * está deshaciendo una entrega que ocurrió —para eso ya habría una
+     * escritura firmada a nombre de otro— sino sacándole la marca a un
+     * lote que nunca se regaló. Lo que lo hace posible es que una donación
+     * no movió un lempira: no hay seña, ni recibos, ni cuotas que desarmar.
+     */
+    public function deshacerDonacionAction(): Action
+    {
+        return Action::make('deshacerDonacion')
+            ->label('Quitar de donación')
+            ->icon(Heroicon::OutlinedArrowUturnLeft)
+            ->color('warning')
+            ->modalHeading('Quitar la donación de este lote')
+            ->modalDescription('El lote vuelve a estar DISPONIBLE para la venta. Como una donación no lleva plata, no hay nada que devolver ni recibo que anular.')
+            ->modalSubmitActionLabel('Quitar la donación')
+            ->modalWidth('lg')
+            ->schema([
+                Textarea::make('motivo')
+                    ->label('¿Por qué se le quita?')
+                    ->required()
+                    ->rows(3)
+                    ->placeholder('Se marcaron cinco lotes por error; la junta aprobó donar solo tres.')
+                    ->helperText('Queda anotado con tu usuario y la fecha. Es lo único que después explica por qué este lote figuró como regalado y volvió al inventario.'),
+            ])
+            ->action(function (array $arguments, array $data): void {
+                $this->conElLote($arguments, function (Lote $lote) use ($data): string {
+                    app(RegistroDeCompromisos::class)->deshacerDonacion(
+                        $lote,
+                        $this->texto($data, 'motivo', ''),
+                    );
+
+                    return sprintf(
+                        '%s ya no figura como donado y volvió a estar disponible.',
+                        (string) $lote->getAttribute('codigo'),
+                    );
+                });
+            });
+    }
+
+    /**
      * Donar: el lote sale del inventario sin que entre un lempira.
      *
      * ═══ POR QUE NO ES UNA PESTAÑA MAS AL LADO DE VENDER Y APARTAR ═══
@@ -739,12 +792,136 @@ class VerPlano extends Page
               */
             'valor' => $lote instanceof Lote
                 ? sprintf(
-                    '%s · %s v²',
+                    '%s · %s %s',
                     $lote->montoValor()->formateado(),
                     new Monto((string) $lote->getAttribute('area_varas'))->redondeado(),
+                    $this->unidad()->corta(),
                 )
                 : null,
         ];
+    }
+
+    /**
+     * Guardar un lote para la familia.
+     *
+     * Lo pidio Mauricio el 13-ago-2026: «para los reservados, estos son
+     * para lotes heredados». Es el gemelo de donar y comparte su forma —un
+     * lote, un motivo obligatorio, un cupo declarado antes— pero NO su
+     * maquinaria: no pregunta a nombre de quien y no escribe ningun
+     * compromiso. Guardar un lote no ata a nadie todavia; ata cuando el
+     * tramite se cierra y el lote se dona, que es el camino de al lado.
+     *
+     * ⚠️ El boton dice «herencia» y el plano publico dira «Reservado». Ver
+     * EstadoLote::etiquetaInterna().
+     */
+    public function reservarLoteAction(): Action
+    {
+        return Action::make('reservarLote')
+            ->label('Guardar para herencia')
+            ->icon(Heroicon::OutlinedHomeModern)
+            // `gray` y no un violeta: es el color que el panel tiene
+            // registrado para el reservado (ver AdminPanelProvider). El
+            // #7c3aed del enum es para el SVG del plano, que no pasa por
+            // la paleta de Filament.
+            ->color('gray')
+            ->modalHeading('Guardar este lote para herencia')
+            ->modalDescription('Sale del mercado y deja de ofrecerse. No genera venta ni cartera, y se puede devolver a la venta cuando haga falta.')
+            ->modalSubmitActionLabel('Guardar')
+            ->modalWidth('lg')
+            ->schema([
+                Textarea::make('motivo')
+                    ->label('¿Por qué se guarda?')
+                    ->required()
+                    ->rows(3)
+                    ->placeholder('Reservado para los herederos de ... Acuerdo de la junta del ...')
+                    ->helperText('Queda anotado con tu usuario y la fecha, en las observaciones del lote. Es lo único que después explica por qué este lote no está a la venta.'),
+            ])
+            ->action(function (array $arguments, array $data): void {
+                $this->conElLote($arguments, function (Lote $lote) use ($data): string {
+                    app(RegistroDeReservas::class)->reservar($lote, $this->texto($data, 'motivo', ''));
+
+                    return sprintf(
+                        '%s quedó guardado para herencia y salió del mercado.',
+                        (string) $lote->getAttribute('codigo'),
+                    );
+                });
+            });
+    }
+
+    /**
+     * Devolver a la venta un lote guardado.
+     *
+     * El mismo caso que corregir una donacion, y por eso la misma
+     * respuesta: guardarlo no movio un lempira, asi que soltarlo tampoco
+     * tiene nada que desarmar. Lo escrito no se borra —la anotacion nueva
+     * se suma arriba— porque que un lote haya estado fuera del mercado es
+     * justo lo que alguien va a querer entender despues.
+     */
+    public function deshacerReservaAction(): Action
+    {
+        return Action::make('deshacerReserva')
+            ->label('Devolver a la venta')
+            ->icon(Heroicon::OutlinedArrowUturnLeft)
+            ->color('warning')
+            ->modalHeading('Devolver este lote a la venta')
+            ->modalDescription('Deja de estar guardado para herencia y vuelve a estar DISPONIBLE. Como no llevaba plata, no hay nada que devolver.')
+            ->modalSubmitActionLabel('Devolver a la venta')
+            ->modalWidth('lg')
+            ->schema([
+                Textarea::make('motivo')
+                    ->label('¿Por qué vuelve a la venta?')
+                    ->required()
+                    ->rows(3)
+                    ->placeholder('La familia decidió no quedárselo; la junta aprobó ponerlo a la venta.')
+                    ->helperText('Queda anotado con tu usuario y la fecha, arriba del motivo por el que se había guardado.'),
+            ])
+            ->action(function (array $arguments, array $data): void {
+                $this->conElLote($arguments, function (Lote $lote) use ($data): string {
+                    app(RegistroDeReservas::class)->deshacerReserva($lote, $this->texto($data, 'motivo', ''));
+
+                    return sprintf(
+                        '%s ya no está guardado y volvió a estar disponible.',
+                        (string) $lote->getAttribute('codigo'),
+                    );
+                });
+            });
+    }
+
+    /**
+     * Cobrar y abonar sin salir del plano.
+     *
+     * Las dos son `CobrarUnPago` tal cual —el mismo modal que la tabla de
+     * Ventas y el expediente—, solo que la venta se resuelve desde el lote
+     * que se tocó. Todo lo que se puede romper vive allá; acá solo se
+     * enchufan, que es exactamente el punto: no hay una tercera pantalla
+     * de cobro que mantener igual a las otras dos.
+     */
+    public function cobrarDesdeElPlanoAction(): Action
+    {
+        return CobrarUnPago::desdeElPlano();
+    }
+
+    public function abonarDesdeElPlanoAction(): Action
+    {
+        return CobrarUnPago::abonoDesdeElPlano();
+    }
+
+    /**
+     * Del plano al expediente completo.
+     *
+     * Existe porque el panel del lote NO tiene que crecer hasta ser el
+     * expediente: anular un recibo, imprimir un estado de cuenta o ver el
+     * historial son pantallas enteras, y meterlas en un cuadrito flotante
+     * arriba de un mapa las haría peores. Lo que el plano resuelve es lo
+     * de todos los días —cobrar la cuota—; para lo demás, este salto.
+     *
+     * Va por Livewire y no por un enlace armado en Alpine: la ruta la sabe
+     * Filament, y una URL escrita a mano en el blade es una que se rompe
+     * callada el día que alguien mueve el recurso.
+     */
+    public function abrirExpediente(int $venta): void
+    {
+        $this->redirect(VentaResource::getUrl('view', ['record' => $venta]));
     }
 
     public function liberarLoteAction(): Action
@@ -791,16 +968,6 @@ class VerPlano extends Page
 
     // ─── Ayudas de la venta desde el plano ────────────────────────────
 
-    /**
-     * Con que llega precargado el formulario al abrirse.
-     *
-     * Se propone el plan MAS CORTO que ofrezca el proyecto: es el que menos
-     * compromete al cliente. Si no hay ninguno, manda el precio propio del
-     * lote, que es lo que habia antes de que existiera la lista por plazo.
-     *
-     *
-     * @return array<string, mixed>
-     */
     /**
      * El cuadro de plazos de un lote, con el motor que firma el contrato.
      *
@@ -935,6 +1102,16 @@ class VerPlano extends Page
             : new TasaDeInteres($texto);
     }
 
+    /**
+     * Con que llega precargado el formulario al abrirse.
+     *
+     * Se propone el plan MAS CORTO que ofrezca el proyecto: es el que menos
+     * compromete al cliente. Si no hay ninguno, manda el precio propio del
+     * lote, que es lo que habia antes de que existiera la lista por plazo.
+     *
+     *
+     * @return array<string, mixed>
+     */
     private function datosInicialesDeVenta(array $arguments): array
     {
         $lote = Lote::query()->find($this->entero($arguments, 'lote', 0));
@@ -1451,18 +1628,21 @@ class VerPlano extends Page
      */
     private function tablaDeLotes(Get $get): HtmlString
     {
-        return Cuadros::lotes(array_map(
-            static fn (array $renglon): array => [
-                'codigo' => $renglon['codigo'],
-                'area'   => $renglon['area'],
-                'plazo'  => $renglon['plazo'],
-                'precio' => $renglon['precio'],
-                'valor'  => $renglon['valor'],
-                'prima'  => $renglon['prima'],
-                'cuota'  => $renglon['plan']?->cuotaMensual(),
-            ],
-            $this->renglonesEnPantalla($get),
-        ));
+        return Cuadros::lotes(
+            array_map(
+                static fn (array $renglon): array => [
+                    'codigo' => $renglon['codigo'],
+                    'area'   => $renglon['area'],
+                    'plazo'  => $renglon['plazo'],
+                    'precio' => $renglon['precio'],
+                    'valor'  => $renglon['valor'],
+                    'prima'  => $renglon['prima'],
+                    'cuota'  => $renglon['plan']?->cuotaMensual(),
+                ],
+                $this->renglonesEnPantalla($get),
+            ),
+            unidad: $this->unidad(),
+        );
     }
 
     /**
@@ -1677,11 +1857,11 @@ class VerPlano extends Page
             $estado = $lote->getAttribute('estado');
 
             $opciones[(int) $lote->getKey()] = sprintf(
-                '%s — %s vr²%s',
+                '%s — %s '.$this->unidad()->abreviada().'%s',
                 (string) $lote->getAttribute('codigo'),
                 Cuadros::conMiles(new Monto($this->areaDe($lote))->redondeado()),
                 $estado instanceof EstadoLote && $estado !== EstadoLote::Disponible
-                    ? sprintf(' (%s)', mb_strtolower($estado->etiqueta()))
+                    ? sprintf(' (%s)', mb_strtolower($estado->etiquetaInterna()))
                     : '',
             );
         }
@@ -2082,6 +2262,13 @@ class VerPlano extends Page
                     ->helperText('DXF en formato ASCII, hasta 20 MB. Si el plano esta en DWG, '.
                                  'hay que exportarlo a DXF desde AutoCAD primero.'),
 
+                Toggle::make('bloque_por_rotulo')
+                    ->label('El rotulo trae la letra de su manzana (A1, B7, C-3…)')
+                    ->default(false)
+                    ->helperText('Prendido, cada lote entra en el bloque que dice su rotulo y los '.
+                                 'que falten se crean solos. El plano entero se importa de UNA vez: '.
+                                 'partirlo en varios archivos apilaria las manzanas una encima de otra.'),
+
                 Select::make('bloque_id')
                     ->label('Bloque donde entran los lotes')
                     ->options(fn (): array => Bloque::query()
@@ -2090,8 +2277,8 @@ class VerPlano extends Page
                         ->pluck('nombre', 'id')
                         ->all())
                     ->required()
-                    ->helperText('Si el plano trae varias manzanas, conviene importar una por vez '.
-                                 'filtrando por su capa.'),
+                    ->helperText('Con la opcion de arriba prendida, este es solo el destino de los '.
+                                 'lotes cuyo rotulo NO traiga letra.'),
 
                 Select::make('unidad')
                     ->label('¿En que unidad esta dibujado el plano?')
@@ -2103,7 +2290,7 @@ class VerPlano extends Page
                                  'este dato sale el area de cada lote.'),
 
                 TextInput::make('precio_vara')
-                    ->label('Precio por vara² para los lotes nuevos')
+                    ->label('Precio '.$this->unidad()->porUnidad().' para los lotes nuevos')
                     ->numeric()
                     ->required()
                     ->default('1200.00'),
@@ -2158,12 +2345,17 @@ class VerPlano extends Page
                      * del sistema.
                      */
                     varaEnMetros: $proyecto->varaEnMetros(),
+                    bloquePorRotulo: $this->booleano($data, 'bloque_por_rotulo'),
                 ));
 
                 $cuerpo = sprintf(
-                    'Capa de lotes: %s. Area total: %s varas². %s',
+                    'Capa de lotes: %s. Area total: %s '.$proyecto->unidadDeArea()->plural().'. %s%s%s',
                     $capaDeLotes,
                     number_format($resultado->areaTotalVaras, 2),
+                    count($resultado->lotesPorBloque) > 1 ? "Repartidos: {$resultado->repartoEnTexto()}. " : '',
+                    $resultado->bloquesCreados === []
+                        ? ''
+                        : 'Se crearon los bloques '.implode(', ', $resultado->bloquesCreados).'. ',
                     $resultado->callesCreadas > 0 ? "Ademas se dibujaron {$resultado->callesCreadas} calles." : ''
                 );
 
@@ -2235,6 +2427,35 @@ class VerPlano extends Page
     }
 
     /**
+     * La unidad de área del proyecto que se está mirando.
+     *
+     * Toda esta pantalla es de UN proyecto, así que la unidad es una sola
+     * y se resuelve una vez por llamada en vez de arrastrarla por
+     * parámetro hasta el fondo de cada sprintf.
+     */
+    private function unidad(): UnidadDeArea
+    {
+        /** @var Proyecto $proyecto */
+        $proyecto = $this->getRecord();
+
+        return $proyecto->unidadDeArea();
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function booleano(array $data, string $campo): bool
+    {
+        $valor = $data[$campo] ?? false;
+
+        // Un Toggle de Filament llega como bool, pero el mismo estado
+        // rehidratado desde el request puede venir como "1". Las dos formas
+        // quieren decir lo mismo y ninguna es un cast ciego a bool, que
+        // convertiria la cadena "false" en verdadero.
+        return in_array($valor, [true, 1, '1'], true);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     #[Override]
@@ -2245,6 +2466,13 @@ class VerPlano extends Page
 
         return [
             'plano' => new PlanoDelProyecto()->para($proyecto),
+
+            /*
+             * R21: el receptor cobra, la administradora reprograma. Se
+             * pregunta aca para no DIBUJAR el boton del abono a quien no
+             * puede; el borde de verdad esta adentro de la accion.
+             */
+            'cobros' => ['puedeAbonar' => CobrarUnPago::seLePermiteAbonar()],
 
             /*
              * Los planes NO pasan por PlanoDelProyecto: son del negocio y

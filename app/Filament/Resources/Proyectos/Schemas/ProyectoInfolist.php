@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Proyectos\Schemas;
 
+use App\Domain\Enums\UnidadDeArea;
 use App\Models\Proyecto;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\TextEntry;
@@ -46,6 +47,18 @@ class ProyectoInfolist
                             ->helperText('Prefijo de los contratos'),
 
                         /*
+                        | 🔴 Faltaba, y se notó en pantalla el 14-ago-2026:
+                        | esto decide cómo se lee TODO el desarrollo —el área
+                        | del lote, la del precio, la del plano y la del
+                        | contrato— y para verlo había que entrar a Editar.
+                        */
+                        TextEntry::make('unidad_area')
+                            ->label('Unidad del área')
+                            ->badge()
+                            ->color('gray')
+                            ->formatStateUsing(fn (UnidadDeArea $state): string => $state->etiqueta()),
+
+                        /*
                         | Un dato que antes no se veía en ningún lado y que
                         | cambia cómo se lee todo el plano: si la geometría
                         | es la del levantamiento o un trazado aproximado.
@@ -55,6 +68,34 @@ class ProyectoInfolist
                             ->badge()
                             ->formatStateUsing(fn (bool $state): string => $state ? 'Esquemático' : 'Geometría real')
                             ->color(fn (bool $state): string => $state ? 'warning' : 'success'),
+                    ]),
+
+                /*
+                | Con qué papel se le cobra a la gente de este desarrollo.
+                |
+                | 🔴 Esta sección nació de un ensayo en pantalla: un cobro de
+                | El Bambú salió como recibo interno teniendo facturación con
+                | CAI, y para siquiera empezar a mirar por qué había que
+                | entrar a Editar → pestaña Facturación. Un dato que decide
+                | qué documento recibe el cliente no puede estar escondido a
+                | dos clics.
+                */
+                Section::make('Con qué papel cobra')
+                    ->icon('heroicon-o-document-text')
+                    ->columns(2)
+                    ->schema([
+                        TextEntry::make('facturacion.nombre')
+                            ->label('Facturación')
+                            ->badge()
+                            ->color('success')
+                            ->placeholder('Solo recibo interno — sin CAI')
+                            ->helperText(fn (Proyecto $record): string => $record->getAttribute('facturacion_id') === null
+                                ? 'Los cobros de este desarrollo salen como comprobante de caja, con «NO VÁLIDO PARA CRÉDITO FISCAL».'
+                                : 'Los cobros de este desarrollo salen como FACTURA con CAI.'),
+
+                        TextEntry::make('facturacion.rtn')
+                            ->label('RTN del emisor')
+                            ->placeholder('—'),
                     ]),
 
                 Section::make('Ubicación')

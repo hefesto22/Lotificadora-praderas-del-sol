@@ -10,6 +10,8 @@ use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\PlanDeCuotas;
 use App\Domain\Ventas\TasaDeInteres;
 use App\Filament\Schemas\Components\MontoField;
+use App\Filament\Schemas\Components\PrecioPorAreaField;
+use App\Filament\Support\Unidades;
 use App\Models\PlanDePago;
 use BackedEnum;
 use Carbon\CarbonImmutable;
@@ -118,9 +120,10 @@ class PlanesDePagoRelationManager extends RelationManager
                     ])
                     ->helperText('0 es contado. No puede repetirse dentro del proyecto.'),
 
-                MontoField::make('precio_vara', 'Precio por vara²')
+                PrecioPorAreaField::make('precio_vara')
+                    ->label('Precio '.Unidades::de($this->getOwnerRecord())->porUnidad())
                     ->required()
-                    ->helperText('Lo que cuesta la vara² si el cliente elige este plazo.'),
+                    ->helperText('Lo que cuesta '.Unidades::de($this->getOwnerRecord())->abreviada().' si el cliente elige este plazo.'),
 
                 TextInput::make('etiqueta')
                     ->label('Nombre en pantalla')
@@ -143,7 +146,7 @@ class PlanesDePagoRelationManager extends RelationManager
                     ->minValue(0)
                     ->maxValue(TasaDeInteres::MAXIMA)
                     ->required()
-                    ->helperText('0 es sin interés, y es lo normal acá: el precio de la vara² ya sube con el plazo. Se dice «anual» y se divide entre 12, como los bancos.')
+                    ->helperText('0 es sin interés, y es lo normal acá: el precio '.Unidades::de($this->getOwnerRecord())->porUnidad().' ya sube con el plazo. Se dice «anual» y se divide entre 12, como los bancos.')
                     /*
                      * Un plan de CONTADO no financia nada, asi que no puede
                      * devengar. La base tiene el mismo CHECK; esto es para que
@@ -222,7 +225,7 @@ class PlanesDePagoRelationManager extends RelationManager
                     ->sortable(),
 
                 TextColumn::make('precio_vara')
-                    ->label('Precio por vara²')
+                    ->label('Precio '.Unidades::de($this->getOwnerRecord())->porUnidad())
                     ->formatStateUsing(fn (PlanDePago $record): string => $record->montoPrecioVara()->formateado())
                     ->alignEnd()
                     ->sortable(),
@@ -243,7 +246,7 @@ class PlanesDePagoRelationManager extends RelationManager
                 | los 301 lotes de Praderas.
                 */
                 TextColumn::make('referencia')
-                    ->label('Un lote de 250 vr²')
+                    ->label('Un lote de 250 '.Unidades::de($this->getOwnerRecord())->abreviada())
                     ->state(fn (PlanDePago $record): string => $this->valorDeReferencia($record)->formateado())
                     ->alignEnd()
                     ->color('gray'),
@@ -283,7 +286,7 @@ class PlanesDePagoRelationManager extends RelationManager
             ->defaultSort('meses')
             ->paginationPageOptions([25, 50, 100])
             ->emptyStateHeading('Todavía no hay planes de pago')
-            ->emptyStateDescription('Cargá el precio de la vara² a cada plazo. Mientras esté vacío, el plano cotiza cada lote a su propio precio y no muestra cuotas.')
+            ->emptyStateDescription('Cargá el precio '.Unidades::de($this->getOwnerRecord())->porUnidad().' a cada plazo. Mientras esté vacío, el plano cotiza cada lote a su propio precio y no muestra cuotas.')
             ->emptyStateIcon('heroicon-o-calculator');
     }
 

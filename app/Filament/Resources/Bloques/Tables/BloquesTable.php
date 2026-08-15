@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Bloques\Tables;
 
+use App\Filament\Support\Unidades;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
@@ -11,6 +12,7 @@ use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 
 class BloquesTable
 {
@@ -33,7 +35,7 @@ class BloquesTable
 
                 TextColumn::make('area_total_varas')
                     ->label('Área del plano')
-                    ->suffix(' varas²')
+                    ->suffix(static fn (?Model $record): string => ' '.Unidades::de($record)->plural())
                     ->placeholder('—')
                     ->alignEnd()
                     ->sortable(),

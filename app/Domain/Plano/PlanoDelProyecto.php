@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace App\Domain\Plano;
 
 use App\Domain\Enums\EstadoLote;
+use App\Domain\Enums\EstadoVenta;
 use App\Domain\Enums\TipoCalle;
+use App\Domain\Enums\UnidadDeArea;
+use App\Domain\Ventas\CarteraDelPlano;
 use App\Models\Bloque;
 use App\Models\Calle;
 use App\Models\Compromiso;
 use App\Models\Lote;
 use App\Models\Proyecto;
+use App\Models\Venta;
 
 /**
  * Arma todo lo que el plano necesita para dibujarse.
@@ -53,8 +57,10 @@ final readonly class PlanoDelProyecto
      *     esquematico: bool,
      *     sinDibujar: int,
      *     resumen: array<string, int>,
-     *     medidas: array{enMetros: bool, varaEnMetros: float, factor: float, unidad: string, pie: string},
-     *     lotes: list<array{id: int, codigo: string, numero: string, bloque: string, rotulo: string, estado: string, etiqueta: string, color: string, puntos: string, centro: array{float, float}, cliente: string|null, areaVaras: string, areaMetros: string, valor: string, valorFormateado: string, desalineado: bool, foto360: string|null, foto360Mini: string|null, foto360Marcas: list<array<string, mixed>>}>,
+     *     donaciones: array{activas: bool, cupo: int, hechas: int, quedan: int, puede: bool},
+     *     herencia: array{activa: bool, cupo: int, guardados: int, quedan: int, puede: bool},
+     *     medidas: array{enMetros: bool, varaEnMetros: float, factor: float, unidad: string, pie: string, area: string, areaCorta: string, areaAbreviada: string, porUnidad: string, dosUnidades: bool},
+     *     lotes: list<array{id: int, codigo: string, numero: string, bloque: string, rotulo: string, estado: string, etiqueta: string, seDeshace: bool, seReserva: bool, seDeshaceReserva: bool, color: string, puntos: string, centro: array{float, float}, cliente: string|null, cartera: array{venta: int, contrato: string, lotes: int, saldo: string, proximaCuota: string|null, vencidas: int, alDia: bool, seCobra: bool}|null, areaVaras: string, areaMetros: string, valor: string, valorFormateado: string, desalineado: bool, foto360: string|null, foto360Mini: string|null, foto360Marcas: list<array<string, mixed>>}>,
      *     calles: list<array{nombre: string|null, tipo: string, etiqueta: string, ancho: float, esArea: bool, puntos: string}>
      * }
      */
@@ -82,9 +88,29 @@ final readonly class PlanoDelProyecto
         $comprometidos = Compromiso::query()
             ->delProyecto($proyecto)
             ->vigentes()
-            ->with('cliente')
+            ->with(['cliente', 'venta'])
             ->get()
             ->keyBy('lote_id');
+
+        /*
+         * Cuanto debe cada contrato, para el panel del lote vendido. Dos
+         * consultas agregadas para TODO el proyecto — ver CarteraDelPlano,
+         * que explica por que los numeros son del contrato y no del lote.
+         *
+         * `lotesPorVenta` sale del arreglo que ya esta en memoria: cuantos
+         * lotes lleva cada contrato no cuesta una consulta mas.
+         */
+        $lotesPorVenta = [];
+
+        foreach ($comprometidos as $compromiso) {
+            $venta = $compromiso->getAttribute('venta_id');
+
+            if (is_int($venta)) {
+                $lotesPorVenta[$venta] = ($lotesPorVenta[$venta] ?? 0) + 1;
+            }
+        }
+
+        $cartera = CarteraDelPlano::de(array_keys($lotesPorVenta));
 
         $lotesDibujados = [];
         $sinDibujar = 0;
@@ -124,21 +150,25 @@ final readonly class PlanoDelProyecto
                 'bloque'   => $nombreBloque,
                 'rotulo'   => Lote::componerRotulo($nombreBloque, (string) $lote->getAttribute('numero')),
                 'estado'   => $estado->value,
-                'etiqueta' => $estado->etiqueta(),
+                'etiqueta' => $estado->etiquetaInterna(),
                 /*
                  * Que se pueda vender lo decide el ENUM, no el panel. Antes el
                  * blade preguntaba `estado !== 'vendido'` y por eso un lote
                  * reservado —y ahora uno donado— ofrecía «Vender este lote».
                  */
-                'seVende'         => $estado->seVende(),
-                'seDona'          => $estado->seDona(),
-                'porQueNoSeVende' => $estado->porQueNoSeVende(),
-                'color'           => $estado->colorHex(),
-                'puntos'          => $this->comoPuntosSvg($vertices),
-                'centro'          => $this->centroDe($vertices),
-                'cliente'         => $cliente,
-                'areaVaras'       => (string) $lote->getAttribute('area_varas'),
-                'areaMetros'      => $this->enMetrosCuadrados(
+                'seVende'          => $estado->seVende(),
+                'seDona'           => $estado->seDona(),
+                'seDeshace'        => $estado->seDeshaceLaDonacion(),
+                'seReserva'        => $estado->seReserva(),
+                'seDeshaceReserva' => $estado->seDeshaceLaReserva(),
+                'porQueNoSeVende'  => $estado->porQueNoSeVende(),
+                'color'            => $estado->colorHex(),
+                'puntos'           => $this->comoPuntosSvg($vertices),
+                'centro'           => $this->centroDe($vertices),
+                'cliente'          => $cliente,
+                'cartera'          => $this->carteraDe($compromiso, $cartera, $lotesPorVenta),
+                'areaVaras'        => (string) $lote->getAttribute('area_varas'),
+                'areaMetros'       => $this->enMetrosCuadrados(
                     (string) $lote->getAttribute('area_varas'),
                     $proyecto->varaEnMetros(),
                 ),
@@ -202,8 +232,95 @@ final readonly class PlanoDelProyecto
             'medidas'      => $this->medidasDe($proyecto),
             'sinDibujar'   => $sinDibujar,
             'resumen'      => $this->resumen($lotes),
+            'donaciones'   => $this->donacionesDe($proyecto),
+            'herencia'     => $this->herenciaDe($proyecto),
             'lotes'        => $lotesDibujados,
             'calles'       => $callesDibujadas,
+        ];
+    }
+
+    /**
+     * El cupo de donaciones, para que el plano sepa si dibuja el botón.
+     *
+     * Va en el payload y no se resuelve en el blade porque es una regla
+     * del negocio —cuántos lotes decidió regalar la lotificadora— y no una
+     * decisión de presentación. El botón es la consecuencia, no la regla.
+     *
+     * @return array{activas: bool, cupo: int, hechas: int, quedan: int, puede: bool}
+     */
+    private function donacionesDe(Proyecto $proyecto): array
+    {
+        return [
+            'activas' => $proyecto->donaLotes(),
+            'cupo'    => $proyecto->cupoDeDonaciones(),
+            'hechas'  => $proyecto->lotesDonados(),
+            'quedan'  => $proyecto->donacionesQueQuedan(),
+            'puede'   => $proyecto->puedeDonarOtroLote(),
+        ];
+    }
+
+    /**
+     * Lo que debe el contrato de este lote, o null si no hay nada que cobrar.
+     *
+     * Null en tres casos, y los tres son «acá no hay cartera»: el lote no
+     * tiene compromiso vigente, el compromiso no cuelga de una venta —un
+     * apartado, una donación— o la venta no dejó ni una cuota.
+     *
+     * ⚠️ Los números son DEL CONTRATO. Ver CarteraDelPlano: el recibo
+     * también lo es, y dos números de la misma pantalla que no quieren
+     * decir lo mismo son un error esperando a que alguien atienda apurado.
+     * Por eso viaja `lotes`: cuando son varios, el panel lo dice.
+     *
+     * @param array<int, array{saldo: string, vencidas: int, proximaCuota: string|null, alDia: bool}> $cartera
+     * @param array<int, int> $lotesPorVenta
+     *
+     * @return array{venta: int, contrato: string, lotes: int, saldo: string, proximaCuota: string|null, vencidas: int, alDia: bool, seCobra: bool}|null
+     */
+    private function carteraDe(?Compromiso $compromiso, array $cartera, array $lotesPorVenta): ?array
+    {
+        if (! $compromiso instanceof Compromiso) {
+            return null;
+        }
+
+        $id = $compromiso->getAttribute('venta_id');
+
+        if (! is_int($id) || ! array_key_exists($id, $cartera)) {
+            return null;
+        }
+
+        $venta = $compromiso->getRelationValue('venta');
+        $estado = $venta instanceof Venta ? $venta->getAttribute('estado') : null;
+        $contrato = $venta instanceof Venta ? $venta->getAttribute('numero_contrato') : null;
+
+        return [
+            'venta'        => $id,
+            'contrato'     => is_string($contrato) && $contrato !== '' ? $contrato : '—',
+            'lotes'        => $lotesPorVenta[$id] ?? 1,
+            'saldo'        => $cartera[$id]['saldo'],
+            'proximaCuota' => $cartera[$id]['proximaCuota'],
+            'vencidas'     => $cartera[$id]['vencidas'],
+            'alDia'        => $cartera[$id]['alDia'],
+            'seCobra'      => CarteraDelPlano::seCobra($estado instanceof EstadoVenta ? $estado : null),
+        ];
+    }
+
+    /**
+     * El cupo de herencia, para que el plano sepa si dibuja el botón.
+     *
+     * Gemelo de `donacionesDe()` y por la misma razón: cuántos lotes se
+     * guardan para la familia es una regla del negocio, no una decisión de
+     * presentación. El botón es la consecuencia.
+     *
+     * @return array{activa: bool, cupo: int, guardados: int, quedan: int, puede: bool}
+     */
+    private function herenciaDe(Proyecto $proyecto): array
+    {
+        return [
+            'activa'    => $proyecto->reservaLotes(),
+            'cupo'      => $proyecto->cupoDeReservas(),
+            'guardados' => $proyecto->lotesReservados(),
+            'quedan'    => $proyecto->reservasQueQuedan(),
+            'puede'     => $proyecto->puedeReservarOtroLote(),
         ];
     }
 
@@ -225,19 +342,36 @@ final readonly class PlanoDelProyecto
      * `factor` viaja calculado para que el navegador no tenga que saber si
      * hay que convertir o no: multiplicar por 1 no convierte nada.
      *
-     * @return array{enMetros: bool, varaEnMetros: float, factor: float, unidad: string, pie: string}
+     * @return array{enMetros: bool, varaEnMetros: float, factor: float, unidad: string, pie: string, area: string, areaCorta: string, areaAbreviada: string, porUnidad: string, dosUnidades: bool}
      */
     private function medidasDe(Proyecto $proyecto): array
     {
-        $enMetros = (bool) $proyecto->getAttribute('medidas_en_metros');
+        $unidadDelArea = $proyecto->unidadDeArea();
+
+        /*
+         * Un proyecto que trabaja en metros² ya tiene todo en metros: las
+         * cotas de los lados y el área. El toggle «mostrar las medidas en
+         * metros» es de los proyectos en varas², donde el plano viene
+         * acotado en una unidad y el negocio cobra en otra.
+         */
+        $enMetros = $unidadDelArea === UnidadDeArea::Metros
+            || (bool) $proyecto->getAttribute('medidas_en_metros');
+
         $vara = (float) $proyecto->varaEnMetros();
 
+        // `dosUnidades`: los m² al lado solo tienen sentido en varas². En
+        // un proyecto en metros² serian el mismo numero dos veces.
         return [
-            'enMetros'     => $enMetros,
-            'varaEnMetros' => $vara,
-            'factor'       => $enMetros ? $vara : 1.0,
-            'unidad'       => $enMetros ? 'm' : 'V',
-            'pie'          => $enMetros
+            'enMetros'      => $enMetros,
+            'varaEnMetros'  => $vara,
+            'factor'        => $enMetros ? $vara : 1.0,
+            'unidad'        => $enMetros ? 'm' : 'V',
+            'area'          => $unidadDelArea->plural(),
+            'areaCorta'     => $unidadDelArea->corta(),
+            'areaAbreviada' => $unidadDelArea->abreviada(),
+            'porUnidad'     => $unidadDelArea->porUnidad(),
+            'dosUnidades'   => $unidadDelArea !== UnidadDeArea::Metros,
+            'pie'           => $enMetros
                 ? 'Medidas en metros, tomadas del plano del topógrafo.'
                 : 'Medidas en varas, tomadas del plano del topógrafo.',
         ];

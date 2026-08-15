@@ -98,7 +98,12 @@ class ClienteResource extends Resource
     #[Override]
     public static function getGloballySearchableAttributes(): array
     {
-        return ['nombre'];
+        /*
+         * Las DOS columnas. `nombre_busqueda` atiende a quien teclea sin
+         * tildes —el caso de todos los dias— y `nombre` a quien las
+         * escribe. Filament arma un OR con la lista, asi que sale gratis.
+         */
+        return ['nombre', 'nombre_busqueda'];
     }
 
     /**

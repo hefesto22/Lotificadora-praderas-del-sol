@@ -53,14 +53,14 @@ final readonly class PlanoPublico
     /**
      * @return array{
      *     servicios: list<array{etiqueta: string, trazo: string}>,
-     *     colores: list<array{estado: string, etiqueta: string, relleno: string, borde: string, enLeyenda: bool}>,
+     *     colores: list<array{estado: string, etiqueta: string, relleno: string, borde: string}>,
      *     ubicacion: array{lat: string, lng: string, googleMaps: string, waze: string}|null,
      *     proyecto: array{nombre: string, municipio: string|null, departamento: string|null},
      *     viewBox: string,
      *     calco: string|null,
      *     hayGeometria: bool,
      *     esquematico: bool,
-     *     medidas: array{enMetros: bool, varaEnMetros: float, factor: float, unidad: string, pie: string},
+     *     medidas: array{enMetros: bool, varaEnMetros: float, factor: float, unidad: string, pie: string, area: string, areaCorta: string, areaAbreviada: string, porUnidad: string, dosUnidades: bool},
      *     disponibles: int,
      *     total: int,
      *     lotes: list<array{id: int, codigo: string, numero: string, rotulo: string, bloque: string, estado: string, etiqueta: string, color: string, puntos: string, centro: array{float, float}, area: string, areaFormateada: string, seCotiza: bool, clave: string, foto360: string|null, foto360Mini: string|null, foto360Marcas: list<array<string, mixed>>}>,
@@ -87,6 +87,18 @@ final readonly class PlanoPublico
             }
 
             /*
+             * El disfraz de la vidriera: reservado, donado y cancelado salen
+             * a la calle como VENDIDO. Ver EstadoLote::comoSeVeAfuera() —
+             * ahi esta el porque, y el aviso de que esto es SOLO la pintura.
+             *
+             * ⚠️ Va DESPUES del contador a proposito: `$estaLibre` se
+             * calcula con el estado de verdad. Si el disfraz llegara a
+             * mandar tambien ahi, la pagina diria menos disponibles de los
+             * que hay y estaria mintiendo hacia el otro lado.
+             */
+            $afuera = (EstadoLote::tryFrom($lote['estado']) ?? EstadoLote::Disponible)->comoSeVeAfuera();
+
+            /*
              * ⚠️ Acá se escribe el arreglo público, clave por clave. Lo que no
              * esté en esta lista NO sale de la lotificadora. En particular
              * `cliente` y `valor`, que sí vienen en `$lote`.
@@ -97,15 +109,16 @@ final readonly class PlanoPublico
                 'numero'         => $lote['numero'],
                 'rotulo'         => $lote['rotulo'],
                 'bloque'         => $lote['bloque'],
-                'estado'         => $lote['estado'],
-                'etiqueta'       => $lote['etiqueta'],
-                'color'          => $lote['color'],
+                'estado'         => $afuera->value,
+                'etiqueta'       => $afuera->etiqueta(),
+                'color'          => $afuera->colorHex(),
                 'puntos'         => $lote['puntos'],
                 'centro'         => $lote['centro'],
                 'area'           => $lote['areaVaras'],
                 'areaFormateada' => $this->comoArea(
                     $lote['areaVaras'],
-                    $medidas['enMetros'] ? $lote['areaMetros'] : null,
+                    $medidas['areaAbreviada'],
+                    $medidas['dosUnidades'] && $medidas['enMetros'] ? $lote['areaMetros'] : null,
                 ),
                 // Solo lo que está a la venta lleva precio. Ver el docblock.
                 'seCotiza' => $estaLibre,
@@ -160,13 +173,17 @@ final readonly class PlanoPublico
     // ─── Interno ──────────────────────────────────────────────────────
 
     /**
-     * «250.0000» se lee «250 vr²», y «312.5000» se lee «312.5 vr²».
+     * «250.0000» se lee «250 v²», y «312.5000» se lee «312.5 v²».
      *
      * Los ceros de relleno son ruido para quien mira un lote en el teléfono:
      * hacen parecer que la medida tiene una precisión que no le importa a
      * nadie. Los decimales que sí valen se conservan.
+     *
+     * `$unidad` viene del proyecto —hay desarrollos en varas² y otros en
+     * metros²— y `$enMetros` solo llega cuando hay DOS unidades que
+     * mostrar, que es cosa de los proyectos en varas².
      */
-    private function comoArea(string $varas, ?string $enMetros = null): string
+    private function comoArea(string $varas, string $unidad, ?string $enMetros = null): string
     {
         $texto = $varas;
 
@@ -174,36 +191,58 @@ final readonly class PlanoPublico
             $texto = rtrim(rtrim($texto, '0'), '.');
         }
 
-        $area = ($texto === '' ? '0' : $texto).' vr²';
+        $area = ($texto === '' ? '0' : $texto).' '.$unidad;
 
         /*
          * Los m² van AL LADO, nunca en lugar de las varas². Es como los
          * rotula el topografo en el plano (A=320.19m2 / 459.22v2), y es lo
          * unico honesto: el cliente compara la medida con la hoja impresa
-         * en metros, pero el precio que ve abajo es por vara².
+         * en metros, pero el precio que ve abajo es por vara². En un
+         * proyecto que YA trabaja en metros² no hay nada al lado que
+         * poner: seria el mismo numero dos veces.
          */
         return $enMetros === null ? $area : $area.' · '.$enMetros.' m²';
     }
 
     /**
-     * Los cuatro estados con sus dos colores, para que la pagina no los
-     * escriba a mano.
+     * Los estados que la calle ve, con sus dos colores, para que la pagina
+     * no los escriba a mano.
      *
      * Antes vivian en el CSS de la plantilla Y en la leyenda Y en el PNG de
      * WhatsApp. Tres listas que tienen que coincidir terminan no coincidiendo:
      * ahora salen del enum, que es donde se decide.
      *
-     * @return list<array{estado: string, etiqueta: string, relleno: string, borde: string, enLeyenda: bool}>
+     * Son TRES y no seis: reservado, donado y cancelado se pintan de vendido
+     * —ver EstadoLote::comoSeVeAfuera()— asi que aparecen una sola vez. De
+     * esta lista sale tambien la clase CSS de cada lote, de modo que un
+     * estado que no esta aca tampoco tiene con que pintarse: la leyenda y el
+     * dibujo no se pueden ir cada uno por su lado ni queriendo.
+     *
+     * @return list<array{estado: string, etiqueta: string, relleno: string, borde: string}>
      */
     private function colores(): array
     {
-        return array_map(static fn (EstadoLote $estado): array => [
-            'estado'    => $estado->value,
-            'etiqueta'  => $estado->etiqueta(),
-            'relleno'   => $estado->relleno(),
-            'borde'     => $estado->borde(),
-            'enLeyenda' => $estado->enLeyendaPublica(),
-        ], EstadoLote::cases());
+        $colores = [];
+
+        /*
+         * La clave del arreglo ES el filtro: los tres estados que se
+         * disfrazan escriben la misma entrada y la pisan con datos
+         * identicos. Sin un `if` que decida nada, y el orden queda el de
+         * la PRIMERA escritura —disponible, apartado, vendido—, que es el
+         * que la leyenda tiene que leer.
+         */
+        foreach (EstadoLote::cases() as $estado) {
+            $afuera = $estado->comoSeVeAfuera();
+
+            $colores[$afuera->value] = [
+                'estado'   => $afuera->value,
+                'etiqueta' => $afuera->etiqueta(),
+                'relleno'  => $afuera->relleno(),
+                'borde'    => $afuera->borde(),
+            ];
+        }
+
+        return array_values($colores);
     }
 
     /**

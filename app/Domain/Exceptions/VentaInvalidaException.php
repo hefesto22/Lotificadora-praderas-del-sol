@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Exceptions;
 
 use App\Domain\Enums\FormaDePago;
+use App\Domain\Enums\UnidadDeArea;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\TasaDeInteres;
 
@@ -85,10 +86,10 @@ final class VentaInvalidaException extends GrupoOlympoException
      * devolveria igual, pero una validacion que se puede hacer antes no
      * tiene por que hacerse despues.
      */
-    public static function porDescuentoSinMotivo(string $codigo, Monto $lista, Monto $pactado): self
+    public static function porDescuentoSinMotivo(string $codigo, Monto $lista, Monto $pactado, UnidadDeArea $unidad = UnidadDeArea::Varas): self
     {
         return new self(
-            "El lote {$codigo} se esta vendiendo a {$pactado->formateado()} la vara² cuando "
+            "El lote {$codigo} se esta vendiendo a {$pactado->formateado()} {$unidad->porUnidad()} cuando "
             ."el precio de lista es {$lista->formateado()}. Un precio menor se puede registrar, "
             .'pero hay que escribir el motivo del descuento: queda anotado con el usuario y la fecha.'
         );
@@ -108,13 +109,6 @@ final class VentaInvalidaException extends GrupoOlympoException
         );
     }
 
-    /**
-     * La red de seguridad del §8.3.4.
-     *
-     * Si el plan no suma exactamente el saldo, no se escribe ni una cuota.
-     * Un plan que no cierra produce un estado de cuenta que nunca llega a
-     * cero, y eso se descubre meses despues con dinero de por medio.
-     */
     /**
      * Las primas por lote no dan la prima del contrato.
      *
@@ -145,6 +139,13 @@ final class VentaInvalidaException extends GrupoOlympoException
         return new self("En el lote {$codigo}: {$mensaje}");
     }
 
+    /**
+     * La red de seguridad del §8.3.4.
+     *
+     * Si el plan no suma exactamente el saldo, no se escribe ni una cuota.
+     * Un plan que no cierra produce un estado de cuenta que nunca llega a
+     * cero, y eso se descubre meses despues con dinero de por medio.
+     */
     public static function porPlanQueNoCierra(Monto $sumaDeCuotas, Monto $saldo): self
     {
         return new self(

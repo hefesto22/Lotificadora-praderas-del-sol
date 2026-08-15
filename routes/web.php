@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\EstadoDeCuentaController;
+use App\Http\Controllers\ImprimirDevolucionController;
 use App\Http\Controllers\ImprimirReciboController;
 use App\Http\Controllers\PlanoImagenController;
 use App\Http\Controllers\PlanoPublicoController;
@@ -48,6 +49,13 @@ Route::middleware(UsuarioActivoDelPanel::class, SuspensionPorMora::class)
     ->group(function (): void {
         Route::get('recibo/{recibo}', ImprimirReciboController::class)->name('recibo');
         Route::get('estado-de-cuenta/{venta}', EstadoDeCuentaController::class)->name('estado-de-cuenta');
+
+        /*
+         * El papel de una SALIDA: la devolución de una seña (R14) y el acta
+         * de una rescisión de lote (R22). Uno solo para los dos porque
+         * contestan las mismas tres preguntas — ver la vista.
+         */
+        Route::get('devolucion/{devolucion}', ImprimirDevolucionController::class)->name('devolucion');
     });
 
 /*

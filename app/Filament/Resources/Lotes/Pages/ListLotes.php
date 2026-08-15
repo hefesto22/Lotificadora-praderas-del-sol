@@ -47,7 +47,7 @@ class ListLotes extends ListRecords
         $pestanas = ['todos' => Tab::make('Todos')->badge(fn (): int => Lote::query()->count())];
 
         foreach (EstadoLote::cases() as $estado) {
-            $pestanas[$estado->value] = Tab::make($estado->etiqueta())
+            $pestanas[$estado->value] = Tab::make($estado->etiquetaInterna())
                 ->modifyQueryUsing(fn (Builder $query): Builder => $query->where('estado', $estado->value))
                 ->badge(fn (): int => Lote::query()->where('estado', $estado->value)->count())
                 ->badgeColor($estado->color());

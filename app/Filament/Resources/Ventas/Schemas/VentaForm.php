@@ -13,7 +13,9 @@ use App\Domain\Ventas\PlanDeCuotas;
 use App\Filament\Schemas\Components\DNIField;
 use App\Filament\Schemas\Components\MayusculasField;
 use App\Filament\Schemas\Components\MontoField;
+use App\Filament\Schemas\Components\PrecioPorAreaField;
 use App\Filament\Schemas\Components\TelefonoHondurasField;
+use App\Filament\Support\Unidades;
 use App\Models\Cliente;
 use App\Models\Lote;
 use App\Models\Proyecto;
@@ -32,6 +34,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Builder;
+use Livewire\Component;
 use Throwable;
 
 /**
@@ -119,7 +122,8 @@ class VentaForm
                                                 $set('motivo_descuento', null);
                                             }),
 
-                                        MontoField::make('precio_vara', 'Precio por vara²')
+                                        PrecioPorAreaField::make('precio_vara')
+                                            ->label(static fn (Get $get, ?Component $livewire): string => 'Precio '.Unidades::delFormulario($get, null, $livewire, '../../proyecto_id')->porUnidad())
                                             ->live(onBlur: true)
                                             ->columnSpan(3),
 
@@ -431,15 +435,6 @@ class VentaForm
     // ─── Opciones ─────────────────────────────────────────────────────
 
     /**
-     * Los lotes vendibles del proyecto elegido.
-     *
-     * `../../proyecto_id` y no `proyecto_id`: esto corre DENTRO de una fila
-     * del repetidor, y ahi el scope es la fila. Dos saltos suben al
-     * formulario — uno sale del item, el otro del repetidor.
-     *
-     * @return array<int, string>
-     */
-    /**
      * Los clientes, menos quien ya es titular.
      *
      * @return array<int, string>
@@ -476,6 +471,15 @@ class VentaForm
         return $opciones;
     }
 
+    /**
+     * Los lotes vendibles del proyecto elegido.
+     *
+     * `../../proyecto_id` y no `proyecto_id`: esto corre DENTRO de una fila
+     * del repetidor, y ahi el scope es la fila. Dos saltos suben al
+     * formulario — uno sale del item, el otro del repetidor.
+     *
+     * @return array<int, string>
+     */
     private static function lotesDisponibles(Get $get): array
     {
         $proyecto = $get('../../proyecto_id');
@@ -484,12 +488,14 @@ class VentaForm
             return [];
         }
 
+        $unidad = Unidades::de(Proyecto::query()->whereKey($proyecto)->first());
+
         return self::vendibles()
             ->where('proyecto_id', $proyecto)
             ->get()
             ->mapWithKeys(static fn (Lote $lote): array => [
                 (int) $lote->getKey() => sprintf(
-                    '%s — %s vr² — %s la vara²%s',
+                    '%s — %s '.$unidad->abreviada().' — %s '.$unidad->porUnidad().'%s',
                     (string) $lote->getAttribute('codigo'),
                     (string) $lote->getAttribute('area_varas'),
                     new Monto((string) $lote->getAttribute('precio_vara'))->formateado(),

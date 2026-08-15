@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Domain\Enums\EstadoLote;
+use App\Domain\Enums\UnidadDeArea;
 use App\Domain\Exceptions\LoteInmutableException;
 use App\Domain\Exceptions\ValueObjectInvalidoException;
 use App\Domain\Plano\Foto360;
@@ -203,7 +204,23 @@ class Lote extends Model
     }
 
     /**
-     * 12B — el número de lote con la letra de su bloque pegada.
+     * La unidad de área del proyecto de este lote.
+     *
+     * Va por la RELACIÓN, no por una consulta fresca como
+     * calcularCodigo(): las tablas la piden una vez por fila y sin
+     * `with('proyecto')` esto es el N+1 del §4.L4. Los listados que la
+     * usan cargan la relación; el `?? UnidadDeArea::Varas` es para el
+     * modelo suelto de un test, no una excusa para no cargarla.
+     */
+    public function unidadDeArea(): UnidadDeArea
+    {
+        $proyecto = $this->proyecto;
+
+        return $proyecto instanceof Proyecto ? $proyecto->unidadDeArea() : UnidadDeArea::Varas;
+    }
+
+    /**
+     * B-12 — el lote como lo dice la gente.
      *
      * Es lo que se rotula EN EL MAPA, y es distinto del código a
      * propósito. El código (RPS-B-012) es para el contrato, el recibo y
@@ -211,12 +228,19 @@ class Lote extends Model
      * trescientos lotes encima: un "12" solo no dice de qué manzana es, y
      * el código completo no entra.
      *
+     * ⚠️ El 13-ago-2026 esto devolvía `12B` —la letra pegada atrás— por
+     * ser un carácter más corto. Lo pidió cambiado Mauricio, y tenía
+     * razón: la lotificadora dice «el A-1», «el H-9», los expedientes de
+     * la cartera vieja están escritos así y el código del sistema también
+     * va manzana primero. Un mapa que rotula al revés de como habla la
+     * oficina obliga a traducir en la cabeza en cada consulta.
+     *
      * Sin relleno de ceros: acá manda que se lea de un vistazo, no que
      * ordene alfabéticamente.
      */
     public static function componerRotulo(string $bloque, string $numero): string
     {
-        return $numero.$bloque;
+        return $bloque.'-'.$numero;
     }
 
     // ─── Dinero ───────────────────────────────────────────────────────
@@ -394,9 +418,6 @@ class Lote extends Model
         return $this->belongsTo(Proyecto::class);
     }
 
-    /**
-     * @return BelongsTo<Bloque, $this>
-     */
     /**
      * ¿Este lote tiene foto 360 cargada?
      *

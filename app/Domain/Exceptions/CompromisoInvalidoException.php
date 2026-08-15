@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Exceptions;
 
 use App\Domain\Enums\FormaDePago;
+use App\Domain\Enums\UnidadDeArea;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\TasaDeInteres;
 
@@ -139,16 +140,57 @@ final class CompromisoInvalidoException extends GrupoOlympoException
     }
 
     /**
+     * Solo se corrige lo que esta donado.
+     */
+    public static function porDeshacerLoQueNoEsDonacion(string $codigo, string $estado): self
+    {
+        return new self(
+            "El lote {$codigo} esta {$estado}, no donado. Corregir una donacion es sacarle ".
+            'la marca a un lote que quedo registrado como donado por error; para cualquier otro '.
+            'estado hay un camino propio.'
+        );
+    }
+
+    /**
+     * Corregir una donacion sin decir por que.
+     */
+    public static function porDeshacerDonacionSinMotivo(string $codigo): self
+    {
+        return new self(
+            "Hay que escribir por que se le quita la donacion al lote {$codigo}. Es lo unico ".
+            'que despues explica por que un lote figuro como regalado y volvio al inventario.'
+        );
+    }
+
+    /**
+     * El cupo de donaciones del desarrollo ya se cumplio.
+     *
+     * Es una guarda del DOMINIO y no solo del boton: el plano esconde el
+     * boton cuando el cupo se llena, pero donar tambien se puede llamar
+     * desde un seeder, desde tinker o desde la proxima pantalla que
+     * alguien escriba. Lo que decide cuantos lotes se regalan es una
+     * decision de la lotificadora, no el camino por el que se entra.
+     */
+    public static function porCupoDeDonacionesLleno(string $codigo, int $cupo, int $hechas): self
+    {
+        return new self(
+            "El lote {$codigo} no se puede donar: este desarrollo declaro {$cupo} donaciones ".
+            "y ya lleva {$hechas}. Si de verdad se va a regalar otro, primero hay que subir el ".
+            'numero en la ficha del proyecto, pestaña Estado, seccion Donaciones.'
+        );
+    }
+
+    /**
      * R4: un descuento sin motivo no se graba.
      *
      * La contratante contesto «se negocia caso por caso», y lo que aporta
      * el sistema es que despues se pueda saber quien autorizo que. Sin
      * motivo escrito, el descuento es indistinguible de un error de tipeo.
      */
-    public static function porDescuentoSinMotivo(string $codigo, Monto $lista, Monto $pactado): self
+    public static function porDescuentoSinMotivo(string $codigo, Monto $lista, Monto $pactado, UnidadDeArea $unidad = UnidadDeArea::Varas): self
     {
         return new self(
-            "El lote {$codigo} se esta vendiendo a {$pactado->formateado()} la vara² cuando ".
+            "El lote {$codigo} se esta vendiendo a {$pactado->formateado()} {$unidad->porUnidad()} cuando ".
             "el precio de lista es {$lista->formateado()}. Un precio menor se puede registrar, ".
             'pero hay que escribir el motivo: queda anotado con el usuario y la fecha.'
         );

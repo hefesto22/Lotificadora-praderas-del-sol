@@ -471,7 +471,13 @@
 @endif
 
 <header>
-    @if ($logo)
+    {{-- La vidriera lleva el logo del DESARROLLO, que es lo que el cliente
+         busca cuando abre el enlace que le mandaron por WhatsApp. El de la
+         inmobiliaria queda de respaldo si el desarrollo no tiene el suyo
+         cargado todavía. --}}
+    @if ($logoDelProyecto ?? null)
+        <img src="{{ $logoDelProyecto }}" alt="">
+    @elseif ($logo)
         <img src="{{ $logo }}" alt="">
     @endif
     <div>
@@ -548,14 +554,12 @@
         <p style="padding:2rem;text-align:center;color:var(--suave)">El plano de este proyecto todavía no está dibujado.</p>
     @endif
 
-    {{-- Los mismos tonos del plano, del mismo lugar. Cancelado no se
-         explica: para el cliente solo significa «no está a la venta», y
-         nombrarlo invita a preguntar por qué. --}}
+    {{-- Los mismos tonos del plano, del mismo lugar, y ya vienen filtrados:
+         reservado, donado y cancelado salen pintados de vendido, así que la
+         lista trae tres y no seis. Lo decide el enum, no esta plantilla. --}}
     <div class="leyenda">
         @foreach ($plano['colores'] as $tono)
-            @if ($tono['enLeyenda'])
-                <span><i class="punto" style="background:{{ $tono['relleno'] }};box-shadow:0 0 0 2px {{ $tono['borde'] }}"></i> <b>{{ $tono['etiqueta'] }}</b></span>
-            @endif
+            <span><i class="punto" style="background:{{ $tono['relleno'] }};box-shadow:0 0 0 2px {{ $tono['borde'] }}"></i> <b>{{ $tono['etiqueta'] }}</b></span>
         @endforeach
     </div>
 </div>

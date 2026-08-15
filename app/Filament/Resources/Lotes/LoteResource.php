@@ -137,7 +137,7 @@ class LoteResource extends Resource
 
         return [
             'Proyecto' => (string) $record->proyecto?->getAttribute('nombre'),
-            'Estado'   => $estado instanceof EstadoLote ? $estado->etiqueta() : '—',
+            'Estado'   => $estado instanceof EstadoLote ? $estado->etiquetaInterna() : '—',
             'Valor'    => 'L '.number_format((float) $record->getAttribute('valor'), 2),
         ];
     }

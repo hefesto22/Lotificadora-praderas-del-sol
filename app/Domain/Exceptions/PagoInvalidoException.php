@@ -35,6 +35,26 @@ final class PagoInvalidoException extends GrupoOlympoException
         );
     }
 
+    /**
+     * Un lote rescindido no se cobra, aunque le quede una cuota con saldo.
+     *
+     * La cuota pagada a medias sobrevive a la rescision —tiene un recibo
+     * encima— y por eso el lote sigue «debiendo» a los ojos de una consulta
+     * ingenua. Sin esta guarda, la ventanilla podria emitirle un recibo
+     * numerado a alguien por un terreno que ya devolvio.
+     *
+     * Va en el Service y no solo en la pantalla: el modal de cobro ya los
+     * filtra, pero el plano y cualquier pantalla futura entran por acá.
+     */
+    public static function porLoteRescindido(string $codigo): self
+    {
+        return new self(
+            "El lote {$codigo} esta rescindido: ya no es de este cliente y no se le puede cobrar. ".
+            'Si le queda un saldo en pantalla es de una cuota vieja que se conserva como historia; '.
+            'lo que paso con esa plata esta en el acta de rescision.'
+        );
+    }
+
     public static function porNoDeberNada(string $codigo): self
     {
         return new self(

@@ -7,6 +7,7 @@ use App\Domain\Plano\Dxf\ArchivoDxfInvalidoException;
 use App\Domain\Plano\Dxf\ExtractorDeGeometria;
 use App\Domain\Plano\Dxf\LectorDxf;
 use App\Domain\Plano\Dxf\PoligonoDxf;
+use App\Domain\Plano\Dxf\RotuloDxf;
 use App\Domain\Plano\Dxf\UnidadDxf;
 
 /**
@@ -286,6 +287,61 @@ describe('Extractor — rotulos', function (): void {
 
         expect($rotulo->texto)->toBe("LOTE 42\n250.00 m2")
             ->and($rotulo->numeroDeLote())->toBe('42');
+    });
+
+    /*
+    | 🔴 El bug del 13-ago-2026, con el plano de EL BAMBU. Adentro de cada
+    | lote hay tres o cuatro textos —el numero, el area en m2, el area en
+    | varas2 y las medidas de los lados— y gana el que quede mas cerca del
+    | centro. Buscando "el primer numero que aparezca" en cualquier parte
+    | del texto, "A=157.63m2" daba el lote 63 y "17.40m" el lote 40-M: de
+    | 84 lotes quedaba UNO con el numero correcto.
+    */
+    test('un area, una medida o un nombre no son un numero de lote', function (): void {
+        $archivo = new LectorDxf()->leer(dxfConEntidades([
+            [0, 'TEXT'], [8, 'TEXTOS'], [10, '0'], [20, '0'], [40, '2'], [1, 'A=157.63m2'],
+            [0, 'TEXT'], [8, 'TEXTOS'], [10, '0'], [20, '0'], [40, '2'], [1, '17.40m'],
+            [0, 'TEXT'], [8, 'TEXTOS'], [10, '0'], [20, '0'], [40, '2'], [1, '521.563V2'],
+            [0, 'TEXT'], [8, 'TEXTOS'], [10, '0'], [20, '0'], [40, '2'], [1, '250 m2'],
+            [0, 'TEXT'], [8, 'TEXTOS'], [10, '0'], [20, '0'], [40, '2'], [1, 'AREA MUNICIPAL'],
+        ]));
+
+        $numeros = array_map(
+            static fn (RotuloDxf $rotulo): ?string => $rotulo->numeroDeLote(),
+            new ExtractorDeGeometria()->rotulos($archivo)
+        );
+
+        expect($numeros)->toBe([null, null, null, null, null]);
+    });
+
+    /*
+    | La letra de la manzana se lee APARTE del numero, y por posicion:
+    | adelante es el bloque ("A1"), atras es el sufijo de una subdivision
+    | ("12B"), que es formato que el sistema ya admitia. Las palabras que
+    | quieren decir "lote" no son manzana; una "L" sola si, porque "L-12"
+    | da el numero 12 lo mismo leyendola de una forma que de la otra.
+    */
+    test('la manzana pegada al numero se lee aparte del numero', function (): void {
+        $archivo = new LectorDxf()->leer(dxfConEntidades([
+            [0, 'TEXT'], [8, 'TEXTOS'], [10, '0'], [20, '0'], [40, '2'], [1, 'A1'],
+            [0, 'TEXT'], [8, 'TEXTOS'], [10, '0'], [20, '0'], [40, '2'], [1, 'B-7'],
+            [0, 'TEXT'], [8, 'TEXTOS'], [10, '0'], [20, '0'], [40, '2'], [1, '12'],
+            [0, 'TEXT'], [8, 'TEXTOS'], [10, '0'], [20, '0'], [40, '2'], [1, '12B'],
+            [0, 'TEXT'], [8, 'TEXTOS'], [10, '0'], [20, '0'], [40, '2'], [1, 'LOTE 12'],
+        ]));
+
+        $leidos = array_map(
+            static fn (RotuloDxf $rotulo): array => [$rotulo->bloqueDeLote(), $rotulo->numeroDeLote()],
+            new ExtractorDeGeometria()->rotulos($archivo)
+        );
+
+        expect($leidos)->toBe([
+            ['A', '1'],
+            ['B', '7'],
+            [null, '12'],
+            [null, '12-B'],
+            [null, '12'],
+        ]);
     });
 });
 

@@ -34,6 +34,39 @@ class ReciboInfolist
                             ->weight('bold')
                             ->formatStateUsing(static fn (Recibo $record): string => $record->folio()),
 
+                        /*
+                         * Los datos fiscales salen del RECIBO y no de la
+                         * facturacion de hoy: son los que llevaba impresos
+                         * ese papel. Por eso esta ficha contesta «¿con que
+                         * autorizacion se emitio esta?» sin que nadie tenga
+                         * que cruzar dos pantallas — que es la primera
+                         * pregunta de una fiscalizacion.
+                         *
+                         * Los renglones no salen cuando es recibo interno:
+                         * cuatro campos vacios en la ficha de todos los dias
+                         * ensucian la pantalla del caso normal.
+                         */
+                        TextEntry::make('numero_factura')
+                            ->label('Factura')
+                            ->weight('bold')
+                            ->copyable()
+                            ->visible(static fn (Recibo $record): bool => $record->esFactura()),
+
+                        TextEntry::make('cai')
+                            ->label('CAI')
+                            ->columnSpanFull()
+                            ->visible(static fn (Recibo $record): bool => $record->esFactura()),
+
+                        TextEntry::make('rango_desde')
+                            ->label('Rango autorizado')
+                            ->state(static fn (Recibo $record): ?string => $record->rangoAutorizado())
+                            ->visible(static fn (Recibo $record): bool => $record->esFactura()),
+
+                        TextEntry::make('fecha_limite_emision')
+                            ->label('Fecha límite de emisión')
+                            ->date('d/m/Y')
+                            ->visible(static fn (Recibo $record): bool => $record->esFactura()),
+
                         TextEntry::make('fecha')
                             ->label('Fecha')
                             ->date('d/m/Y'),

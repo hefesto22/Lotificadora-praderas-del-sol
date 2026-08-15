@@ -6,6 +6,7 @@ namespace App\Filament\Resources\Proyectos\RelationManagers;
 
 use App\Filament\Schemas\Components\AreaField;
 use App\Filament\Schemas\Components\MayusculasField;
+use App\Filament\Support\Unidades;
 use BackedEnum;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
@@ -15,6 +16,8 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Override;
 
 /**
@@ -80,6 +83,12 @@ class BloquesRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('nombre')
+            /*
+            | with('proyecto'): la unidad del área se resuelve por fila y
+            | sale del proyecto. Sin esto son 25 consultas por página
+            | (§4.L4). Ver App\Filament\Support\Unidades.
+            */
+            ->modifyQueryUsing(static fn (Builder $query): Builder => $query->with('proyecto'))
             ->columns([
                 TextColumn::make('nombre')
                     ->label('Bloque')
@@ -100,7 +109,7 @@ class BloquesRelationManager extends RelationManager
 
                 TextColumn::make('area_total_varas')
                     ->label('Área del plano')
-                    ->suffix(' varas²')
+                    ->suffix(static fn (?Model $record): string => ' '.Unidades::de($record)->plural())
                     ->alignEnd()
                     ->placeholder('—'),
             ])

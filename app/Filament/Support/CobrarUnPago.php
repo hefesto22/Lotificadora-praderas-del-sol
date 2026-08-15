@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Filament\Support;
 
+use App\Domain\Enums\EstadoCompromiso;
 use App\Domain\Enums\EstadoVenta;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\ModalidadDeReprogramacion;
 use App\Domain\Exceptions\GrupoOlympoException;
+use App\Domain\Facturacion\ConsumoDeFacturas;
+use App\Domain\Facturacion\EstadoDelTalonario;
 use App\Domain\Pagos\EfectoDelAbono;
 use App\Domain\Pagos\RegistroDePagos;
 use App\Domain\ValueObjects\Monto;
@@ -15,6 +18,8 @@ use App\Filament\Schemas\Components\MontoField;
 use App\Models\Cliente;
 use App\Models\Compromiso;
 use App\Models\Cuota;
+use App\Models\Facturacion;
+use App\Models\Proyecto;
 use App\Models\Recibo;
 use App\Models\Reprogramacion;
 use App\Models\Venta;
@@ -36,6 +41,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Collection as Cuotas;
+use Illuminate\Support\Collection;
 use Illuminate\Support\HtmlString;
 
 /**
@@ -119,8 +125,310 @@ final readonly class CobrarUnPago
     }
 
     /**
+     * Las MISMAS dos acciones, pero abiertas desde el plano.
+     *
+     * Lo pidió Mauricio el 13-ago-2026: «cuando ya esté vendido, que
+     * aparezca para pagar la cuota desde acá, o abonar a capital; así se
+     * maneja mejor todo desde acá». Es el mismo argumento que ya justificó
+     * vender desde el plano: quien cobra abre el plano, no la lista de
+     * ventas, y hacerlo navegar hasta el expediente le hace perder de
+     * vista el lote que tenía en pantalla.
+     *
+     * ⚠️ NO ES OTRO MODAL. `campos()`, `valoresIniciales()` y `registrar()`
+     * son exactamente los mismos que usan la tabla de Ventas y el
+     * expediente; lo único distinto es de dónde sale la venta. Copiar el
+     * modal habría dejado TRES pantallas que tienen que decir lo mismo, y
+     * este archivo existe justamente porque ya eran dos y se separaron.
+     *
+     * Lo que cambia de dónde sale la venta: allá Filament inyecta el
+     * `$record`, que YA es una Venta. Acá el record es el proyecto y el
+     * lote llega en `$arguments`, así que hay que subir del lote a su
+     * compromiso vigente y de ahí a la venta.
+     */
+    public static function desdeElPlano(): Action
+    {
+        return self::modalDelPlano('cobrarDesdeElPlano', ModoDeCobro::Cuota)
+            ->label('Registrar un pago')
+            ->icon(Heroicon::OutlinedBanknotes)
+            ->color('success');
+    }
+
+    /**
+     * 🔴 El abono desde el plano, con el MISMO dueño que en el expediente.
+     *
+     * R21 dice que el receptor cobra y la administradora reprograma. Que el
+     * botón salga en otra pantalla no cambia quién puede apretarlo: acá se
+     * verifica igual, y adentro de `->action()` —no solo al dibujarlo—,
+     * porque una acción de Filament se puede montar por URL.
+     */
+    public static function abonoDesdeElPlano(): Action
+    {
+        return self::modalDelPlano('abonarDesdeElPlano', ModoDeCobro::Abono)
+            ->label('Abonar a capital')
+            ->icon(Heroicon::OutlinedArrowTrendingDown)
+            ->color('primary');
+    }
+
+    /**
+     * ¿Este usuario puede abonar a capital? La pregunta de R21, para afuera.
+     *
+     * La expone el plano para no dibujar un botón que después va a rebotar.
+     * El borde de verdad sigue estando adentro de `->action()`.
+     */
+    public static function seLePermiteAbonar(): bool
+    {
+        return self::puedeReprogramar();
+    }
+
+    /**
+     * El modal del plano: el de siempre, con la venta resuelta desde el lote.
+     */
+    private static function modalDelPlano(string $nombre, ModoDeCobro $porDefecto): Action
+    {
+        return Action::make($nombre)
+            ->modalHeading('Registrar un pago')
+            ->modalSubmitActionLabel('Registrar y emitir el recibo')
+            ->modalWidth('2xl')
+            ->fillForm(static function (array $arguments) use ($porDefecto): array {
+                $venta = self::ventaDelLote($arguments);
+
+                return $venta instanceof Venta ? new self($venta)->valoresIniciales($porDefecto) : [];
+            })
+            ->schema(static function (array $arguments): array {
+                $venta = self::ventaDelLote($arguments);
+
+                if (! $venta instanceof Venta) {
+                    return [];
+                }
+
+                return [...self::avisoDelPapel($venta), ...self::avisoDelTalonario($venta), ...self::avisoDelContrato($venta), ...new self($venta)->campos()];
+            })
+            ->action(static function (array $arguments, array $data) use ($porDefecto): void {
+                $venta = self::ventaDelLote($arguments);
+
+                if (! $venta instanceof Venta) {
+                    Notification::make()
+                        ->title('No se encontró el contrato de ese lote')
+                        ->body('El lote no tiene una venta vigente detrás. Abrí su expediente para ver qué pasó.')
+                        ->danger()
+                        ->send();
+
+                    return;
+                }
+
+                // El borde de R21, acá y no solo en el boton.
+                if ($porDefecto === ModoDeCobro::Abono && ! self::puedeReprogramar()) {
+                    Notification::make()
+                        ->title('No se registró el movimiento')
+                        ->body('Abonar a capital reprograma el plan de cuotas y eso lo hace la administradora.')
+                        ->danger()
+                        ->persistent()
+                        ->send();
+
+                    return;
+                }
+
+                new self($venta)->registrar($data);
+            });
+    }
+
+    /**
+     * Del lote que se tocó en el plano a la venta que lo lleva.
+     *
+     * Se sube por el compromiso VIGENTE, que es el camino que el repo ya
+     * usa —`RegistroDeCompromisos::vigenteDe()`—: no hay relación directa
+     * de lote a venta, y no la hay a propósito, porque un lote pasa por
+     * varios compromisos a lo largo de su vida y solo uno está abierto.
+     *
+     * Devuelve null cuando no hay nada que cobrar: un lote libre, uno
+     * apartado —el apartado no tiene venta— o uno donado.
+     *
+     * @param array<string, mixed> $arguments
+     */
+    private static function ventaDelLote(array $arguments): ?Venta
+    {
+        $lote = $arguments['lote'] ?? null;
+
+        if (! is_int($lote) && ! is_string($lote)) {
+            return null;
+        }
+
+        $venta = Compromiso::query()
+            ->where('lote_id', '=', (int) $lote)
+            ->vigentes()
+            ->with('venta')
+            ->first()?->getRelationValue('venta');
+
+        return $venta instanceof Venta && self::seLePuedeCobrar($venta) ? $venta : null;
+    }
+
+    /**
+     * 🔴 «Este contrato lleva tres lotes», dicho antes de cobrar.
+     *
+     * El aviso que hace que esto se pueda abrir desde un lote sin mentir.
+     * El recibo es del CONTRATO —un contrato de varios lotes se cobra en
+     * uno solo, y por eso `Recibo::compromiso_id` queda vacío a
+     * propósito—, así que quien entró haciendo clic en RPS-C-009 tiene que
+     * enterarse de que el papel que va a imprimir también cubre C-010 y
+     * C-011. Sin esta línea, el mismo gesto significa dos cosas distintas
+     * según por dónde se haya entrado.
+     *
+     * En un contrato de un solo lote —la mayoría— no aparece nada: no hay
+     * nada que aclarar y una advertencia de más se deja de leer.
+     *
+     * @return list<Component>
+     */
+    /**
+     * 🔴 QUE PAPEL VA A SALIR, DICHO ANTES DE COBRAR.
+     *
+     * ═══ DE DONDE SALIO ESTO ═══
+     *
+     * Del ensayo en pantalla del 14-ago-2026. Se cobro una cuota de un
+     * desarrollo que factura con CAI y el papel salio como **recibo interno**,
+     * sin factura y sin un solo mensaje. El correlativo del SAR ni se consumio
+     * ni se salteo: la emision simplemente no ocurrio.
+     *
+     * Eso es peor que un error. Un error se ve; esto le entrega al cliente el
+     * documento equivocado y nadie se entera hasta que lo pregunta el SAR.
+     * `ConsumoDeFacturas` tiene tres salidas que devuelven null en silencio
+     * —proyecto nulo, facturacion nula, facturacion apagada— y son correctas
+     * como comportamiento, pero **invisibles** en el momento en que importan.
+     *
+     * ═══ POR QUE UN RENGLON QUE SIEMPRE ESTA ═══
+     *
+     * Contra la regla de que un aviso permanente se deja de leer: esto **no
+     * es un aviso, es un dato del formulario**, como «Total a cobrar». Quien
+     * cobra tiene que saber que va a imprimir antes de apretar el boton, no
+     * despues de entregarlo.
+     *
+     * Y el tercer caso es el que justifica todo: cuando el desarrollo TIENE
+     * facturacion configurada pero hoy no puede emitir, el sistema se
+     * contradice a si mismo — ahi el renglon se pone rojo y lo dice.
+     *
+     * ⚠️ Pregunta con `puedeEmitir()`, que NO consume correlativo. Llamar a
+     * `ConsumoDeFacturas` para previsualizar quemaria un numero del SAR cada
+     * vez que alguien abre el modal y lo cierra.
+     *
+     * @return list<Component>
+     */
+    private static function avisoDelPapel(Venta $venta): array
+    {
+        /*
+         * 🔴 Por `facturacionDe()` y NO por `$venta->proyecto?->facturacion`.
+         * Es exactamente el error que este aviso existe para hacer visible: el
+         * modelo que llega de una tabla puede venir con columnas de menos, y
+         * preguntarle a él daria «recibo interno» sin contradiccion aparente
+         * —justo el silencio que hay que romper—. El aviso tiene que ver lo
+         * MISMO que va a ver el dominio al emitir, o miente con confianza.
+         */
+        $proyecto = $venta->proyecto;
+        $facturacion = app(ConsumoDeFacturas::class)->facturacionDe($proyecto);
+        $configurada = Proyecto::query()->whereKey($proyecto?->getKey())->value('facturacion_id') !== null;
+        $puede = $facturacion instanceof Facturacion && $facturacion->puedeEmitir();
+
+        if ($configurada && ! $puede) {
+            return [
+                Placeholder::make('papel')
+                    ->label('⚠️ Ojo con el papel')
+                    ->content(sprintf(
+                        'Este desarrollo está configurado para facturar con CAI (%s), pero HOY no puede '.
+                        'emitir: la facturación está apagada, o no tiene una autorización vigente. '.
+                        'El papel va a salir como RECIBO INTERNO, sin valor fiscal. '.
+                        'Revisá Administración → Facturación antes de cobrar.',
+                        $facturacion?->getAttribute('nombre') ?? 'sin nombre',
+                    ))
+                    ->columnSpanFull(),
+            ];
+        }
+
+        return [
+            Placeholder::make('papel')
+                ->label('Papel que sale')
+                ->content($puede
+                    ? sprintf('FACTURA con CAI — %s', $facturacion?->getAttribute('nombre') ?? '')
+                    : 'Recibo interno — comprobante de caja, sin valor fiscal')
+                ->columnSpanFull(),
+        ];
+    }
+
+    /**
+     * El aviso de que el talonario se acaba, en el momento del cobro.
+     *
+     * ═══ POR QUE TAMBIEN ACA, Y NO SOLO EN EL ESCRITORIO ═══
+     *
+     * Porque este es el unico momento en que la persona que puede hacer algo
+     * al respecto esta mirando. El widget del Escritorio lo ve quien abre el
+     * sistema de mañana; el que se queda con un cliente enfrente y sin poder
+     * emitir el papel es quien esta cobrando ahora.
+     *
+     * Solo aparece si ESTE desarrollo factura y su talonario esta en
+     * problemas. En Praderas —que emite recibo interno— no sale nunca.
+     *
+     * @return list<Component>
+     */
+    private static function avisoDelTalonario(Venta $venta): array
+    {
+        // Misma relectura que el aviso del papel, y por la misma razon.
+        $facturacion = app(ConsumoDeFacturas::class)->facturacionDe($venta->proyecto);
+
+        if (! $facturacion instanceof Facturacion) {
+            return [];
+        }
+
+        $estado = EstadoDelTalonario::de($facturacion);
+
+        if (! $estado->hayQueAvisar()) {
+            return [];
+        }
+
+        return [
+            Placeholder::make('talonario')
+                ->label($estado->esUnParo() ? 'No se puede facturar' : 'El talonario se está acabando')
+                ->content($estado->titular().'. '.$estado->detalle())
+                ->columnSpanFull(),
+        ];
+    }
+
+    private static function avisoDelContrato(Venta $venta): array
+    {
+        $codigos = $venta->compromisos()
+            ->with('lote')
+            ->get()
+            // Los rescindidos afuera: nombrarlos aca diria que el contrato
+            // lleva tres lotes cuando ya lleva dos.
+            ->reject(static fn (Compromiso $compromiso): bool => $compromiso->getAttribute('estado') === EstadoCompromiso::Rescindido)
+            ->map(static fn (Compromiso $compromiso): string => (string) $compromiso->lote?->getAttribute('codigo'))
+            ->filter()
+            ->values()
+            ->all();
+
+        if (count($codigos) < 2) {
+            return [];
+        }
+
+        return [
+            Placeholder::make('lotes_del_contrato')
+                ->label('Ojo: este contrato lleva '.count($codigos).' lotes')
+                ->content(implode(' · ', $codigos).'. El recibo los cubre a todos.'),
+        ];
+    }
+
+    /**
      * La única definición del modal. Las dos acciones de arriba son esto con
      * otra etiqueta, otro permiso y otro valor inicial del toggle.
+     *
+     * ═══ 🔴 LOS AVISOS FALTABAN ACA ═══
+     *
+     * Hasta el 14-ago-2026 este schema era solo `campos()`, y los avisos
+     * —qué papel sale, el talonario que se acaba— vivían **únicamente en el
+     * modal del plano**. O sea: no se veían ni desde la tabla de Ventas ni
+     * desde el expediente, que es por donde se cobra todos los días.
+     *
+     * Lo agarró el ensayo en pantalla, no un test: un modal que se arma en
+     * dos lugares distintos se separa solo, y el día que se separa uno de los
+     * dos le miente a alguien. El aviso del CONTRATO sigue siendo solo del
+     * plano, y eso sí es a propósito: acá el listado de lotes ya está a la
+     * vista.
      */
     private static function modal(string $nombre, ModoDeCobro $porDefecto): Action
     {
@@ -129,7 +437,11 @@ final readonly class CobrarUnPago
             ->modalSubmitActionLabel('Registrar y emitir el recibo')
             ->modalWidth('2xl')
             ->fillForm(static fn (Venta $record): array => new self($record)->valoresIniciales($porDefecto))
-            ->schema(static fn (Venta $record): array => new self($record)->campos())
+            ->schema(static fn (Venta $record): array => [
+                ...self::avisoDelPapel($record),
+                ...self::avisoDelTalonario($record),
+                ...new self($record)->campos(),
+            ])
             ->action(static function (Venta $record, array $data): void {
                 new self($record)->registrar($data);
             });
@@ -1233,6 +1545,39 @@ final readonly class CobrarUnPago
     // ─── Los lotes y sus saldos ───────────────────────────────────────
 
     /**
+     * 🔴 Los lotes del contrato, SIEMPRE en el mismo orden.
+     *
+     * `compromisos` no trae `orderBy`, asi que Postgres los devuelve en el
+     * orden fisico de la tabla — y ese orden CAMBIA en cuanto una fila se
+     * actualiza, porque Postgres reescribe la fila al final del heap. En un
+     * modal de cobro eso es peor que feo: `primerLoteConSaldo()` decide a
+     * QUE LOTE se le propone el pago, asi que despues de cobrar una vez el
+     * monto sugerido podia caer en otro lote sin que nadie moviera nada.
+     *
+     * Se descubrio el 13-ago-2026 por un test que fallaba salteado en
+     * `EstadoDeCuenta`, que tenia el mismo agujero.
+     *
+     * Por CODIGO porque es el orden del contrato: RPS-A-001, RPS-A-002.
+     *
+     * @return Collection<int, Compromiso>
+     */
+    private function compromisosEnOrden(): Collection
+    {
+        /*
+         * 🔴 Los RESCINDIDOS quedan afuera (R22, 14-ago-2026). Un lote que se
+         * cayo puede conservar una cuota con saldo —la que se pago a medias o
+         * la que tuvo un pago anulado no se pueden borrar, tienen
+         * aplicaciones colgando— y sin este filtro ese lote seguiria
+         * apareciendo en el modal de cobro, ofreciendole a la ventanilla
+         * cobrarle a alguien por un terreno que ya no es suyo.
+         */
+        return $this->venta->compromisos
+            ->reject(static fn (Compromiso $compromiso): bool => $compromiso->getAttribute('estado') === EstadoCompromiso::Rescindido)
+            ->sortBy(static fn (Compromiso $compromiso): string => (string) $compromiso->lote?->getAttribute('codigo'))
+            ->values();
+    }
+
+    /**
      * Los lotes del contrato que todavía deben, con cuánto.
      *
      * @return array<int, string>
@@ -1241,7 +1586,7 @@ final readonly class CobrarUnPago
     {
         $opciones = [];
 
-        foreach ($this->venta->compromisos as $renglon) {
+        foreach ($this->compromisosEnOrden() as $renglon) {
             $saldo = $this->saldoDe($renglon);
 
             if ($saldo->esCero()) {
@@ -1270,7 +1615,7 @@ final readonly class CobrarUnPago
     {
         $lotes = [];
 
-        foreach ($this->venta->compromisos as $renglon) {
+        foreach ($this->compromisosEnOrden() as $renglon) {
             if (! $this->saldoDe($renglon)->esCero()) {
                 $lotes[] = $renglon;
             }
@@ -1281,7 +1626,7 @@ final readonly class CobrarUnPago
 
     private function primerLoteConSaldo(): ?Compromiso
     {
-        foreach ($this->venta->compromisos as $renglon) {
+        foreach ($this->compromisosEnOrden() as $renglon) {
             if (! $this->saldoDe($renglon)->esCero()) {
                 return $renglon;
             }

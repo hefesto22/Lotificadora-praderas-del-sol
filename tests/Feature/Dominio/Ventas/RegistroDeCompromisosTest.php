@@ -20,7 +20,17 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
 beforeEach(function (): void {
-    $this->proyecto = Proyecto::factory()->create(['codigo' => 'RPS']);
+    /*
+    | Con donaciones y cupo de sobra: desde el 13-ago-2026 donar exige que
+    | el desarrollo haya declarado cuantos lotes va a regalar, y este
+    | archivo prueba las reglas de la donacion, no las del cupo. Esas
+    | viven en CupoDeDonacionesTest.
+    */
+    $this->proyecto = Proyecto::factory()->create([
+        'codigo'        => 'RPS',
+        'dona_lotes'    => true,
+        'lotes_a_donar' => 50,
+    ]);
     $this->bloque = Bloque::factory()->create([
         'proyecto_id' => $this->proyecto->getKey(),
         'nombre'      => 'A',

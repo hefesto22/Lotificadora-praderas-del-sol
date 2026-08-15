@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Domain\Ventas;
 
+use App\Domain\Enums\EstadoCompromiso;
 use App\Domain\ValueObjects\Monto;
 use App\Models\Cliente;
+use App\Models\Compromiso;
 use App\Models\Cuota;
 use App\Models\Venta;
 use Carbon\CarbonImmutable;
@@ -85,7 +87,40 @@ final readonly class EstadoDeCuenta
         $pagadas = 0;
         $totales = 0;
 
-        foreach ($venta->compromisos as $compromiso) {
+        /*
+         * 🔴 ORDENADOS POR CODIGO, Y NO POR COMO VENGAN.
+         *
+         * `compromisos` no trae `orderBy`, asi que Postgres los devuelve en
+         * el orden fisico de la tabla — y ese orden CAMBIA en cuanto una
+         * fila se actualiza, porque Postgres reescribe la fila al final del
+         * heap en vez de tocarla donde estaba. Resultado: el mismo contrato
+         * imprimia sus lotes en un orden antes de cobrar y en otro despues.
+         *
+         * Se descubrio el 13-ago-2026 por un test que fallaba salteado
+         * —`lotes[0]` era el de 12 meses o el de 24 segun el dia—, pero el
+         * problema no era del test: es el papel que recibe el cliente. Un
+         * estado de cuenta que lista los mismos tres lotes en distinto orden
+         * cada vez que se imprime obliga a leerlo entero para compararlo con
+         * el anterior.
+         *
+         * Por CODIGO porque es el orden del contrato: RPS-A-001, RPS-A-002.
+         */
+        /*
+         * 🔴 Los lotes RESCINDIDOS no entran (R22, 14-ago-2026). Un estado de
+         * cuenta contesta «que tengo y cuanto debo HOY», y un lote que se
+         * cayo no es ninguna de las dos cosas. Dejarlo adentro le sumaria al
+         * cliente el saldo de una cuota que quedo viva por tener un pago
+         * encima, por un terreno que ya devolvio.
+         *
+         * Su historia no se pierde: vive en el acta de rescision, en los
+         * recibos que se le entregaron y en la bitacora del compromiso.
+         */
+        $compromisos = $venta->compromisos
+            ->reject(static fn (Compromiso $compromiso): bool => $compromiso->getAttribute('estado') === EstadoCompromiso::Rescindido)
+            ->sortBy(static fn (Compromiso $compromiso): string => (string) $compromiso->lote?->getAttribute('codigo'))
+            ->values();
+
+        foreach ($compromisos as $compromiso) {
             $cuenta = CuentaDelLote::de($compromiso);
 
             $lotes[] = $cuenta;

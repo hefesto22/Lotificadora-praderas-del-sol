@@ -7,7 +7,8 @@ namespace App\Filament\Resources\Lotes\Schemas;
 use App\Domain\Enums\EstadoLote;
 use App\Filament\Schemas\Components\AreaField;
 use App\Filament\Schemas\Components\MayusculasField;
-use App\Filament\Schemas\Components\MontoField;
+use App\Filament\Schemas\Components\PrecioPorAreaField;
+use App\Filament\Support\Unidades;
 use App\Models\Bloque;
 use App\Models\Lote;
 use Carbon\CarbonInterface;
@@ -20,6 +21,7 @@ use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Livewire\Component;
 
 class LoteForm
 {
@@ -99,7 +101,8 @@ class LoteForm
                                     ->disabled(fn (?Lote $record): bool => self::estaVendido($record))
                                     ->afterStateUpdatedJs(self::JS_CALCULAR_VALOR),
 
-                                MontoField::make('precio_vara', 'Precio por vara²')
+                                PrecioPorAreaField::make('precio_vara')
+                                    ->label(static fn (Get $get, ?Lote $record, ?Component $livewire): string => 'Precio '.Unidades::delFormulario($get, $record, $livewire)->porUnidad())
                                     ->live(onBlur: true)
                                     ->disabled(fn (?Lote $record): bool => self::estaVendido($record))
                                     ->afterStateUpdatedJs(self::JS_CALCULAR_VALOR),
@@ -114,7 +117,7 @@ class LoteForm
                                     // área × precio, justo lo que el golden test del
                                     // §9.C9 existe para impedir.
                                     ->dehydrated(false)
-                                    ->helperText('Se calcula solo: área × precio por vara².'),
+                                    ->helperText(static fn (Get $get, ?Lote $record, ?Component $livewire): string => 'Se calcula solo: área × precio '.Unidades::delFormulario($get, $record, $livewire)->porUnidad().'.'),
 
                                 Textarea::make('observaciones')
                                     ->label('Observaciones')
@@ -128,7 +131,7 @@ class LoteForm
                                 Select::make('estado')
                                     ->label('Estado del lote')
                                     ->options(fn (): array => collect(EstadoLote::cases())
-                                        ->mapWithKeys(fn (EstadoLote $estado): array => [$estado->value => $estado->etiqueta()])
+                                        ->mapWithKeys(fn (EstadoLote $estado): array => [$estado->value => $estado->etiquetaInterna()])
                                         ->all())
                                     ->default(EstadoLote::Disponible->value)
                                     ->required()
@@ -196,9 +199,12 @@ class LoteForm
         };
 
         try {
+            // 4 decimales del area x 6 del precio = 10. Para bajar a centavos
+            // se divide entre 10^8, sumando medio paso para redondear igual
+            // que ROUND() en Postgres y que bcmath en el servidor.
             const area = aEntero($get('area_varas'), 4);
-            const precio = aEntero($get('precio_vara'), 2);
-            const centavos = (area * precio + 5000n) / 10000n;
+            const precio = aEntero($get('precio_vara'), 6);
+            const centavos = (area * precio + 50000000n) / 100000000n;
 
             $set('valor', (Number(centavos) / 100).toFixed(2));
         } catch (e) {

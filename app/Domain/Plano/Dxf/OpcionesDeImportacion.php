@@ -20,6 +20,14 @@ use App\Domain\Plano\ValidaMedidas;
  * dibuje directamente en varas. Si es asi, no hay conversion que hacer y
  * el factor de la vara —que sigue pendiente de confirmar, ver pregunta 16
  * de docs/dominio.md— no toca el area de ningun lote.
+ *
+ * `bloquePorRotulo` es para los planos que traen la manzana pegada al
+ * numero ("A1", "B-7"): con la opcion prendida, cada lote entra en el
+ * bloque que dice su rotulo y el bloque elegido en el formulario pasa a
+ * ser solo el destino de los que no traigan letra. APAGADA por defecto y
+ * a proposito: el rotulo que el propio sistema dibuja en el mapa es
+ * `numero.bloque` ("12B"), y leer eso como bloque "12" seria peor que no
+ * leer nada. Ver RotuloDxf::bloqueDeLote().
  */
 final readonly class OpcionesDeImportacion
 {
@@ -39,6 +47,7 @@ final readonly class OpcionesDeImportacion
         public UnidadDxf $unidad = UnidadDxf::Metros,
         public bool $dibujadoEnVaras = false,
         string $varaEnMetros = '0.8359',
+        public bool $bloquePorRotulo = false,
     ) {
         if (trim($capaDeLotes) === '') {
             throw ValueObjectInvalidoException::paraCampo(

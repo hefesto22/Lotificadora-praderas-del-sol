@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Domain\Enums\EstadoCompromiso;
 use App\Domain\ValueObjects\Monto;
 use Database\Factories\CuotaFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -12,6 +13,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Override;
 
 /**
@@ -112,6 +114,22 @@ class Cuota extends Model
     public function venta(): BelongsTo
     {
         return $this->belongsTo(Venta::class);
+    }
+
+    /**
+     * Los pagos que se le aplicaron, INCLUIDOS los de recibos anulados.
+     *
+     * 🔴 Anular un recibo devuelve `monto_pagado` a cero pero **no borra la
+     * aplicación**: la fila queda como historia y su FK a `cuotas` es
+     * `restrictOnDelete`. Por eso «monto_pagado = 0» NO significa «a esta
+     * cuota nunca la tocó nadie», y quien vaya a borrar cuotas tiene que
+     * preguntar por acá. Ver `RegistroDeRescisiones::soltarLasCuotas()`.
+     *
+     * @return HasMany<AplicacionDePago, $this>
+     */
+    public function aplicaciones(): HasMany
+    {
+        return $this->hasMany(AplicacionDePago::class);
     }
 
     /**
@@ -288,6 +306,36 @@ class Cuota extends Model
     protected function pendientes(Builder $query): Builder
     {
         return $query->whereColumn('monto_pagado', '<', 'monto');
+    }
+
+    /**
+     * Solo las cuotas de lotes que siguen siendo del cliente.
+     *
+     * ═══ POR QUE HACE FALTA ═══
+     *
+     * Al rescindir un lote (R22) sus cuotas pendientes se borran, **pero no
+     * todas pueden borrarse**: la que se pago a medias y la que tuvo un pago
+     * anulado se quedan, porque tienen aplicaciones colgando de un recibo que
+     * el cliente guardo. Esas cuotas conservan saldo, y sin este filtro el
+     * expediente seguiria diciendo que el cliente debe por un lote que ya no
+     * es suyo.
+     *
+     * No se borra ni se reescribe nada: la cuota sigue ahi con su historia
+     * intacta. Lo que cambia es que **deja de contar como deuda**.
+     *
+     * ⚠️ Va en las sumas de DINERO, no en las de historia: el recibo impreso
+     * y las aplicaciones de pago siguen viendo todo.
+     *
+     * @param Builder<Cuota> $query
+     *
+     * @return Builder<Cuota>
+     */
+    #[Scope]
+    protected function deLotesVivos(Builder $query): Builder
+    {
+        return $query->whereDoesntHave('compromiso', static function (Builder $compromiso): void {
+            $compromiso->where('estado', EstadoCompromiso::Rescindido->value);
+        });
     }
 
     /**

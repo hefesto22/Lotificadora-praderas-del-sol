@@ -6,6 +6,8 @@ namespace App\Http\Controllers;
 
 use App\Domain\Ventas\EstadoDeCuenta;
 use App\Models\BrandingSetting;
+use App\Models\Facturacion;
+use App\Models\Proyecto;
 use App\Models\Venta;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
@@ -41,13 +43,78 @@ final class EstadoDeCuentaController
         Gate::authorize('view', $venta);
 
         return view('documentos.estado-de-cuenta', [
-            'cuenta' => EstadoDeCuenta::de($venta),
-            'emisor' => $this->emisor(),
-            'logo'   => $this->logo(),
+            'cuenta'          => EstadoDeCuenta::de($venta),
+            'emisor'          => $this->emisorDe($this->proyectoDe($venta)),
+            'logo'            => $this->logo(),
+            'logoDelProyecto' => $this->proyectoDe($venta)?->logoUrl(),
         ]);
     }
 
     // ─── Interno ──────────────────────────────────────────────────────
+
+    /**
+     * El desarrollo al que pertenece esta venta: de ahí salen su logo y su
+     * membrete.
+     *
+     * Se llega por el primer compromiso: una venta puede llevar varios
+     * lotes, pero todos son del MISMO proyecto —lo verifica
+     * `RegistroDeVentas` al activarla—, así que el primero alcanza.
+     */
+    private function proyectoDe(Venta $venta): ?Proyecto
+    {
+        $proyecto = $venta->compromisos()->with('proyecto')->first()?->proyecto;
+
+        return $proyecto instanceof Proyecto ? $proyecto : null;
+    }
+
+    /**
+     * Quién emite, tal como sale impreso arriba del papel.
+     *
+     * PRIMERO la facturación del desarrollo, la config solo de respaldo.
+     * Hasta el 14-ago-2026 esto era únicamente `config/lotificadora.php`,
+     * que es UNO para toda la instalación: con dos urbanizaciones —cada una
+     * con su nombre, sus teléfonos y su dirección impresos en su propio
+     * talonario— el mismo membrete salía en los dos papeles. Lo pidió
+     * Mauricio mandando la foto del talonario de Praderas.
+     *
+     * El respaldo no es adorno: un proyecto sin facturación elegida sigue
+     * imprimiendo igual que ayer.
+     *
+     * @return array<string, string|null>
+     */
+    private function emisorDe(?Proyecto $proyecto): array
+    {
+        $facturacion = $proyecto?->facturacion;
+
+        /*
+         * Tres fuentes, en este orden y por esta razon:
+         *
+         *  1. La FACTURACION, cuando el desarrollo factura con CAI. Ahi la
+         *     direccion impresa es la del establecimiento, que es la del
+         *     lugar desde donde se emite — no siempre donde esta el terreno.
+         *  2. El PROYECTO, cuando emite recibo interno. Su nombre, su
+         *     direccion de la pestaña Ubicacion y los telefonos que se le
+         *     cargaron. Lo enderezo Mauricio el 14-ago-2026: un recibo de
+         *     caja no necesita pasar por una facturacion.
+         *  3. La CONFIG, de respaldo. Un proyecto al que todavia no le
+         *     cargaron nada sigue imprimiendo como hasta ayer.
+         */
+        if ($facturacion instanceof Facturacion) {
+            return $facturacion->comoEmisor();
+        }
+
+        if ($proyecto instanceof Proyecto) {
+            $propio = $proyecto->comoEmisor();
+
+            // Si el proyecto no tiene ni nombre util, no vale la pena: cae
+            // en la config, que al menos trae el RTN de la lotificadora.
+            if ($propio['residencial'] !== null) {
+                return $propio;
+            }
+        }
+
+        return $this->emisor();
+    }
 
     /**
      * @return array<string, string|null>

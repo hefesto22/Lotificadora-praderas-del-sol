@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Domain\Enums\EstadoLote;
+use App\Domain\Enums\UnidadDeArea;
 use App\Domain\Exceptions\ProyectoConMovimientoException;
 use App\Domain\ValueObjects\Monto;
 use App\Traits\HasAuditFields;
@@ -15,8 +16,10 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Override;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
@@ -31,11 +34,20 @@ use Spatie\Activitylog\Support\LogOptions;
 #[Fillable([
     'nombre',
     'codigo',
+    'logo_path',
+    'facturacion_id',
+    'unidad_area',
+    'dona_lotes',
+    'lotes_a_donar',
+    'reserva_lotes',
+    'lotes_a_reservar',
     'municipio',
     'departamento',
     'direccion',
     'latitud',
     'longitud',
+    'telefonos',
+    'correo',
     'activo',
     'plano_esquematico',
     'medidas_en_metros',
@@ -77,12 +89,24 @@ class Proyecto extends Model
      * El default de la migracion arregla la base; este arregla PHP. Los
      * dos tienen que existir y decir lo mismo.
      *
+     * ⚠️ Vale IGUAL para un atributo casteado a ENUM. `unidad_area` cayo
+     * en la misma trampa el 13-ago: sin el default de aca, el modelo
+     * recien creado no lo trae, el cast convierte el null ausente en
+     * UnidadDeArea::Varas, y el primer update registraba un cambio de
+     * unidad que nadie hizo. **Toda columna nueva con default en la
+     * migracion se repite en esta lista.**
+     *
      * @var array<string, mixed>
      */
     #[Override]
     protected $attributes = [
         'plano_esquematico' => false,
         'medidas_en_metros' => false,
+        'unidad_area'       => UnidadDeArea::Varas->value,
+        'dona_lotes'        => false,
+        'lotes_a_donar'     => 0,
+        'reserva_lotes'     => false,
+        'lotes_a_reservar'  => 0,
     ];
 
     /**
@@ -215,6 +239,11 @@ class Proyecto extends Model
             'activo'            => 'boolean',
             'plano_esquematico' => 'boolean',
             'medidas_en_metros' => 'boolean',
+            'unidad_area'       => UnidadDeArea::class,
+            'dona_lotes'        => 'boolean',
+            'lotes_a_donar'     => 'integer',
+            'reserva_lotes'     => 'boolean',
+            'lotes_a_reservar'  => 'integer',
             'plano_publico'     => 'boolean',
             'servicios'         => 'array',
         ];
@@ -236,6 +265,18 @@ class Proyecto extends Model
      */
     public function varaEnMetros(): string
     {
+        /*
+         * En un proyecto que trabaja en metros² la unidad del área ES el
+         * metro: el factor vale uno y no hay nada que preguntarle al
+         * topógrafo. Se consulta ANTES que la columna a propósito — un
+         * `vara_en_metros` viejo no puede contradecir a la unidad.
+         */
+        $porLaUnidad = $this->unidadDeArea()->ladoEnMetros();
+
+        if ($porLaUnidad !== null) {
+            return $porLaUnidad;
+        }
+
         $propia = $this->getAttribute('vara_en_metros');
 
         if (is_numeric($propia) && (float) $propia > 0) {
@@ -295,10 +336,257 @@ class Proyecto extends Model
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['nombre', 'codigo', 'activo', 'plano_esquematico', 'medidas_en_metros', 'vara_en_metros'])
+            ->logOnly(['nombre', 'codigo', 'unidad_area', 'activo', 'plano_esquematico', 'medidas_en_metros', 'vara_en_metros', 'dona_lotes', 'lotes_a_donar', 'reserva_lotes', 'lotes_a_reservar', 'facturacion_id', 'logo_path'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges()
             ->setDescriptionForEvent(fn (string $evento): string => "Proyecto {$evento}");
+    }
+
+    /**
+     * La unidad en la que este desarrollo mide y COBRA la superficie.
+     *
+     * Nunca devuelve null: la columna tiene default y CHECK. Se lee por
+     * acá y no por el atributo crudo para que un proyecto recién armado
+     * con `new Proyecto` —sin pasar por la base— también conteste.
+     */
+    public function unidadDeArea(): UnidadDeArea
+    {
+        $unidad = $this->getAttribute('unidad_area');
+
+        return $unidad instanceof UnidadDeArea ? $unidad : UnidadDeArea::Varas;
+    }
+
+    public function trabajaEnMetros(): bool
+    {
+        return $this->unidadDeArea() === UnidadDeArea::Metros;
+    }
+
+    /**
+     * ¿Todavía se puede cambiar la unidad de este desarrollo?
+     *
+     * Hasta que salga el primer lote. Cambiarla NO reconvierte ningún
+     * área —ver UnidadDeArea— así que después de una venta el número del
+     * contrato firmado y el de la pantalla estarían en unidades
+     * distintas. Regla de Mauricio, 13-ago-2026: «se puede editar solo
+     * si no se ha vendido ninguno, de ahí no se puede editar».
+     *
+     * Un APARTADO no traba: es reversible —para eso existe la devolución
+     * de la seña— y todavía no hay escritura de por medio. Una DONACIÓN
+     * sí, porque el lote salió del inventario para siempre.
+     */
+    public function puedeCambiarLaUnidad(): bool
+    {
+        return ! Lote::query()
+            ->where('proyecto_id', $this->getKey())
+            ->whereIn('estado', [EstadoLote::Vendido->value, EstadoLote::Donado->value])
+            ->exists();
+    }
+
+    /**
+     * El membrete del RECIBO INTERNO, armado con lo que el proyecto ya tiene.
+     *
+     * Lo pidió Mauricio el 14-ago-2026: un recibo de caja no necesita una
+     * facturación —no tiene CAI, ni establecimiento, ni rango— así que se
+     * configura acá mismo. Y la dirección NO se vuelve a teclear: sale de
+     * la pestaña Ubicación, que es donde ya estaba.
+     *
+     * ⚠️ Devuelve las MISMAS claves que `Facturacion::comoEmisor()` y que
+     * la config: así el recibo y el estado de cuenta no distinguen de dónde
+     * salió el membrete, y las tres fuentes se pueden encadenar.
+     *
+     * Sin RTN a propósito: un comprobante de caja no lo lleva. El que
+     * factura con CAI pasa por `Facturacion`, que sí lo exige.
+     *
+     * @return array{nombre: string|null, rtn: string|null, residencial: string|null, direccion: string|null, telefono: string|null}
+     */
+    public function comoEmisor(): array
+    {
+        $texto = function (string $columna): ?string {
+            $valor = $this->getAttribute($columna);
+
+            return is_string($valor) && trim($valor) !== '' ? trim($valor) : null;
+        };
+
+        return [
+            'nombre'      => null,
+            'rtn'         => null,
+            'residencial' => $texto('nombre'),
+            'direccion'   => $texto('direccion') ?? $this->municipioYDepartamento(),
+            'telefono'    => $texto('telefonos'),
+        ];
+    }
+
+    /**
+     * «Corpus, Copán» — el respaldo cuando no cargaron una dirección larga.
+     */
+    private function municipioYDepartamento(): ?string
+    {
+        $partes = [];
+
+        foreach (['municipio', 'departamento'] as $columna) {
+            $valor = $this->getAttribute($columna);
+
+            if (is_string($valor) && trim($valor) !== '') {
+                $partes[] = trim($valor);
+            }
+        }
+
+        return $partes === [] ? null : implode(', ', $partes);
+    }
+
+    /**
+     * La URL del logo de este desarrollo, o null si no le cargaron ninguno.
+     *
+     * Se guarda la RUTA y se arma la URL acá: el dominio cambia entre la
+     * Mac y el VPS, y una URL guardada apuntaría al lugar equivocado el día
+     * del despliegue.
+     *
+     * Comprueba que el archivo EXISTA. Un `<img>` roto en un contrato
+     * impreso se ve peor que un contrato sin logo, y el archivo se puede
+     * haber ido en una restauración de backup.
+     */
+    public function logoUrl(): ?string
+    {
+        $ruta = $this->getAttribute('logo_path');
+
+        if (! is_string($ruta) || trim($ruta) === '') {
+            return null;
+        }
+
+        $disco = Storage::disk('public');
+
+        return $disco->exists($ruta) ? $disco->url($ruta) : null;
+    }
+
+    /**
+     * Con qué papel cobra este desarrollo.
+     *
+     * Null hasta que alguien se la elija, y eso está bien: los proyectos
+     * que ya existen siguieron funcionando igual el día que se agregó
+     * esto. Varios proyectos pueden apuntar a la MISMA facturación —es la
+     * forma de compartir un rango— pero solo cuando emiten desde la misma
+     * oficina. Ver la migración `2026_08_13_230000`.
+     *
+     * @return BelongsTo<Facturacion, $this>
+     */
+    public function facturacion(): BelongsTo
+    {
+        return $this->belongsTo(Facturacion::class);
+    }
+
+    // ─── Donaciones ───────────────────────────────────────────────────
+
+    /**
+     * ¿Este desarrollo dona lotes, y cuántos le quedan por donar?
+     *
+     * Donar saca un lote del inventario sin que entre un lempira. El cupo
+     * es la decisión escrita ANTES —cuántos se van a regalar— y lo que
+     * hace que el botón desaparezca solo cuando se cumplió, en vez de
+     * quedar disponible para siempre. Regla de Mauricio, 13-ago-2026.
+     */
+    public function donaLotes(): bool
+    {
+        return (bool) $this->getAttribute('dona_lotes');
+    }
+
+    public function cupoDeDonaciones(): int
+    {
+        return (int) $this->getAttribute('lotes_a_donar');
+    }
+
+    /**
+     * Los lotes de este proyecto que YA se donaron.
+     *
+     * Cuenta el estado del lote y no los compromisos: un lote donado es
+     * uno, y contar compromisos abriría la puerta a contar dos veces el
+     * día que un lote se done, se deshaga y se vuelva a donar.
+     */
+    public function lotesDonados(): int
+    {
+        return Lote::query()
+            ->where('proyecto_id', $this->getKey())
+            ->where('estado', EstadoLote::Donado->value)
+            ->count();
+    }
+
+    /**
+     * Cuántas donaciones quedan por hacer. Nunca negativo: si alguien
+     * bajó el cupo por debajo de lo ya entregado, quedan cero — lo hecho
+     * no se deshace solo.
+     */
+    public function donacionesQueQuedan(): int
+    {
+        if (! $this->donaLotes()) {
+            return 0;
+        }
+
+        return max(0, $this->cupoDeDonaciones() - $this->lotesDonados());
+    }
+
+    public function puedeDonarOtroLote(): bool
+    {
+        return $this->donacionesQueQuedan() > 0;
+    }
+
+    // ─── Herencia ─────────────────────────────────────────────────────
+
+    /**
+     * ¿Este desarrollo guarda lotes para la familia, y cuántos le quedan?
+     *
+     * El gemelo del cupo de donaciones y por la misma razón: un lote
+     * reservado sale del mercado sin que entre un lempira, así que cuántos
+     * se guardan es una decisión escrita ANTES —cuando se arma el
+     * desarrollo— y no un botón encendido para siempre. Regla de Mauricio,
+     * 13-ago-2026.
+     *
+     * ⚠️ La columna dice `reserva` y la pantalla dice «Herencia». Es a
+     * propósito: el estado del lote se llama `reservado` en la base y en
+     * la leyenda del plano público, donde esa palabra cierra la
+     * conversación. Adentro se administra herencia. Ver
+     * EstadoLote::etiquetaInterna().
+     */
+    public function reservaLotes(): bool
+    {
+        return (bool) $this->getAttribute('reserva_lotes');
+    }
+
+    public function cupoDeReservas(): int
+    {
+        return (int) $this->getAttribute('lotes_a_reservar');
+    }
+
+    /**
+     * Los lotes de este proyecto que YA están guardados.
+     *
+     * Cuenta el estado del lote, igual que `lotesDonados()` y por el mismo
+     * motivo: un lote guardado es uno, y no hay ninguna otra tabla que
+     * pueda contarlo dos veces.
+     */
+    public function lotesReservados(): int
+    {
+        return Lote::query()
+            ->where('proyecto_id', $this->getKey())
+            ->where('estado', EstadoLote::Reservado->value)
+            ->count();
+    }
+
+    /**
+     * Cuántos lotes quedan por guardar. Nunca negativo: si alguien bajó el
+     * cupo por debajo de lo ya guardado, quedan cero — lo hecho no se
+     * deshace solo, se saca lote por lote desde el plano.
+     */
+    public function reservasQueQuedan(): int
+    {
+        if (! $this->reservaLotes()) {
+            return 0;
+        }
+
+        return max(0, $this->cupoDeReservas() - $this->lotesReservados());
+    }
+
+    public function puedeReservarOtroLote(): bool
+    {
+        return $this->reservasQueQuedan() > 0;
     }
 
     /**

@@ -265,6 +265,7 @@ class Venta extends Model
     {
         $porMes = Cuota::query()
             ->where('venta_id', $this->getKey())
+            ->deLotesVivos()
             ->selectRaw('numero, SUM(monto) AS total')
             ->groupBy('numero')
             ->orderBy('numero')
@@ -323,6 +324,7 @@ class Venta extends Model
         /** @var string|int|null $suma */
         $suma = $this->cuotas()
             ->reorder()
+            ->deLotesVivos()
             ->selectRaw('COALESCE(SUM(monto - monto_pagado), 0) AS pendiente')
             ->value('pendiente');
 

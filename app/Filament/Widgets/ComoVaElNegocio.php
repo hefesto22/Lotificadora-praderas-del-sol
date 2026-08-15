@@ -109,6 +109,9 @@ class ComoVaElNegocio extends StatsOverviewWidget
     {
         $vencidas = Cuota::query()
             ->reorder()
+            // La cuota que sobrevive a una rescision nunca se va a pagar: sin
+            // esto se quedaria clavada en «vencido» para siempre.
+            ->deLotesVivos()
             ->whereColumn('monto_pagado', '<', 'monto')
             ->whereDate('fecha_vencimiento', '<', today())
             ->whereIn('venta_id', $this->ventasVigentes());
@@ -128,6 +131,7 @@ class ComoVaElNegocio extends StatsOverviewWidget
     {
         $pendientes = Cuota::query()
             ->reorder()
+            ->deLotesVivos()
             ->whereColumn('monto_pagado', '<', 'monto')
             ->whereIn('venta_id', $this->ventasVigentes());
 

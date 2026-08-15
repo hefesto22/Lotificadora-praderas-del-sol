@@ -34,12 +34,23 @@ class VentasTable
         return $table
             ->modifyQueryUsing(fn (Builder $query): Builder => $query
                 ->with([
-                    'proyecto:id,nombre,codigo',
+                    /*
+                     * 🔴 `facturacion_id` NO es de adorno. Sin ella, cobrar
+                     * desde esta tabla emitia recibo interno en un desarrollo
+                     * que factura con CAI — ver ConsumoDeFacturas::facturacionDe().
+                     * El dominio ya no depende de esto, pero traerla ahorra una
+                     * consulta por cobro y deja el modelo entero.
+                     */
+                    'proyecto:id,nombre,codigo,facturacion_id',
                     // Solo el titular: es el único cliente que la tabla muestra.
                     'clientes' => fn ($relacion) => $relacion->wherePivot('titular', true),
                 ])
                 ->withCount('compromisos')
+                // `deLotesVivos()`: un lote rescindido puede dejar una cuota
+                // con saldo —la pagada a medias no se borra— y sin esto la
+                // lista mostraria un saldo distinto al del expediente.
                 ->addSelect(['saldo_pendiente' => Cuota::query()
+                    ->deLotesVivos()
                     ->selectRaw('COALESCE(SUM(monto - monto_pagado), 0)')
                     ->whereColumn('cuotas.venta_id', 'ventas.id'),
                 ]))

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Prospectos\Tables;
 
+use App\Filament\Support\BuscarNombre;
 use App\Models\Prospecto;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Textarea;
@@ -38,7 +39,8 @@ final class ProspectosTable
 
                 TextColumn::make('nombre')
                     ->label('Nombre')
-                    ->searchable()
+                    // Sin acentos: ver BuscarNombre.
+                    ->searchable(query: BuscarNombre::propio())
                     ->weight('bold')
                     ->wrap(),
 

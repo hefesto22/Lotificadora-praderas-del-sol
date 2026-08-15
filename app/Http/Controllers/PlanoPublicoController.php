@@ -73,12 +73,13 @@ final class PlanoPublicoController
         );
 
         return view('publico.plano', [
-            'plano'    => $datos,
-            'imagen'   => $this->imagen($proyecto, $datos),
-            'proyecto' => $proyecto,
-            'whatsapp' => $this->whatsapp($proyecto),
-            'empresa'  => $this->empresa(),
-            'logo'     => $this->logo(),
+            'plano'           => $datos,
+            'imagen'          => $this->imagen($proyecto, $datos),
+            'proyecto'        => $proyecto,
+            'logoDelProyecto' => $proyecto->logoUrl(),
+            'whatsapp'        => $this->whatsapp($proyecto),
+            'empresa'         => $this->empresa(),
+            'logo'            => $this->logo(),
         ]);
     }
 

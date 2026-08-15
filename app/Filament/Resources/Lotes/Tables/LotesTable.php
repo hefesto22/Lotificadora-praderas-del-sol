@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Lotes\Tables;
 
 use App\Domain\Enums\EstadoLote;
+use App\Filament\Support\Unidades;
 use App\Models\Bloque;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteAction;
@@ -14,6 +15,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 
 /**
  * §10.7: columnas explícitas, filtros con la misma fuente que el scoping,
@@ -28,6 +30,12 @@ class LotesTable
     public static function configure(Table $table): Table
     {
         return $table
+            /*
+            | with('proyecto'): la unidad del área se resuelve por fila y
+            | sale del proyecto. Sin esto son 25 consultas por página
+            | (§4.L4). Ver App\Filament\Support\Unidades.
+            */
+            ->modifyQueryUsing(static fn (Builder $query): Builder => $query->with('proyecto'))
             ->columns([
                 TextColumn::make('codigo')
                     ->label('Código')
@@ -61,12 +69,12 @@ class LotesTable
 
                 TextColumn::make('area_varas')
                     ->label('Área')
-                    ->suffix(' varas²')
+                    ->suffix(static fn (?Model $record): string => ' '.Unidades::de($record)->plural())
                     ->alignEnd()
                     ->sortable(),
 
                 TextColumn::make('precio_vara')
-                    ->label('Precio/vara²')
+                    ->label(static fn (?Model $record): string => 'Precio/'.Unidades::de($record)->abreviada())
                     ->prefix('L ')
                     ->alignEnd()
                     ->sortable()
@@ -83,7 +91,7 @@ class LotesTable
                     ->label('Estado')
                     ->badge()
                     ->color(fn (EstadoLote $state): string => $state->color())
-                    ->formatStateUsing(fn (EstadoLote $state): string => $state->etiqueta())
+                    ->formatStateUsing(fn (EstadoLote $state): string => $state->etiquetaInterna())
                     ->sortable(),
             ])
             ->filters([
@@ -124,7 +132,7 @@ class LotesTable
                 SelectFilter::make('estado')
                     ->label('Estado')
                     ->options(fn (): array => collect(EstadoLote::cases())
-                        ->mapWithKeys(fn (EstadoLote $estado): array => [$estado->value => $estado->etiqueta()])
+                        ->mapWithKeys(fn (EstadoLote $estado): array => [$estado->value => $estado->etiquetaInterna()])
                         ->all())
                     ->multiple(),
             ])

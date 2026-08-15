@@ -8,6 +8,7 @@ use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\Pagos\RegistroDePagos;
+use App\Filament\Support\BuscarNombre;
 use App\Filament\Support\ImprimirRecibo;
 use App\Models\Recibo;
 use Filament\Actions\Action;
@@ -39,12 +40,38 @@ class RecibosTable
                 'cliente', 'venta', 'compromiso.lote', 'aplicaciones.cuota.compromiso.lote',
             ])->withCount('impresiones'))
             ->columns([
+                /*
+                 * El folio interno, que es el numero de la caja (R12) y el
+                 * que trae quien llega con el papel de siempre.
+                 *
+                 * Desde el 14-ago-2026 un documento puede llevar DOS numeros
+                 * —este y el de la factura del SAR— y por eso el de la factura
+                 * baja como descripcion en vez de ocupar otra columna: quien
+                 * mira esta lista busca por el folio, y ver dieciseis digitos
+                 * arriba en la primera columna le cambiaria el punto de
+                 * referencia a todo el mundo.
+                 */
                 TextColumn::make('numero')
                     ->label('Recibo')
                     ->weight('bold')
                     ->searchable()
                     ->sortable()
-                    ->formatStateUsing(static fn (Recibo $record): string => $record->folio()),
+                    ->formatStateUsing(static fn (Recibo $record): string => $record->folio())
+                    ->description(static fn (Recibo $record): ?string => $record->esFactura()
+                        ? 'Factura '.$record->numeroDelPapel()
+                        : null),
+
+                /*
+                 * Buscable aparte y no adentro de la columna de arriba: quien
+                 * llega con una factura en la mano trae los dieciseis digitos,
+                 * y `numero` es un entero — buscar «000-001-01-00000004» ahi
+                 * no encuentra nada.
+                 */
+                TextColumn::make('numero_factura')
+                    ->label('Factura')
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true)
+                    ->placeholder('—'),
 
                 /*
                  * Un recibo anulado NO se esconde de la lista: su número sigue
@@ -83,7 +110,8 @@ class RecibosTable
                     ->description(static fn (Recibo $record): ?string => $record->esANombreDeOtro()
                         ? 'por cuenta de '.($record->cliente?->getAttribute('nombre') ?? '—')
                         : null)
-                    ->searchable()
+                    // Sin acentos: ver BuscarNombre.
+                    ->searchable(query: BuscarNombre::delCliente())
                     ->wrap()
                     ->placeholder('—'),
 

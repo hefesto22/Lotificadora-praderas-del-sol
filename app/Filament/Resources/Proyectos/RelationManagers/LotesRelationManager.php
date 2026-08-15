@@ -10,7 +10,8 @@ use App\Domain\Plano\Foto360;
 use App\Domain\Plano\MarcasDelLote;
 use App\Filament\Schemas\Components\AreaField;
 use App\Filament\Schemas\Components\MayusculasField;
-use App\Filament\Schemas\Components\MontoField;
+use App\Filament\Schemas\Components\PrecioPorAreaField;
+use App\Filament\Support\Unidades;
 use App\Models\Bloque;
 use App\Models\Lote;
 use BackedEnum;
@@ -26,6 +27,8 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\ValidationException;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Override;
@@ -88,7 +91,8 @@ class LotesRelationManager extends RelationManager
                     ->required()
                     ->disabled(fn (?Lote $record): bool => $this->estaVendido($record)),
 
-                MontoField::make('precio_vara', 'Precio por vara²')
+                PrecioPorAreaField::make('precio_vara')
+                    ->label('Precio '.Unidades::de($this->getOwnerRecord())->porUnidad())
                     ->disabled(fn (?Lote $record): bool => $this->estaVendido($record))
                     ->helperText('El valor se calcula solo: área × precio.'),
 
@@ -231,6 +235,12 @@ class LotesRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('codigo')
+            /*
+            | with('proyecto'): la unidad del área se resuelve por fila y
+            | sale del proyecto. Sin esto son 25 consultas por página
+            | (§4.L4). Ver App\Filament\Support\Unidades.
+            */
+            ->modifyQueryUsing(static fn (Builder $query): Builder => $query->with('proyecto'))
             ->columns([
                 TextColumn::make('codigo')
                     ->label('Código')
@@ -247,12 +257,12 @@ class LotesRelationManager extends RelationManager
 
                 TextColumn::make('area_varas')
                     ->label('Área')
-                    ->suffix(' varas²')
+                    ->suffix(static fn (?Model $record): string => ' '.Unidades::de($record)->plural())
                     ->alignEnd()
                     ->sortable(),
 
                 TextColumn::make('precio_vara')
-                    ->label('Precio/vara²')
+                    ->label(static fn (?Model $record): string => 'Precio/'.Unidades::de($record)->abreviada())
                     ->prefix('L ')
                     ->alignEnd()
                     ->toggleable(isToggledHiddenByDefault: true),
@@ -268,7 +278,7 @@ class LotesRelationManager extends RelationManager
                     ->label('Estado')
                     ->badge()
                     ->color(fn (EstadoLote $state): string => $state->color())
-                    ->formatStateUsing(fn (EstadoLote $state): string => $state->etiqueta())
+                    ->formatStateUsing(fn (EstadoLote $state): string => $state->etiquetaInterna())
                     ->sortable(),
             ])
             ->filters([
@@ -284,7 +294,7 @@ class LotesRelationManager extends RelationManager
                 SelectFilter::make('estado')
                     ->label('Estado')
                     ->options(fn (): array => collect(EstadoLote::cases())
-                        ->mapWithKeys(fn (EstadoLote $estado): array => [$estado->value => $estado->etiqueta()])
+                        ->mapWithKeys(fn (EstadoLote $estado): array => [$estado->value => $estado->etiquetaInterna()])
                         ->all())
                     ->multiple(),
             ])

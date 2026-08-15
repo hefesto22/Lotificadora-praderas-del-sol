@@ -76,9 +76,15 @@ enum TipoCompromiso: string
      * valor y deshacerla es una rescision, que es otro tramite y
      * probablemente otra conversacion con la contratante.
      *
-     * Una donacion tampoco, y es la mas dificil de las tres: para cuando
-     * quedo registrada, lo normal es que la escritura ya este firmada a
-     * nombre de otro. Deshacerla no es un boton del sistema.
+     * Una donacion tampoco pasa por aca, y no es lo mismo: para cuando una
+     * donacion de verdad quedo registrada, lo normal es que la escritura ya
+     * este firmada a nombre de otro, y eso no se deshace con un boton.
+     *
+     * Lo que SI existe desde el 13-ago-2026 es corregir un REGISTRO
+     * equivocado —«se marcaron cinco y solo eran tres»— y vive en
+     * `RegistroDeCompromisos::deshacerDonacion()`, aparte a proposito: no
+     * comparte camino con `liberar()` porque liberar sabe de señas que hay
+     * que devolver, y una donacion nunca movio un lempira.
      */
     public function seLibera(): bool
     {

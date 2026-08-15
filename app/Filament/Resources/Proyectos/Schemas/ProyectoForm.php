@@ -5,15 +5,20 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Proyectos\Schemas;
 
 use App\Domain\Enums\ServicioDelProyecto;
+use App\Domain\Enums\UnidadDeArea;
 use App\Domain\ValueObjects\Monto;
 use App\Filament\Schemas\Components\DNIField;
 use App\Filament\Schemas\Components\MayusculasField;
 use App\Filament\Schemas\Components\TelefonoHondurasField;
+use App\Models\Facturacion;
 use App\Models\Proyecto;
+use App\Support\ImageOptimizer;
 use Carbon\CarbonInterface;
 use Closure;
 use Filament\Forms\Components\CheckboxList;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -23,8 +28,10 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Illuminate\Support\HtmlString;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
 /**
  * Patrón aprobado del §10: tabs persistentes en el query string, y un tab
@@ -56,7 +63,7 @@ class ProyectoForm
                                     ->maxLength(150)
                                     ->unique(ignoreRecord: true)
                                     ->prefixIcon('heroicon-o-building-office-2')
-                                    ->placeholder('Ej: Residencial Praderas del Sol')
+                                    ->placeholder('Ej: Residencial Los Almendros')
                                     ->columnSpanFull(),
 
                                 MayusculasField::make('codigo')
@@ -70,11 +77,56 @@ class ProyectoForm
                                     // congelan en edición. Cambiar el código partiría la
                                     // serie de contratos en dos.
                                     ->disabledOn('edit')
-                                    ->helperText(
-                                        'Prefijo de los números de contrato: RPS-2026-0065. '.
+                                    /*
+                                     * 🔴 El ejemplo sale del codigo TECLEADO, no de
+                                     * una constante. Estaba escrito «RPS-2026-0065»
+                                     * a mano, asi que la ficha de EL BAMBU —codigo
+                                     * REB— decia que sus contratos empezaban con RPS.
+                                     * Lo agarro el ensayo del 14-ago-2026 en pantalla.
+                                     */
+                                    ->live(onBlur: true)
+                                    ->helperText(fn (Get $get): string => sprintf(
+                                        'Prefijo de los números de contrato: %s-%d-0001. '.
                                         'No se puede cambiar después de crear el proyecto, '.
-                                        'porque partiría la numeración en dos series.'
-                                    ),
+                                        'porque partiría la numeración en dos series.',
+                                        self::codigoDeEjemplo($get),
+                                        today()->year,
+                                    )),
+
+                                /*
+                                 * ⚠️ ESTE CAMPO DECIDE COMO SE LEE Y SE COBRA
+                                 * TODO EL DESARROLLO.
+                                 *
+                                 * De el salen la unidad del area de cada lote,
+                                 * la del precio, la del plano, la del contrato y
+                                 * la del recibo. Y NO CONVIERTE NADA: cambiarlo
+                                 * con lotes cargados solo les cambia la palabra
+                                 * al lado del numero, no el numero.
+                                 *
+                                 * Por eso se traba en cuanto sale el primer lote
+                                 * —regla de Mauricio, 13-ago-2026— y no en
+                                 * cuanto hay lotes: mientras esten todos
+                                 * disponibles todavia se puede corregir un
+                                 * dedazo sin que nadie tenga un papel firmado
+                                 * que diga otra cosa.
+                                 */
+                                Select::make('unidad_area')
+                                    ->label('Unidad del área')
+                                    ->options(UnidadDeArea::opciones())
+                                    // El default de la INSTALACION: en Honduras la vara²,
+                                    // pero una lotificadora de otro pais lo cambia una vez
+                                    // en config/lotificadora.php y nunca mas (Ley L0).
+                                    ->default((string) config('lotificadora.area.unidad_por_defecto', UnidadDeArea::Varas->value))
+                                    ->required()
+                                    ->selectablePlaceholder(false)
+                                    // live() para que «Medidas del plano», que vive en
+                                    // otra pestaña, aparezca y desaparezca al elegir.
+                                    ->live()
+                                    ->prefixIcon('heroicon-o-scale')
+                                    ->disabled(static fn (?Proyecto $record): bool => $record instanceof Proyecto && ! $record->puedeCambiarLaUnidad())
+                                    ->helperText(static fn (?Proyecto $record): string => $record instanceof Proyecto && ! $record->puedeCambiarLaUnidad()
+                                        ? 'Ya no se puede cambiar: este proyecto tiene lotes vendidos o donados, y la unidad está escrita en sus contratos.'
+                                        : 'En qué se mide y se COBRA la superficie de este desarrollo. El área de cada lote, el precio, el plano y el contrato salen de acá. Se puede corregir mientras no se haya vendido ningún lote.'),
                             ])
                             ->columns(2),
 
@@ -230,6 +282,159 @@ class ProyectoForm
                             ])
                             ->columns(1),
 
+                        /*
+                         * Pestaña propia, como pidio Mauricio el 13-ago-2026:
+                         * «que tenga su propio toggle, asi como
+                         * Identificacion, Ubicacion y Socios». Y tiene razon:
+                         * de aca va a colgar todo lo de la factura cuando se
+                         * arme la emision, y metido adentro de Identificacion
+                         * iba a terminar tapando el nombre y el codigo.
+                         */
+                        Tab::make('Facturación')
+                            ->icon('heroicon-o-document-text')
+                            ->schema([
+                                /*
+                                 * ═══ CON QUE PAPEL COBRA ESTE DESARROLLO ═══
+                                 *
+                                 * Mauricio lo pidio asi el 13-ago-2026: «que
+                                 * este en un toggle en cada proyecto y de ahi
+                                 * se selecciona si es individual la
+                                 * facturacion, si es dual o si es recibo;
+                                 * dual es que ambos proyectos consumen la
+                                 * misma facturacion».
+                                 *
+                                 * ⚠️ LOS TRES MODOS NO SE GUARDAN. La columna
+                                 * sigue siendo una sola —`facturacion_id`— y
+                                 * el modo se DEDUCE de ella:
+                                 *
+                                 *   · vacia            → recibo interno
+                                 *   · con una que nadie mas usa → propia
+                                 *   · con una que otro tambien usa → dual
+                                 *
+                                 * Guardarlo aparte seria un segundo lugar
+                                 * donde vive la misma verdad, y el dia que
+                                 * alguien vincule el segundo proyecto desde
+                                 * el OTRO lado, el primero se quedaria
+                                 * diciendo «propia» para siempre. Asi no hay
+                                 * nada que sincronizar: se lee de los hechos.
+                                 */
+                                Section::make('Facturación')
+                                    ->description('Con qué papel se le cobra a la gente de este desarrollo.')
+                                    ->icon('heroicon-o-document-text')
+                                    ->schema([
+                                        Radio::make('modo_de_facturacion')
+                                            ->label('¿Cómo factura este desarrollo?')
+                                            ->options([
+                                                'recibo'     => 'Solo recibo interno',
+                                                'propia'     => 'Facturación propia (individual)',
+                                                'compartida' => 'Facturación compartida (dual)',
+                                            ])
+                                            ->descriptions([
+                                                'recibo'     => 'Sin CAI. Comprobante de caja: sirve para el control de la lotificadora y para el cliente, pero NO da crédito fiscal.',
+                                                'propia'     => 'Este desarrollo emite desde su propia oficina, con su establecimiento y su rango.',
+                                                'compartida' => 'Los dos desarrollos CONSUMEN el mismo rango. Correcto solo si emiten desde la misma oficina: el SAR autoriza el rango por punto de emisión y el código del establecimiento va adentro del número.',
+                                            ])
+                                            ->required()
+                                            // No es columna: se deduce de facturacion_id.
+                                            ->dehydrated(false)
+                                            ->live()
+                                            ->formatStateUsing(static fn (?Proyecto $record): string => self::modoDeFacturacionDe($record))
+                                            ->afterStateUpdated(static fn (Set $set): mixed => $set('facturacion_id', null))
+                                            ->columnSpanFull(),
+
+                                        Select::make('facturacion_id')
+                                            ->label(static fn (Get $get): string => $get('modo_de_facturacion') === 'compartida'
+                                                ? '¿Cuál facturación comparten?'
+                                                : 'Facturación de este desarrollo')
+                                            ->options(static fn (Get $get, ?Proyecto $record): array => self::facturacionesPara($get, $record))
+                                            ->searchable()
+                                            ->visible(static fn (Get $get): bool => $get('modo_de_facturacion') !== 'recibo')
+                                            ->required(static fn (Get $get): bool => $get('modo_de_facturacion') !== 'recibo')
+                                            /*
+                                             * Se guarda AUNQUE este escondido: al pasar a
+                                             * recibo interno, `afterStateUpdated` lo dejo en
+                                             * null y ese null tiene que llegar a la base. Sin
+                                             * esto, el proyecto se quedaria con la
+                                             * facturacion vieja pegada y nadie lo veria.
+                                             */
+                                            ->dehydrated()
+                                            ->helperText(static fn (Get $get): string => $get('modo_de_facturacion') === 'compartida'
+                                                ? 'Al lado de cada una dice qué otro desarrollo la usa. Al elegirla, los dos pasan a consumir el mismo rango de correlativos. Si todavía no la usa nadie, este es el primero de los dos.'
+                                                : 'Se listan las que no está usando ningún otro desarrollo. Se cargan en Administración → Facturación.')
+                                            ->columnSpanFull(),
+
+                                        /*
+                                         * El logo del DESARROLLO, que no es el de la
+                                         * empresa. El de la empresa vive en
+                                         * BrandingSetting y se ve arriba del panel;
+                                         * este sale en el recibo, en el contrato, en
+                                         * el estado de cuenta y en el plano publico,
+                                         * al lado del otro. Pedido de Mauricio el
+                                         * 14-ago-2026, con los tres logos en la mano.
+                                         *
+                                         * Mismo tratamiento que el logo de la
+                                         * instalacion: se convierte a WebP al subirlo
+                                         * —ver ImageOptimizer— porque un PNG de tres
+                                         * megas en el encabezado de un contrato lo
+                                         * unico que hace es demorar la impresion.
+                                         */
+                                        /*
+                                         * ═══ EL MEMBRETE DEL RECIBO INTERNO ═══
+                                         *
+                                         * Solo dos campos, y es a proposito. Lo
+                                         * enderezo Mauricio el 14-ago-2026: un
+                                         * recibo de caja no necesita una
+                                         * «facturacion» —no tiene CAI, ni
+                                         * establecimiento, ni rango— asi que se
+                                         * configura aca mismo.
+                                         *
+                                         * El resto del membrete YA lo tiene el
+                                         * proyecto: el nombre, el logo de abajo y
+                                         * la direccion de la pestaña Ubicacion. Yo
+                                         * le habia puesto otra direccion a la
+                                         * facturacion, y eso dejaba la misma verdad
+                                         * escrita en dos lugares.
+                                         */
+                                        TextInput::make('telefonos')
+                                            ->label('Teléfono(s)')
+                                            ->maxLength(60)
+                                            ->visible(static fn (Get $get): bool => $get('modo_de_facturacion') === 'recibo')
+                                            ->helperText('Salen impresos en el recibo. Si son dos, van separados por una barra: «9993-0743 / 3369-0764».'),
+
+                                        TextInput::make('correo')
+                                            ->label('Correo')
+                                            ->email()
+                                            ->maxLength(120)
+                                            ->visible(static fn (Get $get): bool => $get('modo_de_facturacion') === 'recibo'),
+
+                                        Placeholder::make('de_donde_sale_el_membrete')
+                                            ->label('El resto del membrete')
+                                            ->visible(static fn (Get $get): bool => $get('modo_de_facturacion') === 'recibo')
+                                            ->content(new HtmlString(
+                                                'El <strong>nombre</strong> y la <strong>dirección</strong> del recibo salen de lo que este '.
+                                                'proyecto ya tiene: el nombre de arriba y la dirección de la pestaña <strong>Ubicación</strong>. '.
+                                                'No se vuelven a teclear acá — si se corrigen allá, el recibo cambia solo.'
+                                            ))
+                                            ->columnSpanFull(),
+
+                                        FileUpload::make('logo_path')
+                                            ->label('Logo del desarrollo')
+                                            ->image()
+                                            ->imageEditor()
+                                            ->disk('public')
+                                            ->directory('proyectos')
+                                            ->visibility('public')
+                                            ->maxSize(5120)
+                                            ->acceptedFileTypes(['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp'])
+                                            ->saveUploadedFileUsing(static fn (TemporaryUploadedFile $file): string => ImageOptimizer::toWebp($file, 'proyectos'))
+                                            ->helperText('El de ESTE desarrollo, no el de la inmobiliaria. Sale en el recibo y la factura —junto al de la empresa, que ya está cargado en Configuración—, y también en el contrato, el estado de cuenta y el plano público. Se convierte a WebP solo. Máximo 5 MB.')
+                                            ->columnSpanFull(),
+                                    ])
+                                    ->columns(2)
+                                    ->columnSpanFull(),
+                            ])
+                            ->columns(1),
+
                         Tab::make('Estado')
                             ->icon('heroicon-o-power')
                             ->schema([
@@ -270,6 +475,15 @@ class ProyectoForm
                                 Section::make('Medidas del plano')
                                     ->description('En qué unidad se leen las medidas de este desarrollo.')
                                     ->icon('heroicon-o-scale')
+                                    /*
+                                     * Desaparece entera cuando el proyecto trabaja
+                                     * en metros²: ahí la unidad del área ES el
+                                     * metro, el factor vale uno solo —lo resuelve
+                                     * Proyecto::varaEnMetros()— y las medidas ya
+                                     * están en metros. Preguntar de nuevo lo mismo
+                                     * es un campo más donde equivocarse.
+                                     */
+                                    ->visible(static fn (Get $get): bool => $get('unidad_area') !== UnidadDeArea::Metros->value)
                                     ->schema([
                                         Toggle::make('medidas_en_metros')
                                             ->label('Mostrar las medidas en metros')
@@ -319,6 +533,120 @@ class ProyectoForm
                                             )),
                                     ])
                                     ->columns(2),
+
+                                /*
+                                 * ═══ EL CUPO, NO EL PERMISO ═══
+                                 *
+                                 * Donar saca un lote del inventario sin que
+                                 * entre un lempira, y es el unico compromiso
+                                 * que no deja rastro de plata. Un si/no deja
+                                 * la puerta abierta para siempre; un cupo la
+                                 * cierra sola cuando se cumplio lo que la
+                                 * lotificadora decidio regalar.
+                                 *
+                                 * El boton «Donar este lote» del plano sale
+                                 * de aca: mientras queden donaciones se
+                                 * dibuja, y cuando el cupo se llena
+                                 * desaparece. Ver Proyecto::puedeDonarOtroLote().
+                                 */
+                                Section::make('Donaciones')
+                                    ->description('Cuántos lotes de este desarrollo se van a entregar sin cobrar.')
+                                    ->icon('heroicon-o-gift')
+                                    ->schema([
+                                        Toggle::make('dona_lotes')
+                                            ->label('Este desarrollo dona lotes')
+                                            ->onColor('success')
+                                            ->offColor('gray')
+                                            ->live()
+                                            ->helperText(
+                                                'Apagado, el botón «Donar este lote» no aparece en el plano. '.
+                                                'Una donación es definitiva y no genera cartera: conviene que '.
+                                                'sea una decisión tomada antes, no un clic disponible siempre.'
+                                            ),
+
+                                        TextInput::make('lotes_a_donar')
+                                            ->label('Cuántos lotes se donarán')
+                                            ->numeric()
+                                            ->minValue(0)
+                                            ->maxValue(9999)
+                                            ->default(0)
+                                            ->required()
+                                            ->visible(static fn (Get $get): bool => (bool) $get('dona_lotes'))
+                                            ->helperText(static function (?Proyecto $record): string {
+                                                if (! $record instanceof Proyecto) {
+                                                    return 'El botón de donar se muestra hasta completar esta cantidad, y después desaparece solo.';
+                                                }
+
+                                                $hechas = $record->lotesDonados();
+                                                $cupo = $record->cupoDeDonaciones();
+
+                                                if ($hechas > $cupo && $cupo > 0) {
+                                                    return "⚠️ Ya hay {$hechas} lotes donados, más que el cupo de {$cupo}. ".
+                                                           'Lo entregado no se deshace solo: el botón queda oculto hasta que subas el número.';
+                                                }
+
+                                                return "Van {$hechas} donados. El botón se muestra hasta completar la cantidad, y después desaparece solo.";
+                                            }),
+                                    ])
+                                    ->columns(1),
+
+                                /*
+                                 * ═══ HERENCIA: EL GEMELO DE LAS DONACIONES ═══
+                                 *
+                                 * Lo pidio Mauricio el 13-ago-2026, el mismo
+                                 * dia y con el mismo argumento: «para los
+                                 * reservados, estos son para lotes heredados,
+                                 * asi que tambien hay que colocarlo». Es la
+                                 * otra forma de que el inventario se achique
+                                 * sin una venta atras, asi que lleva cupo por
+                                 * la misma razon.
+                                 *
+                                 * ⚠️ Adentro dice «Herencia» y afuera dice
+                                 * «Reservado». No es un descuido: el plano
+                                 * publico sigue usando la palabra que el
+                                 * comprador entiende sola. Ver
+                                 * EstadoLote::etiquetaInterna().
+                                 */
+                                Section::make('Herencia')
+                                    ->description('Cuántos lotes de este desarrollo se guardan para la familia.')
+                                    ->icon('heroicon-o-home-modern')
+                                    ->schema([
+                                        Toggle::make('reserva_lotes')
+                                            ->label('Este desarrollo guarda lotes para herencia')
+                                            ->onColor('success')
+                                            ->offColor('gray')
+                                            ->live()
+                                            ->helperText(
+                                                'Apagado, el botón «Guardar para herencia» no aparece en el plano. '.
+                                                'Un lote guardado sale del mercado y no genera cartera: conviene '.
+                                                'que sea una decisión tomada al armar el desarrollo.'
+                                            ),
+
+                                        TextInput::make('lotes_a_reservar')
+                                            ->label('Cuántos lotes se guardarán')
+                                            ->numeric()
+                                            ->minValue(0)
+                                            ->maxValue(9999)
+                                            ->default(0)
+                                            ->required()
+                                            ->visible(static fn (Get $get): bool => (bool) $get('reserva_lotes'))
+                                            ->helperText(static function (?Proyecto $record): string {
+                                                if (! $record instanceof Proyecto) {
+                                                    return 'El botón de guardar se muestra hasta completar esta cantidad, y después desaparece solo.';
+                                                }
+
+                                                $guardados = $record->lotesReservados();
+                                                $cupo = $record->cupoDeReservas();
+
+                                                if ($guardados > $cupo && $cupo > 0) {
+                                                    return "⚠️ Ya hay {$guardados} lotes guardados, más que el cupo de {$cupo}. ".
+                                                           'El botón queda oculto hasta que subas el número, o hasta que saques alguno desde el plano.';
+                                                }
+
+                                                return "Van {$guardados} guardados. El botón se muestra hasta completar la cantidad, y después desaparece solo.";
+                                            }),
+                                    ])
+                                    ->columns(1),
 
                                 Section::make('Plano público')
                                     ->description('La página que se le manda al cliente por WhatsApp.')
@@ -593,5 +921,97 @@ class ProyectoForm
         $limpio = rtrim(rtrim(new Monto((string) $parte)->redondeado(4), '0'), '.');
 
         return sprintf('%s · %s%%', trim($nombre), $limpio);
+    }
+
+    /**
+     * En cuál de los tres modos está HOY este desarrollo.
+     *
+     * Se deduce, no se guarda. Ver el comentario de la sección Facturación:
+     * un segundo lugar donde viva la misma verdad es un segundo lugar que se
+     * puede quedar viejo.
+     */
+    private static function modoDeFacturacionDe(?Proyecto $record): string
+    {
+        $facturacion = $record instanceof Proyecto ? $record->getAttribute('facturacion_id') : null;
+
+        if (! is_int($facturacion)) {
+            return 'recibo';
+        }
+
+        $cuantos = Proyecto::query()->where('facturacion_id', '=', $facturacion)->count();
+
+        return $cuantos > 1 ? 'compartida' : 'propia';
+    }
+
+    /**
+     * Las facturaciones que se pueden elegir, según el modo.
+     *
+     * En «propia» solo las que no está usando NADIE más: elegir una que ya
+     * tiene dueño sería compartirla sin decirlo.
+     *
+     * ⚠️ En «compartida» se listan TODAS, y esa fue una corrección del
+     * 14-ago-2026. Antes salían solo las que otro desarrollo ya usaba, y
+     * eso dejaba un huevo-y-gallina: la primera vez la lista aparecía
+     * vacía —«no hay opciones disponibles»— porque nadie había tomado
+     * ninguna todavía, y no había forma de empezar a compartir. Ahora se
+     * puede elegir cualquiera y al lado dice quién más la usa, que es el
+     * dato que de verdad importa al vincular.
+     *
+     * El modo no lo decide este selector: lo decide cuántos proyectos
+     * terminan apuntando a la misma. Ver `modoDeFacturacionDe()`.
+     *
+     * @return array<int, string>
+     */
+    private static function facturacionesPara(Get $get, ?Proyecto $record): array
+    {
+        $modo = $get('modo_de_facturacion');
+        $miId = $record instanceof Proyecto ? (int) $record->getKey() : 0;
+
+        $opciones = [];
+
+        $facturaciones = Facturacion::query()
+            ->where('activa', '=', true)
+            ->with('proyectos')
+            ->orderBy('nombre')
+            ->get();
+
+        foreach ($facturaciones as $facturacion) {
+            $otros = $facturacion->proyectos
+                ->reject(static fn (Proyecto $proyecto): bool => (int) $proyecto->getKey() === $miId);
+
+            $laUsaOtro = $otros->isNotEmpty();
+
+            if ($modo === 'propia' && $laUsaOtro) {
+                continue;
+            }
+
+            $etiqueta = (string) $facturacion->getAttribute('nombre');
+
+            if ($laUsaOtro) {
+                $etiqueta .= ' — la usa: '.$otros->pluck('nombre')->implode(', ');
+            } elseif ($modo === 'compartida') {
+                $etiqueta .= ' — todavía no la usa nadie más';
+            }
+
+            $opciones[(int) $facturacion->getKey()] = $etiqueta;
+        }
+
+        return $opciones;
+    }
+
+    /**
+     * El código tal como va a salir impreso, o un ejemplo si todavía no hay.
+     *
+     * En MAYÚSCULAS porque así lo guarda el mutador y así sale en el contrato:
+     * mostrar «reb» mientras se teclea y después imprimir «REB» haría dudar de
+     * cuál de los dos vale.
+     */
+    private static function codigoDeEjemplo(Get $get): string
+    {
+        $codigo = $get('codigo');
+
+        return is_string($codigo) && trim($codigo) !== ''
+            ? mb_strtoupper(trim($codigo))
+            : 'RPS';
     }
 }

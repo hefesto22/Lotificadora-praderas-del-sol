@@ -9,6 +9,7 @@ use App\Domain\Enums\FormaDePago;
 use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\RegistroDeCompromisos;
+use App\Filament\Support\BuscarNombre;
 use App\Filament\Support\DevolverLaSenia;
 use App\Models\Compromiso;
 use Filament\Actions\Action;
@@ -47,7 +48,8 @@ class ApartadosTable
 
                 TextColumn::make('cliente.nombre')
                     ->label('A nombre de')
-                    ->searchable()
+                    // Sin acentos: ver BuscarNombre.
+                    ->searchable(query: BuscarNombre::delCliente())
                     ->wrap(),
 
                 TextColumn::make('fecha')

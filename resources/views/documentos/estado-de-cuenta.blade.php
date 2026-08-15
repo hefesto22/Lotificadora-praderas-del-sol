@@ -40,10 +40,20 @@
         .barra button { background: #18181b; border-color: #18181b; color: #fff; font-weight: 600; }
 
         .encabezado { display: flex; justify-content: space-between; gap: 1.5rem; align-items: flex-start; }
-        .emisor { max-width: 60%; }
-        .emisor img { max-height: 52px; max-width: 190px; margin-bottom: .5rem; }
-        .emisor .residencial { font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
-        .emisor .linea { color: #52525b; font-size: 12px; }
+        /* Membrete: el logo a la IZQUIERDA y los datos al lado, en una sola
+           columna que baja. `.datos` es block a proposito —y esta dicho—
+           porque `.emisor` es flex: sin esto, cada renglon del emisor se
+           volvia una columna del encabezado y la direccion terminaba
+           flotando al lado del nombre.
+
+           `height` fija con `width:auto` y `object-fit:contain`: asi un logo
+           alto, uno ancho y uno cuadrado ocupan la misma franja y el membrete
+           se ve igual en los tres desarrollos. */
+        .emisor { max-width: 62%; display: flex; gap: .75rem; align-items: flex-start; }
+        .emisor img { height: 44px; width: auto; max-width: 140px; object-fit: contain; flex: none; }
+        .emisor .datos { display: block; min-width: 0; }
+        .emisor .residencial { font-size: 14px; font-weight: 700; letter-spacing: -.01em; line-height: 1.25; }
+        .emisor .linea { color: #52525b; font-size: 11.5px; line-height: 1.45; }
 
         .titulo { text-align: right; white-space: nowrap; }
         .titulo .que { font-size: 15px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
@@ -127,19 +137,30 @@
 
     <div class="encabezado">
         <div class="emisor">
-            @if ($logo)
+            {{-- UN solo logo: el del desarrollo, que es la marca que el cliente
+                 reconoce. El de la inmobiliaria queda de respaldo para los que
+                 todavía no tengan el suyo cargado. --}}
+            @if ($logoDelProyecto ?? null)
+                <img src="{{ $logoDelProyecto }}" alt="">
+            @elseif ($logo)
                 <img src="{{ $logo }}" alt="">
             @endif
-            <div class="residencial">{{ $emisor['residencial'] ?? '' }}</div>
-            @if ($emisor['nombre'] ?? null)
-                <div class="linea">{{ $emisor['nombre'] }}</div>
-            @endif
-            @if ($emisor['rtn'] ?? null)
-                <div class="linea">RTN {{ $emisor['rtn'] }}</div>
-            @endif
-            @if ($emisor['direccion'] ?? null)
-                <div class="linea">{{ $emisor['direccion'] }}</div>
-            @endif
+
+            <div class="datos">
+                <div class="residencial">{{ $emisor['residencial'] ?? '' }}</div>
+                @if ($emisor['nombre'] ?? null)
+                    <div class="linea">{{ $emisor['nombre'] }}</div>
+                @endif
+                @if ($emisor['rtn'] ?? null)
+                    <div class="linea">RTN {{ $emisor['rtn'] }}</div>
+                @endif
+                @if ($emisor['direccion'] ?? null)
+                    <div class="linea">{{ $emisor['direccion'] }}</div>
+                @endif
+                @if ($emisor['telefono'] ?? null)
+                    <div class="linea">Tel. {{ $emisor['telefono'] }}</div>
+                @endif
+            </div>
         </div>
 
         <div class="titulo">

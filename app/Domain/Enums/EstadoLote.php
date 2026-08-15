@@ -169,26 +169,44 @@ enum EstadoLote: string
     }
 
     /**
-     * ¿Se explica en la leyenda del plano publico?
+     * Como se ve este lote DESDE AFUERA, en el plano publico.
      *
-     * Cancelado no. Es un estado interno —un apartado que se cayo, una venta
-     * rescindida— y para el cliente que mira la vidriera solo significa «no
-     * esta a la venta». Nombrarlo invita a preguntar por que, que es una
-     * conversacion que no le toca tener a una pagina web.
+     * Tres de los seis estados salen a la calle disfrazados de VENDIDO:
+     * reservado, donado y cancelado. Lo pidio Mauricio el 13-ago-2026:
+     * «que reservado y donado solo aparezcan como venta, para que el mundo
+     * no lo sepa; solo que aparezca como venta y ya».
      *
-     * Reservado SI. Es la respuesta contraria y por la razon contraria:
-     * «reservado» es una palabra que en bienes raices se entiende sola y
-     * CIERRA la conversacion en vez de abrirla. Sin ella, dieciseis lotes
-     * pintados de un color sin nombre en la leyenda es exactamente lo que
-     * hace que alguien llame a preguntar.
+     * ═══ POR QUE ═══
      *
-     * Donado tambien, por lo mismo. Y ademas no hay nada que esconder: la
-     * iglesia o la escuela que se levante ahi la va a ver cualquiera que pase
-     * por la calle, y en la vidriera juega a favor.
+     * Porque el plano publico es una vidriera, y de un lote que no esta a
+     * la venta lo unico que le sirve saber al que pasa es eso: que no esta.
+     * El POR QUE no esta es asunto de adentro. Cuantos lotes se guardo la
+     * familia y a quien se le regalaron son datos que le dicen a la
+     * competencia —y al vecino— como se administra el desarrollo, y no
+     * ayudan a vender ni un lote.
+     *
+     * Los tres se juntan en «vendido» y no en un estado propio porque
+     * cualquier color con nombre nuevo es una pregunta nueva. Un plano con
+     * tres tonos —libre, apartado, vendido— no deja nada que interpretar.
+     *
+     * ⚠️ El cancelado entra en la lista y esto REEMPLAZA a la vieja
+     * `enLeyendaPublica()`, que lo pintaba de rojo propio y despues lo
+     * borraba de la leyenda. Eso dejaba lotes «de un color sin nombre»,
+     * que era justo lo que aquel metodo decia querer evitar. Ahora no hay
+     * color sin nombre porque no hay color de mas.
+     *
+     * ⚠️ ES SOLO LA PINTURA. Nada de esto toca la verdad: el contador de
+     * disponibles, el `seCotiza` que decide quien lleva precio, los
+     * reportes, la ficha del lote y el plano de administracion siguen
+     * viendo los seis estados como son. Un lote donado que afuera se lee
+     * «Vendido» adentro sigue sin generar un lempira de cartera.
      */
-    public function enLeyendaPublica(): bool
+    public function comoSeVeAfuera(): self
     {
-        return $this !== self::Cancelado;
+        return match ($this) {
+            self::Disponible, self::Apartado, self::Vendido => $this,
+            self::Reservado, self::Donado, self::Cancelado  => self::Vendido,
+        };
     }
 
     /**
@@ -248,6 +266,78 @@ enum EstadoLote: string
     }
 
     /**
+     * ¿Se puede CORREGIR la donación de este lote?
+     *
+     * Solo un lote DONADO, y la palabra importa: esto no es «devolver» una
+     * donación —para cuando una donación de verdad quedó registrada, lo
+     * normal es que la escritura ya esté firmada a nombre de otro—. Esto
+     * es deshacer un REGISTRO que no debió existir.
+     *
+     * El caso que lo pidió, de Mauricio el 13-ago-2026: «iban a donar 5,
+     * los donaron, pero hubo un error, así que solo se donarían 3; esos 2
+     * deben quedar disponibles para la venta». Y lo que lo hace simple es
+     * que una donación **no mueve un lempira**: no hay seña que devolver,
+     * ni recibos que anular, ni plan de cuotas que desarmar. Soltar el
+     * lote es todo lo que hay que hacer.
+     */
+    public function seDeshaceLaDonacion(): bool
+    {
+        return $this === self::Donado;
+    }
+
+    /**
+     * ¿Este lote se puede guardar para herencia hoy?
+     *
+     * Solo el DISPONIBLE, y es una lista de uno a proposito. Guardar un
+     * lote no le devuelve una seña a nadie ni rescinde nada: si esta
+     * apartado o vendido, primero hay que deshacer ESO —que es un tramite
+     * con plata de por medio— y recien despues guardarlo. Un cancelado se
+     * reactiva desde su ficha, y uno donado ya se entrego.
+     */
+    public function seReserva(): bool
+    {
+        return $this === self::Disponible;
+    }
+
+    /**
+     * ¿Se puede sacar de herencia este lote?
+     *
+     * Solo uno RESERVADO, y es tan simple como se ve: guardarlo no movio
+     * un lempira, asi que soltarlo tampoco. Vuelve a disponible y listo.
+     *
+     * ⚠️ No es la unica salida que tiene. Un lote reservado tambien
+     * `seDona()`: el camino normal del heredero es guardarlo mientras
+     * corre el tramite y donarlo cuando se firma la escritura.
+     */
+    public function seDeshaceLaReserva(): bool
+    {
+        return $this === self::Reservado;
+    }
+
+    /**
+     * La misma etiqueta, pero para las pantallas de ADENTRO.
+     *
+     * Cambia UNA sola: `Reservado` se lee «Herencia». Decision de Mauricio
+     * el 13-ago-2026 —«herencia adentro, reservado afuera»— y las dos
+     * palabras estan bien, cada una para su lector:
+     *
+     *  · Adentro se administra un cupo de lotes guardados para la familia.
+     *    «Reservado» no dice para quien ni por que, y quien configura el
+     *    desarrollo o atiende en ventanilla necesita justamente eso.
+     *  · Afuera —`PlanoPublico`— sigue diciendo «Reservado», que en bienes
+     *    raices se entiende sola y CIERRA la conversacion. «Herencia» le
+     *    cuenta al que pasa por la web que hay una familia dueña detras,
+     *    que no es asunto de una vidriera.
+     *
+     * ⚠️ El unico lugar que se queda con `etiqueta()` es el plano publico.
+     * Ante una pantalla nueva, la pregunta es a quien se le muestra.
+     */
+    public function etiquetaInterna(): string
+    {
+        return $this === self::Reservado ? 'Herencia' : $this->etiqueta();
+    }
+
+    /**
      * La frase que se le muestra a quien abrió el lote y no lo puede vender.
      *
      * Vive pegada a `seVende()` por la misma razón que `relleno()` vive pegado
@@ -266,7 +356,7 @@ enum EstadoLote: string
             self::Disponible, self::Apartado => null,
             self::Vendido                    => 'Lote vendido. Deshacer una venta es una rescisión y ese trámite todavía no está en el sistema.',
             self::Cancelado                  => 'Lote cancelado. Hay que reactivarlo desde su ficha antes de comprometerlo con alguien.',
-            self::Reservado                  => 'Lote reservado: la lotificadora lo sacó del mercado. El motivo está en las observaciones del lote.',
+            self::Reservado                  => 'Lote guardado para herencia: la lotificadora lo sacó del mercado. El motivo está en las observaciones del lote.',
             self::Donado                     => 'Lote donado. Ya tiene dueño y no vuelve al inventario.',
         };
     }

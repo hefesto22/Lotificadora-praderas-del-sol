@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Domain\Enums\EstadoCompromiso;
 use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\TipoCompromiso;
+use App\Domain\Lotes\RegistroDeReservas;
 use App\Domain\Ventas\RegistroDeCompromisos;
 use App\Filament\Resources\Proyectos\Pages\VerPlano;
 use App\Models\Bloque;
@@ -32,7 +34,20 @@ use Livewire\Livewire;
 beforeEach(function (): void {
     actingAsAdmin();
 
-    $this->proyecto = Proyecto::factory()->create(['codigo' => 'RPS']);
+    /*
+    | Con los dos cupos de sobra. Desde el 13-ago-2026 donar exige que el
+    | desarrollo haya declarado cuantos lotes va a regalar, y guardar para
+    | herencia lo mismo. Este archivo prueba el camino del PLANO —el modal,
+    | el motivo, el cliente—, no las reglas del cupo: esas viven en
+    | CupoDeDonacionesTest y en CupoDeHerenciaTest.
+    */
+    $this->proyecto = Proyecto::factory()->create([
+        'codigo'           => 'RPS',
+        'dona_lotes'       => true,
+        'lotes_a_donar'    => 50,
+        'reserva_lotes'    => true,
+        'lotes_a_reservar' => 50,
+    ]);
     $this->bloque = Bloque::factory()->create([
         'proyecto_id' => $this->proyecto->getKey(),
         'nombre'      => 'A',
@@ -617,5 +632,128 @@ describe('Donar', function (): void {
 
         expect($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Disponible)
             ->and(Compromiso::query()->count())->toBe(0);
+    });
+
+    /*
+    | Quitar la donacion, que es el otro boton del mismo modal y hoy el unico
+    | camino que hay: «iban a donar 5, los donaron, pero solo se donarian 3».
+    | El dominio ya tiene sus reglas probadas en CupoDeDonacionesTest; lo que
+    | falta ver aca es que el boton mande el motivo y no se coma el lote.
+    */
+    test('quitar la donacion devuelve el lote al inventario', function (): void {
+        $lote = ($this->lote)('4');
+
+        app(RegistroDeCompromisos::class)->donar($lote, $this->rosa, 'Se marcaron cinco por error.');
+
+        Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->callAction(
+                'deshacerDonacion',
+                ['motivo' => 'La junta aprobo donar solo tres; estos dos vuelven a la venta.'],
+                ['lote'   => $lote->getKey()],
+            )
+            ->assertHasNoActionErrors();
+
+        $cerrado = Compromiso::query()->where('lote_id', $lote->getKey())->firstOrFail();
+
+        expect($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Disponible)
+            ->and($cerrado->getAttribute('estado'))->toBe(EstadoCompromiso::Liberado)
+            ->and($cerrado->getAttribute('motivo'))->toContain('solo tres')
+            // Una donacion no movio plata: no hay nada que devolver.
+            ->and(Venta::query()->count())->toBe(0)
+            ->and(Cuota::query()->count())->toBe(0);
+    });
+
+    test('sin motivo la donacion no se quita', function (): void {
+        $lote = ($this->lote)('5');
+
+        app(RegistroDeCompromisos::class)->donar($lote, $this->rosa, 'Iglesia del sector.');
+
+        Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->callAction('deshacerDonacion', [], ['lote' => $lote->getKey()])
+            ->assertHasActionErrors(['motivo']);
+
+        expect($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Donado);
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| Guardar para HERENCIA desde el plano
+|--------------------------------------------------------------------------
+| El otro camino que achica el inventario sin una venta atras, y el unico
+| que hay hoy para marcar un lote como reservado sin editarle el estado a
+| mano desde su ficha. Pedido de Mauricio el 13-ago-2026: «estos son para
+| lotes heredados».
+|
+| Las reglas del cupo viven en CupoDeHerenciaTest; aca se prueba que el
+| boton mande el motivo y mueva el lote.
+*/
+describe('Guardar para herencia', function (): void {
+    test('el lote sale del mercado con su motivo escrito', function (): void {
+        $lote = ($this->lote)('6');
+
+        Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->callAction(
+                'reservarLote',
+                ['motivo' => 'Guardado para los herederos de la familia Mejia. Acta del 12-ago-2026.'],
+                ['lote'   => $lote->getKey()],
+            )
+            ->assertHasNoActionErrors();
+
+        expect($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Reservado)
+            ->and($lote->getAttribute('observaciones'))->toContain('herederos de la familia Mejia')
+            // Guardar no vende nada ni ata a nadie: no hay cartera detras.
+            ->and(Venta::query()->count())->toBe(0)
+            ->and(Compromiso::query()->count())->toBe(0);
+    });
+
+    test('sin motivo no se guarda y el lote no se mueve', function (): void {
+        $lote = ($this->lote)('7');
+
+        Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->callAction('reservarLote', [], ['lote' => $lote->getKey()])
+            ->assertHasActionErrors(['motivo']);
+
+        expect($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Disponible);
+    });
+
+    test('devolver a la venta lo deja disponible otra vez', function (): void {
+        $lote = ($this->lote)('8');
+
+        app(RegistroDeReservas::class)->reservar($lote, 'Para los herederos.');
+
+        Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->callAction(
+                'deshacerReserva',
+                ['motivo' => 'La familia decidio no quedarselo.'],
+                ['lote'   => $lote->getKey()],
+            )
+            ->assertHasNoActionErrors();
+
+        expect($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Disponible)
+            // Las dos mitades quedan escritas, no se pisan.
+            ->and($lote->getAttribute('observaciones'))->toContain('Para los herederos.')
+            ->and($lote->getAttribute('observaciones'))->toContain('La familia decidio no quedarselo.');
+    });
+
+    /*
+    | El camino largo: se guarda mientras corre el tramite del heredero y se
+    | dona cuando se firma. Es la razon de que `reservado` este en la lista
+    | blanca de EstadoLote::seDona().
+    */
+    test('un lote guardado se puede donar sin devolverlo antes', function (): void {
+        $lote = ($this->lote)('9');
+
+        app(RegistroDeReservas::class)->reservar($lote, 'Para los herederos, mientras corre el tramite.');
+
+        Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->callAction(
+                'donarLote',
+                ['cliente_id' => $this->rosa->getKey(), 'motivo' => 'Se firmo la adjudicacion.'],
+                ['lote'       => $lote->getKey()],
+            )
+            ->assertHasNoActionErrors();
+
+        expect($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Donado);
     });
 });

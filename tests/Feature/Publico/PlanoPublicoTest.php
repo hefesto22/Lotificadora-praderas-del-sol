@@ -535,3 +535,109 @@ describe('Plano público — cómo llegar', function (): void {
             ->toThrow(QueryException::class);
     });
 });
+
+/*
+|--------------------------------------------------------------------------
+| Lo que la calle NO tiene por qué distinguir
+|--------------------------------------------------------------------------
+| Pedido de Mauricio, 13-ago-2026: «que reservado y donado solo aparezcan
+| como venta, para que el mundo no lo sepa». Cuántos lotes se guardó la
+| familia y a quién se le regalaron son datos que le dicen a la competencia
+| —y al vecino— cómo se administra el desarrollo, y no venden ni un lote.
+|
+| El cancelado entra en la misma bolsa: antes se pintaba de rojo propio y
+| después se lo borraba de la leyenda, o sea un color sin nombre, que era
+| justo lo que había que evitar.
+|
+| ⚠️ Es SOLO la pintura. Los tests de abajo verifican también que la verdad
+| no se mueva: el contador de disponibles y el `seCotiza` siguen leyendo el
+| estado real.
+*/
+describe('Plano público — el disfraz de la vidriera', function (): void {
+    test('reservado, donado y cancelado salen como vendidos', function (): void {
+        $numero = 2;
+
+        foreach ([EstadoLote::Reservado, EstadoLote::Donado, EstadoLote::Cancelado] as $estado) {
+            $numero++;
+
+            Lote::factory()
+                ->enBloque($this->bloque)
+                ->conEstado($estado)
+                ->create([
+                    'numero'   => (string) $numero,
+                    'poligono' => [[$numero * 20, 0], [$numero * 20 + 10, 0], [$numero * 20 + 10, 25], [$numero * 20, 25]],
+                ]);
+        }
+
+        $lotes = resolve(PlanoPublico::class)->para($this->proyecto)['lotes'];
+        $disfrazados = array_slice($lotes, 2);
+
+        expect($disfrazados)->toHaveCount(3);
+
+        foreach ($disfrazados as $lote) {
+            expect($lote['estado'])->toBe(EstadoLote::Vendido->value)
+                ->and($lote['etiqueta'])->toBe('Vendido')
+                ->and($lote['color'])->toBe(EstadoLote::Vendido->colorHex())
+                // Y ninguno lleva precio: no están a la venta de verdad.
+                ->and($lote['seCotiza'])->toBeFalse();
+        }
+    });
+
+    /*
+    | El disfraz es de pintura y nada más. Si el contador se dejara engañar,
+    | la página diría «2 disponibles de 5» y estaría mintiendo hacia el otro
+    | lado —ofreciendo lotes que no existen—.
+    */
+    test('el contador de disponibles no se deja disfrazar', function (): void {
+        Lote::factory()->enBloque($this->bloque)->conEstado(EstadoLote::Reservado)->create([
+            'numero'   => '3',
+            'poligono' => [[60, 0], [70, 0], [70, 25], [60, 25]],
+        ]);
+
+        $publico = resolve(PlanoPublico::class)->para($this->proyecto);
+
+        expect($publico['disponibles'])->toBe(1)
+            ->and($publico['total'])->toBe(3);
+    });
+
+    /*
+    | Tres tonos y no seis. De esta lista sale la leyenda Y la clase CSS de
+    | cada lote, así que un color de más sería un lote pintado distinto sin
+    | nombre que lo explique.
+    */
+    test('la leyenda tiene tres colores y ninguno se llama reservado', function (): void {
+        $colores = resolve(PlanoPublico::class)->para($this->proyecto)['colores'];
+
+        expect(array_column($colores, 'estado'))->toBe([
+            EstadoLote::Disponible->value,
+            EstadoLote::Apartado->value,
+            EstadoLote::Vendido->value,
+        ]);
+
+        expect(array_column($colores, 'etiqueta'))->toBe(['Disponible', 'Apartado', 'Vendido']);
+    });
+
+    /*
+    | La red de salida: la palabra no puede aparecer en el HTML crudo, ni en
+    | la leyenda, ni en el `<title>` del polígono, ni en una clase CSS.
+    */
+    test('la página no dice reservado ni donado en ninguna parte', function (): void {
+        Lote::factory()->enBloque($this->bloque)->conEstado(EstadoLote::Reservado)->create([
+            'numero'   => '3',
+            'poligono' => [[60, 0], [70, 0], [70, 25], [60, 25]],
+        ]);
+        Lote::factory()->enBloque($this->bloque)->conEstado(EstadoLote::Donado)->create([
+            'numero'   => '4',
+            'poligono' => [[80, 0], [90, 0], [90, 25], [80, 25]],
+        ]);
+
+        $this->get(route('plano.publico', ['slug' => 'praderas-del-sol']))
+            ->assertOk()
+            // Sin esto, una página en blanco pasaría los tres de abajo.
+            ->assertSee('Vendido')
+            ->assertDontSee('Reservado')
+            ->assertDontSee('Donado')
+            ->assertDontSee('e-reservado', escape: false)
+            ->assertDontSee('e-donado', escape: false);
+    });
+});

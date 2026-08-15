@@ -12,6 +12,7 @@ use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\TipoCompromiso;
 use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\Exceptions\VentaInvalidaException;
+use App\Domain\Facturacion\ConsumoDeFacturas;
 use App\Domain\ValueObjects\Monto;
 use App\Models\Cliente;
 use App\Models\Compromiso;
@@ -65,6 +66,7 @@ final readonly class RegistroDeVentas
 {
     public function __construct(
         private ConsumoDeCorrelativos $correlativos,
+        private ConsumoDeFacturas $facturas,
         private RegistroDeCompromisos $compromisos,
         private ListaDePrecios $lista,
     ) {}
@@ -306,6 +308,8 @@ final readonly class RegistroDeVentas
             return;
         }
 
+        $factura = $this->facturas->paraElProyecto($venta->proyecto);
+
         Recibo::query()->create([
             'numero'        => $this->correlativos->siguienteDeReciboInterno(),
             'venta_id'      => $venta->getKey(),
@@ -320,6 +324,18 @@ final readonly class RegistroDeVentas
                 $prima->formateado(),
                 $senias->formateado(),
             ),
+            /*
+             * ═══ LA FACTURA CON CAI, DESDE EL 14-AGO-2026 ═══
+             *
+             * Si el desarrollo tiene una facturación encendida, acá se consume
+             * el correlativo del SAR y el papel sale como FACTURA. Si no, no
+             * agrega nada y el papel sale como el recibo interno de siempre.
+             *
+             * El número interno de arriba NO se saltea en ninguno de los dos
+             * casos: es el que cuadra la caja, y una serie con huecos deja de
+             * servir para eso (R12).
+             */
+            ...($factura?->paraElRecibo() ?? []),
         ]);
     }
 
@@ -531,7 +547,7 @@ final readonly class RegistroDeVentas
             $motivo = $acuerdo?->motivoLimpio();
 
             if (PrecioPactado::exigeMotivo($lista, $precio, $motivo)) {
-                throw VentaInvalidaException::porDescuentoSinMotivo($this->codigo($lote), $lista, $precio);
+                throw VentaInvalidaException::porDescuentoSinMotivo($this->codigo($lote), $lista, $precio, $proyecto->unidadDeArea());
             }
 
             /*

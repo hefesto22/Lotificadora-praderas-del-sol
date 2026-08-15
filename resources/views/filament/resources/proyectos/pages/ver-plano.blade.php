@@ -205,6 +205,11 @@
            pesar lo mismo que Vender. */
         .plano-accion-donar { border-style: dashed; border-color: #0d9488; color: #0f766e; }
         .dark .plano-accion-donar { border-color: rgba(13, 148, 136, .55); color: #5eead4; }
+        /* Cobrar es el boton de todos los dias del lote vendido: lleno y no
+           punteado, al reves que donar. Verde como la accion de Filament que
+           monta, para que el color del boton y el del modal coincidan. */
+        .plano-accion-cobrar { border-color: #16a34a; background: #f0fdf4; color: #15803d; font-weight: 600; }
+        .dark .plano-accion-cobrar { border-color: rgba(22, 163, 74, .55); background: rgba(22, 163, 74, .12); color: #86efac; }
 
         .plano-detalle-vacio { font-size: .875rem; color: rgb(113 113 122); }
         .dark .plano-detalle-vacio { color: rgb(161 161 170); }
@@ -403,6 +408,9 @@
                    Los poligonos estan siempre en varas: `factor` es 1 o
                    los metros que mide la vara del desarrollo. */
                 medidas: @js($plano['medidas']),
+                donaciones: @js($plano['donaciones']),
+                herencia: @js($plano['herencia']),
+                cobros: @js($cobros),
 
                 base: @js($plano['viewBox']).split(' ').map(Number),
                 vista: { x: 0, y: 0, w: 1, h: 1 },
@@ -448,7 +456,24 @@
                    y no viaja en cada render de Livewire. Si falla, no pasa
                    nada: los lotes se dibujan igual. */
                 calco: { obra: '', rotulo: '', textos: [] },
-                verCalco: true,
+
+                /* 🔴 Arranca segun SI HAY calco, no en true a secas.
+                   Mordio el 13-ago-2026 con El Bambu: el boton que apaga
+                   el calco solo se dibuja cuando el proyecto TIENE calco
+                   —ver la condicion de mas abajo, al lado de «Ampliar»—,
+                   asi que en un proyecto sin calco verCalco se quedaba en
+                   true para siempre y los rotulos de los 84 lotes —que
+                   estan dibujados, con display:none— no habia forma de
+                   encenderlos. Sin calco no hay nada que tapar: los
+                   numeros se ven de entrada.
+
+                   ⚠️ Y ojo con lo que se escribe ACA ADENTRO: este
+                   comentario es de JavaScript, pero el archivo pasa
+                   primero por Blade. Una directiva citada de ejemplo se
+                   COMPILA igual, y una condicional sin su cierre revienta
+                   la vista entera con «unexpected end of file». Mordio en
+                   el mismo cambio: 30 tests en rojo por una cita. */
+                verCalco: @js($plano['calco'] !== null),
                 completo: false,
 
                 init() {
@@ -1168,15 +1193,22 @@ get hayInteres() {
                     return `${(enVaras * this.medidas.factor).toFixed(2)} ${this.medidas.unidad}`;
                 },
 
-                /* El area con las DOS unidades cuando el proyecto esta en
-                   metros, igual que la rotula el topografo en el plano
-                   (A=320.19m2 / 459.22v2). La vara² nunca desaparece: es la
-                   unidad con la que se vende. */
+                /* El area con las DOS unidades cuando el proyecto se
+                   cobra en varas² y el plano viene acotado en metros,
+                   igual que la rotula el topografo (A=320.19m2 /
+                   459.22v2). La unidad con la que se VENDE nunca
+                   desaparece.
+
+                   En un proyecto que ya trabaja en metros², `dosUnidades`
+                   viene en false: poner los m² al lado seria escribir el
+                   mismo numero dos veces. */
                 get areaConUnidades() {
-                    const varas = `${this.areaFormateada} v²`;
+                    const propia = `${this.areaFormateada} ${this.medidas.areaCorta}`;
                     const metros = this.seleccionado?.areaMetros;
 
-                    return this.medidas.enMetros && metros ? `${varas} · ${metros} m²` : varas;
+                    return this.medidas.dosUnidades && this.medidas.enMetros && metros
+                        ? `${propia} · ${metros} m²`
+                        : propia;
                 },
             }"
             :class="completo ? 'plano-grid plano-completo' : 'plano-grid'"
@@ -1289,9 +1321,10 @@ get hayInteres() {
 
                     {{-- Los rotulos al final, para que ningun poligono los tape.
 
-                         Van con la letra del bloque pegada —12B— porque en
-                         un plano de 24 manzanas un "12" solo no dice de cual
-                         es, y el codigo entero (RPS-B-012) no entra.
+                         Van con la letra del bloque adelante —B-12— porque
+                         en un plano de 24 manzanas un "12" solo no dice de
+                         cual es, el codigo entero (RPS-B-012) no entra, y
+                         asi se lee igual que como lo dice la oficina.
 
                          Con el calco encendido se ocultan: el dibujo del
                          topografo ya trae escritos el numero y el area de
@@ -1357,7 +1390,7 @@ get hayInteres() {
                             </p>
 
                             <p class="plano-carrito-detalle">
-                                <span x-text="resumenCarrito.area"></span> vr² ·
+                                <span x-text="resumenCarrito.area"></span> <span x-text="medidas.areaCorta"></span> ·
                                 <span x-text="resumenCarrito.total"></span> ·
                                 prima <span x-text="resumenCarrito.prima"></span>
                             </p>
@@ -1481,10 +1514,10 @@ get hayInteres() {
                                         <tspan
                                             :x="figura?.cx"
                                             :dy="medidas.enMetros ? -(figura?.fuente ?? 0) * 0.7 : 0"
-                                            x-text="`${areaFormateada} v²`"
+                                            x-text="`${areaFormateada} ${medidas.areaCorta}`"
                                         ></tspan>
                                         <tspan
-                                            x-show="medidas.enMetros && seleccionado?.areaMetros"
+                                            x-show="medidas.dosUnidades && medidas.enMetros && seleccionado?.areaMetros"
                                             :x="figura?.cx"
                                             :dy="(figura?.fuente ?? 0) * 1.5"
                                             :font-size="figura ? figura.fuente : 1"
@@ -1516,7 +1549,42 @@ get hayInteres() {
                                             <dd x-text="seleccionado.cliente"></dd>
                                         </div>
                                     </template>
+
+                                    {{-- La cartera del CONTRATO, no la del lote, y por eso
+                                         se dice con esas palabras. Un contrato puede llevar
+                                         varios lotes y el recibo los cubre a todos; poner
+                                         aca un saldo del lote, al lado de un boton que cobra
+                                         el contrato, seria dar dos numeros que no quieren
+                                         decir lo mismo. Ver CarteraDelPlano. --}}
+                                    <template x-if="seleccionado.cartera">
+                                        <div class="plano-dato plano-dato-fuerte">
+                                            <dt>Saldo del contrato</dt>
+                                            <dd x-text="seleccionado.cartera.saldo"></dd>
+                                        </div>
+                                    </template>
+                                    <template x-if="seleccionado.cartera && seleccionado.cartera.proximaCuota">
+                                        <div class="plano-dato">
+                                            <dt>Próxima cuota</dt>
+                                            <dd x-text="seleccionado.cartera.proximaCuota"></dd>
+                                        </div>
+                                    </template>
+                                    <template x-if="seleccionado.cartera && seleccionado.cartera.lotes > 1">
+                                        <div class="plano-dato">
+                                            <dt>Contrato</dt>
+                                            <dd x-text="seleccionado.cartera.contrato + ' · ' + seleccionado.cartera.lotes + ' lotes'"></dd>
+                                        </div>
+                                    </template>
                                 </dl>
+
+                                {{-- El atraso NO es un dato mas de la lista: es lo unico
+                                     que cambia la conversacion con el cliente que esta
+                                     enfrente, asi que sale del <dl> y se lee solo. --}}
+                                <template x-if="seleccionado.cartera && ! seleccionado.cartera.alDia">
+                                    <p class="plano-aviso"
+                                       x-text="seleccionado.cartera.vencidas === 1
+                                           ? 'Tiene 1 cuota vencida.'
+                                           : 'Tiene ' + seleccionado.cartera.vencidas + ' cuotas vencidas.'"></p>
+                                </template>
 
                                 {{--
                                     Vender y Apartar como PESTAÑAS, no como dos
@@ -1552,7 +1620,7 @@ get hayInteres() {
                                             <div class="plano-panel">
                                                 <template x-if="planes.length === 0">
                                                     <p class="plano-planes-nota">
-                                                        Falta cargar el precio por vara² de cada plazo. Se cargan en el
+                                                        Falta cargar el precio <span x-text="medidas.porUnidad"></span> de cada plazo. Se cargan en el
                                                         proyecto, pestaña «Planes de pago»; en cuanto haya uno, este
                                                         cuadro calcula la cuota de cada plan sobre este lote.
                                                     </p>
@@ -1576,7 +1644,7 @@ get hayInteres() {
                                                                 <tr>
                                                                     <th></th>
                                                                     <th>Plazo</th>
-                                                                    <th>Precio v²</th>
+                                                                    <th>Precio <span x-text="medidas.areaCorta"></span></th>
                                                                     <th x-show="hayInteres">Interés</th>
                                                                     <th>Valor</th>
                                                                     <th>Cuota</th>
@@ -1796,6 +1864,49 @@ get hayInteres() {
                                     </div>
                                 </template>
 
+                                {{-- Cobrar sin salir del plano. Pedido de Mauricio el
+                                     13-ago-2026: quien cobra abre el plano, no la lista de
+                                     ventas, y mandarlo a navegar le hace perder de vista el
+                                     lote que tenia en pantalla.
+
+                                     El modal que se monta es el MISMO de la tabla de Ventas
+                                     y del expediente —CobrarUnPago—, no una copia. Se manda
+                                     el lote y del otro lado se sube a su contrato.
+
+                                     `seCobra` es que la venta este vigente: una liquidada o
+                                     rescindida no recibe dinero. `cobros.puedeAbonar` es
+                                     R21 —el receptor cobra, la administradora reprograma—,
+                                     y se verifica otra vez del lado del servidor. --}}
+                                <template x-if="seleccionado.cartera && seleccionado.cartera.seCobra">
+                                    <div class="plano-acciones">
+                                        <button
+                                            type="button"
+                                            class="plano-accion plano-accion-ancha plano-accion-cobrar"
+                                            x-on:click="$wire.mountAction('cobrarDesdeElPlano', { lote: seleccionado.id }); abierto = false"
+                                        >
+                                            Registrar un pago
+                                        </button>
+
+                                        <template x-if="cobros.puedeAbonar">
+                                            <button
+                                                type="button"
+                                                class="plano-accion plano-accion-ancha"
+                                                x-on:click="$wire.mountAction('abonarDesdeElPlano', { lote: seleccionado.id }); abierto = false"
+                                            >
+                                                Abonar a capital
+                                            </button>
+                                        </template>
+
+                                        <button
+                                            type="button"
+                                            class="plano-accion plano-accion-ancha"
+                                            x-on:click="$wire.abrirExpediente(seleccionado.cartera.venta)"
+                                        >
+                                            Abrir el expediente
+                                        </button>
+                                    </div>
+                                </template>
+
                                 <template x-if="! seleccionado.seVende">
                                     <p class="plano-detalle-vacio" x-text="seleccionado.porQueNoSeVende"></p>
                                 </template>
@@ -1810,14 +1921,70 @@ get hayInteres() {
                                      Aparece para los DISPONIBLES y para los RESERVADOS, que
                                      es el camino normal —el lote se guarda mientras corre el
                                      tramite y se dona cuando se firma la escritura—. Lo
-                                     decide `seDona()`, en el enum, no este blade. --}}
-                                <template x-if="seleccionado.seDona">
+                                     decide seDona(), en el enum, no este blade.
+
+                                     Y ademas mientras QUEDEN donaciones por hacer: cada
+                                     desarrollo declara cuantos lotes va a regalar y el boton
+                                     desaparece solo al cumplirse el cupo (13-ago-2026). Las
+                                     dos condiciones se calculan afuera; aca solo se leen. --}}
+                                <template x-if="seleccionado.seDona && donaciones.puede">
                                     <button
                                         type="button"
                                         class="plano-accion plano-accion-ancha plano-accion-donar"
                                         x-on:click="$wire.mountAction('donarLote', { lote: seleccionado.id }); abierto = false"
                                     >
                                         Donar este lote
+                                    </button>
+                                </template>
+
+                                {{-- Corregir una donacion mal registrada.
+
+                                     No dice «devolver» a proposito: no se deshace
+                                     una entrega que ocurrio, se le saca la marca a
+                                     un lote que nunca se regalo. Lo decide
+                                     seDeshaceLaDonacion(), en el enum. --}}
+                                <template x-if="seleccionado.seDeshace">
+                                    <button
+                                        type="button"
+                                        class="plano-accion plano-accion-ancha"
+                                        x-on:click="$wire.mountAction('deshacerDonacion', { lote: seleccionado.id }); abierto = false"
+                                    >
+                                        Quitar de donación
+                                    </button>
+                                </template>
+
+                                {{-- Guardar el lote para la familia.
+
+                                     El gemelo del boton de donar y con la misma
+                                     mecanica: aparece solo para los DISPONIBLES
+                                     —lo decide seReserva(), en el enum— y mientras
+                                     QUEDEN lotes por guardar del cupo que declaro
+                                     el desarrollo. Las dos condiciones se calculan
+                                     afuera; aca solo se leen.
+
+                                     Dice «herencia» y no «reservar» porque es lo
+                                     que es, y porque quien lee esta pantalla
+                                     trabaja adentro. El cliente que abre el plano
+                                     publico sigue leyendo «Reservado». --}}
+                                <template x-if="seleccionado.seReserva && herencia.puede">
+                                    <button
+                                        type="button"
+                                        class="plano-accion plano-accion-ancha"
+                                        x-on:click="$wire.mountAction('reservarLote', { lote: seleccionado.id }); abierto = false"
+                                    >
+                                        Guardar para herencia
+                                    </button>
+                                </template>
+
+                                {{-- Y la vuelta: el lote guardado que se pone a la
+                                     venta. Lo decide seDeshaceLaReserva(). --}}
+                                <template x-if="seleccionado.seDeshaceReserva">
+                                    <button
+                                        type="button"
+                                        class="plano-accion plano-accion-ancha"
+                                        x-on:click="$wire.mountAction('deshacerReserva', { lote: seleccionado.id }); abierto = false"
+                                    >
+                                        Devolver a la venta
                                     </button>
                                 </template>
 

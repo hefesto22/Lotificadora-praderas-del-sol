@@ -25,11 +25,24 @@ final class ImprimirRecibo
             ->label('Imprimir')
             ->icon(Heroicon::OutlinedPrinter)
             ->color('gray')
-            // Pestaña nueva y no navegación: quien está cobrando no pierde el
-            // expediente que tenía abierto, y el diálogo de impresión sale en
-            // la pestaña nueva.
+            /*
+             * Sin pestaña: el documento se carga en un iframe escondido y el
+             * dialogo de impresion sale ahi mismo. Pedido de Mauricio el
+             * 14-ago-2026 — quien cobra imprime veinte veces al dia y cada
+             * una le dejaba una pestaña que despues hay que cerrar.
+             *
+             * La `url` se conserva como respaldo: si el JS no cargo, el
+             * enlace sigue siendo un enlace y abre el documento. Alpine
+             * intercepta el clic solo cuando puede.
+             */
             ->url(static fn (Recibo $record): string => route('documentos.recibo', $record))
             ->openUrlInNewTab()
+            ->extraAttributes(static fn (Recibo $record): array => [
+                'x-on:click.prevent' => sprintf(
+                    "window.olympoImprimir && window.olympoImprimir('%s')",
+                    route('documentos.recibo', $record),
+                ),
+            ])
             ->visible(static fn (Recibo $record): bool => auth()->user()?->can('view', $record) === true);
     }
 
@@ -42,9 +55,21 @@ final class ImprimirRecibo
     public static function enNotificacion(Recibo $recibo): Action
     {
         return Action::make('imprimir')
-            ->label('Imprimir el recibo')
+            /*
+             * «El recibo» o «la factura», segun lo que salio. La notificacion
+             * aparece justo despues de cobrar, y llamarle recibo a una
+             * factura ahi es la primera vez que alguien se entera de que el
+             * papel es otro — conviene que no sea equivocandose.
+             */
+            ->label('Imprimir '.($recibo->esFactura() ? 'la factura' : 'el recibo'))
             ->icon(Heroicon::OutlinedPrinter)
             ->url(route('documentos.recibo', $recibo))
-            ->openUrlInNewTab();
+            ->openUrlInNewTab()
+            ->extraAttributes([
+                'x-on:click.prevent' => sprintf(
+                    "window.olympoImprimir && window.olympoImprimir('%s')",
+                    route('documentos.recibo', $recibo),
+                ),
+            ]);
     }
 }

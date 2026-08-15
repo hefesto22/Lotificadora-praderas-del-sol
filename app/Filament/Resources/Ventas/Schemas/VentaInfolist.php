@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Ventas\Schemas;
 
+use App\Domain\Enums\EstadoCompromiso;
 use App\Domain\Enums\EstadoVenta;
 use App\Domain\ValueObjects\Monto;
 use App\Filament\Support\Cuadros;
@@ -92,6 +93,10 @@ class VentaInfolist
                             // array<int, ...> y Cuadros pide una lista.
                             ->getStateUsing(static fn (Venta $record): HtmlString => Cuadros::lotes(
                                 array_values($record->compromisos
+                                    // Un lote rescindido ya no es de este
+                                    // contrato: dejarlo aca contradiria a los
+                                    // totales, que se recalcularon sin el.
+                                    ->reject(static fn (Compromiso $c): bool => $c->getAttribute('estado') === EstadoCompromiso::Rescindido)
                                     ->map(static fn (Compromiso $c): array => [
                                         'codigo' => (string) $c->lote?->getAttribute('codigo'),
                                         'area'   => (string) $c->getAttribute('area_varas'),
@@ -105,6 +110,7 @@ class VentaInfolist
                                     ])
                                     ->all()),
                                 'Este contrato no tiene lotes.',
+                                $record->proyecto?->unidadDeArea(),
                             )),
                     ]),
 
@@ -145,8 +151,8 @@ class VentaInfolist
 
                         TextEntry::make('cuotas_pendientes')
                             ->label('Cuotas por pagar')
-                            ->getStateUsing(static fn (Venta $record): string => $record->cuotas()->pendientes()->count()
-                                .' de '.$record->cuotas()->count()),
+                            ->getStateUsing(static fn (Venta $record): string => $record->cuotas()->deLotesVivos()->pendientes()->count()
+                                .' de '.$record->cuotas()->deLotesVivos()->count()),
 
                         /*
                          * La escalera. Sale de las CUOTAS GUARDADAS y no de un

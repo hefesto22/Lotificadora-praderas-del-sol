@@ -112,3 +112,51 @@
     .olympo-vacio { font-size: .875rem; color: rgb(113 113 122); }
     .dark .olympo-vacio { color: rgb(161 161 170); }
 </style>
+
+{{-- ═══ IMPRIMIR SIN ABRIR UNA PESTAÑA ═══
+
+     Pedido de Mauricio el 14-ago-2026: «que no se abra una nueva ventana al
+     presionar imprimir, que directamente se abra la pantalla de impresión».
+     Tenía razón — quien cobra imprime veinte veces al día y cada una le
+     dejaba una pestaña abierta que después hay que cerrar a mano.
+
+     El documento se carga en un iframe escondido y se manda a imprimir ahí.
+     El diálogo sale igual, la pestaña no existe, y el expediente que la
+     persona tenía abierto no se mueve.
+
+     ⚠️ El iframe se DESTRUYE después de imprimir y no antes: si se quita
+     mientras el diálogo está abierto, Chrome imprime una hoja en blanco.
+     `onafterprint` avisa tanto al imprimir como al cancelar, y el
+     `setTimeout` de respaldo cubre a los navegadores que no lo disparan. --}}
+<script>
+    window.olympoImprimir = function (url) {
+        const viejo = document.getElementById('olympo-impresor');
+        if (viejo) viejo.remove();
+
+        const marco = document.createElement('iframe');
+        marco.id = 'olympo-impresor';
+        marco.setAttribute('aria-hidden', 'true');
+        marco.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+
+        marco.onload = function () {
+            const ventana = marco.contentWindow;
+            let listo = false;
+
+            const limpiar = function () {
+                if (listo) return;
+                listo = true;
+                setTimeout(function () { marco.remove(); }, 500);
+            };
+
+            ventana.onafterprint = limpiar;
+            ventana.focus();
+            ventana.print();
+
+            // Respaldo: hay navegadores que no disparan onafterprint.
+            setTimeout(limpiar, 60000);
+        };
+
+        marco.src = url;
+        document.body.appendChild(marco);
+    };
+</script>

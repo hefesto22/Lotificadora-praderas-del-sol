@@ -26,8 +26,15 @@ return [
     | Áreas
     |--------------------------------------------------------------------------
     |
-    | La unidad del negocio es la VARA CUADRADA. Todas las áreas se
-    | almacenan y se operan en varas²; los m² son solo presentación.
+    | La unidad del negocio la elige CADA PROYECTO desde el 13-ago-2026:
+    | hay desarrollos en varas² y desarrollos en metros² (ver el enum
+    | UnidadDeArea y la columna `proyectos.unidad_area`). Lo que queda acá
+    | es con cuál nace un proyecto nuevo en ESTA instalación —en Honduras
+    | la costumbre es la vara²— y cuánto mide la vara cuando el topógrafo
+    | no dice otra cosa.
+    |
+    | ⚠️ La unidad es una ETIQUETA, no una conversión: el área siempre se
+    | guarda en la columna `area_varas`, medida en la unidad del proyecto.
     |
     | ✅ CONFIRMADO por la contratante el 3-ago-2026 (R16): la vara del
     | plano es la vara castellana de 0.8359 m. Ningún cálculo de dinero
@@ -67,10 +74,11 @@ return [
     ],
 
     'area' => [
-        'unidad'         => 'vara²',
-        'unidad_plural'  => 'varas²',
-        'vara_en_metros' => '0.8359',
-        'decimales'      => 4,
+        // Con cuál nace un proyecto nuevo. Lo lee el selector de la
+        // pestaña Identificación; cada proyecto guarda después el suyo.
+        'unidad_por_defecto' => 'varas',
+        'vara_en_metros'     => '0.8359',
+        'decimales'          => 4,
     ],
 
     /*

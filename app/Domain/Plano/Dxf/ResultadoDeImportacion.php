@@ -11,6 +11,8 @@ final readonly class ResultadoDeImportacion
 {
     /**
      * @param list<string> $advertencias
+     * @param array<string, int> $lotesPorBloque cuantos lotes cayo en cada bloque
+     * @param list<string> $bloquesCreados los que no existian y nacieron con la importacion
      */
     public function __construct(
         public int $lotesCreados,
@@ -19,7 +21,23 @@ final readonly class ResultadoDeImportacion
         public int $descartados,
         public float $areaTotalVaras,
         public array $advertencias,
+        public array $lotesPorBloque = [],
+        public array $bloquesCreados = [],
     ) {}
+
+    /**
+     * "36 en A, 7 en B, 8 en C" — el reparto, para el aviso de pantalla.
+     */
+    public function repartoEnTexto(): string
+    {
+        $partes = [];
+
+        foreach ($this->lotesPorBloque as $nombre => $cuantos) {
+            $partes[] = "{$cuantos} en {$nombre}";
+        }
+
+        return implode(', ', $partes);
+    }
 
     public function huboAlgo(): bool
     {

@@ -27,7 +27,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Recibo {{ $recibo->folio() }}</title>
+    <title>{{ $recibo->tipoDeDocumento()->denominacion() }} {{ $recibo->numeroDelPapel() }}</title>
     @include('comun.fuente')
     <style>
         @page { size: letter; margin: 12mm; }
@@ -76,10 +76,20 @@
 
         /* ── Encabezado ── */
         .encabezado { display: flex; justify-content: space-between; gap: 1.5rem; align-items: flex-start; }
-        .emisor { max-width: 60%; }
-        .emisor img { max-height: 52px; max-width: 190px; margin-bottom: .5rem; }
-        .emisor .residencial { font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
-        .emisor .linea { color: #52525b; font-size: 12px; }
+        /* Membrete: el logo a la IZQUIERDA y los datos al lado, en una sola
+           columna que baja. `.datos` es block a proposito —y esta dicho—
+           porque `.emisor` es flex: sin esto, cada renglon del emisor se
+           volvia una columna del encabezado y la direccion terminaba
+           flotando al lado del nombre.
+
+           `height` fija con `width:auto` y `object-fit:contain`: asi un logo
+           alto, uno ancho y uno cuadrado ocupan la misma franja y el membrete
+           se ve igual en los tres desarrollos. */
+        .emisor { max-width: 62%; display: flex; gap: .75rem; align-items: flex-start; }
+        .emisor img { height: 44px; width: auto; max-width: 140px; object-fit: contain; flex: none; }
+        .emisor .datos { display: block; min-width: 0; }
+        .emisor .residencial { font-size: 14px; font-weight: 700; letter-spacing: -.01em; line-height: 1.25; }
+        .emisor .linea { color: #52525b; font-size: 11.5px; line-height: 1.45; }
 
         .folio { text-align: right; white-space: nowrap; }
         .folio .rotulo { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #71717a; }
@@ -137,6 +147,29 @@
 
         .nota { margin-top: .75rem; font-size: 11px; line-height: 1.6; color: #71717a; }
 
+        /* ── Lo que la factura tiene que decir y el recibo no ──
+           Acuerdo 481-2017, Art. 10. Va en un recuadro propio porque son
+           datos que nadie lee de corrido: se buscan. Un auditor mira la CAI,
+           el cliente mira el numero, y los dos tienen que encontrarlos sin
+           leer el resto del papel. */
+        .fiscal {
+            margin-top: 1rem; padding: .625rem .875rem;
+            border: 1px solid #d4d4d8; border-radius: .375rem;
+            font-size: 10.5px; line-height: 1.55; color: #3f3f46;
+        }
+        .fiscal .cai { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; word-break: break-all; }
+        .fiscal .rotulo { font-weight: 700; color: #52525b; }
+        .fiscal .destino { margin-top: .375rem; color: #71717a; }
+
+        /* El desglose del impuesto. Grid de dos columnas para que las cifras
+           queden alineadas a la derecha sin una tabla mas. */
+        .impuesto { margin-top: .625rem; display: grid; grid-template-columns: 1fr auto; gap: .15rem .75rem; font-size: 11.5px; }
+        .impuesto .cifra { text-align: right; font-variant-numeric: tabular-nums; }
+        .impuesto .fuerte { font-weight: 700; }
+        /* El total se despega del desglose: son la misma caja pero no la
+           misma pregunta. */
+        .impuesto + .cifra { margin-top: .5rem; padding-top: .5rem; border-top: 1px solid #e4e4e7; }
+
         /* ── Firmas ── */
         .firmas { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem; }
         .firma { border-top: 1px solid #a1a1aa; padding-top: .375rem; text-align: center; font-size: 11px; color: #52525b; }
@@ -164,27 +197,45 @@
 
     <div class="encabezado">
         <div class="emisor">
-            @if ($logo)
+            {{-- UN solo logo: el del desarrollo, que es la marca que el cliente
+                 reconoce. El de la inmobiliaria queda de respaldo para los que
+                 todavía no tengan el suyo cargado. --}}
+            @if ($logoDelProyecto ?? null)
+                <img src="{{ $logoDelProyecto }}" alt="">
+            @elseif ($logo)
                 <img src="{{ $logo }}" alt="">
             @endif
-            <div class="residencial">{{ $emisor['residencial'] ?? '' }}</div>
-            @if ($emisor['nombre'] ?? null)
-                <div class="linea">{{ $emisor['nombre'] }}</div>
-            @endif
-            @if ($emisor['rtn'] ?? null)
-                <div class="linea">RTN {{ $emisor['rtn'] }}</div>
-            @endif
-            @if ($emisor['direccion'] ?? null)
-                <div class="linea">{{ $emisor['direccion'] }}</div>
-            @endif
-            @if ($emisor['telefono'] ?? null)
-                <div class="linea">Tel. {{ $emisor['telefono'] }}</div>
-            @endif
+
+            <div class="datos">
+                <div class="residencial">{{ $emisor['residencial'] ?? '' }}</div>
+                @if ($emisor['nombre'] ?? null)
+                    <div class="linea">{{ $emisor['nombre'] }}</div>
+                @endif
+                @if ($emisor['rtn'] ?? null)
+                    <div class="linea">RTN {{ $emisor['rtn'] }}</div>
+                @endif
+                @if ($emisor['direccion'] ?? null)
+                    <div class="linea">{{ $emisor['direccion'] }}</div>
+                @endif
+                @if ($emisor['telefono'] ?? null)
+                    <div class="linea">Tel. {{ $emisor['telefono'] }}</div>
+                @endif
+            </div>
         </div>
 
         <div class="folio">
-            <div class="rotulo">Recibo de {{ $recibo->concepto?->etiqueta() ?? 'pago' }}</div>
-            <div class="numero">N.º {{ $recibo->folio() }}</div>
+            {{-- La denominacion del documento la exige el Art. 10, num. 5: el
+                 papel tiene que decir como se llama. En el recibo interno se
+                 sigue leyendo «Recibo de cuota», que es como lo nombra la
+                 gente en ventanilla. --}}
+            <div class="rotulo">
+                @if ($recibo->esFactura())
+                    {{ $recibo->tipoDeDocumento()->denominacion() }}
+                @else
+                    Recibo de {{ $recibo->concepto?->etiqueta() ?? 'pago' }}
+                @endif
+            </div>
+            <div class="numero">N.º {{ $recibo->numeroDelPapel() }}</div>
             <div class="fecha">{{ $recibo->fecha?->format('d/m/Y') }}</div>
             @if ($recibo->estaAnulado())
                 <div class="anulado">
@@ -206,10 +257,15 @@
             <div class="rotulo">Recibí de</div>
             <div class="valor">{{ $recibo->nombreDelPapel() }}</div>
         </div>
-        @if ($recibo->dniDelPapel())
+        {{-- En la factura NO es opcional: sin RTN ni identidad el documento no
+             dice a quien se le vendio (Art. 10, num. 11). Por eso el renglon
+             sale siempre —aunque salga vacio, que es una pregunta para quien
+             cobro— mientras que en el recibo interno aparece solo si se
+             cargo. --}}
+        @if ($recibo->esFactura() || $recibo->dniDelPapel())
             <div class="dato">
-                <div class="rotulo">Identidad</div>
-                <div class="valor">{{ $recibo->dniDelPapel() }}</div>
+                <div class="rotulo">{{ $recibo->esFactura() ? 'RTN o identidad' : 'Identidad' }}</div>
+                <div class="valor">{{ ($recibo->esFactura() ? $recibo->identidadDelPapel() : $recibo->dniDelPapel()) ?? '—' }}</div>
             </div>
         @endif
         @if ($recibo->esANombreDeOtro())
@@ -244,7 +300,13 @@
         </div>
     </div>
 
-    @if ($recibo->aplicaciones->isNotEmpty() || ! $aCapital->esCero())
+    {{-- La factura imprime SIEMPRE su detalle. Un recibo de prima o de seña no
+         tiene aplicaciones que listar —la prima no toca cuotas— y hasta hoy
+         eso salía sin tabla, que en un recibo interno está bien. En una
+         factura no: el Art. 10, num. 13 pide descripción, cantidad, precio
+         unitario y valor de lo que se cobró. Por eso, cuando no hay renglones,
+         baja uno solo con el concepto. --}}
+    @if ($recibo->esFactura() || $recibo->aplicaciones->isNotEmpty() || ! $aCapital->esCero())
         <h2>En concepto de</h2>
 
         <table>
@@ -252,6 +314,10 @@
                 <tr>
                     <th>Concepto</th>
                     <th>Vence</th>
+                    @if ($recibo->esFactura())
+                        <th>Cant.</th>
+                        <th>Valor unitario</th>
+                    @endif
                     <th>Monto</th>
                 </tr>
             </thead>
@@ -262,6 +328,14 @@
                              cada plan numera desde 1. El código va adelante. --}}
                         <td>@if ($variosLotes){{ $aplicacion->cuota?->compromiso?->lote?->getAttribute('codigo') ?? '—' }} · @endif Cuota {{ $aplicacion->cuota?->getAttribute('numero') }}</td>
                         <td>{{ $aplicacion->cuota?->getAttribute('fecha_vencimiento')?->format('d/m/Y') ?? '—' }}</td>
+                        @if ($recibo->esFactura())
+                            {{-- Una cuota es una, y su valor unitario es lo que
+                                 se aplicó. Las columnas existen porque la
+                                 factura las pide, no porque acá se vendan
+                                 cosas por docena. --}}
+                            <td>1</td>
+                            <td>{{ $aplicacion->montoAplicado()->formateado() }}</td>
+                        @endif
                         <td>{{ $aplicacion->montoAplicado()->formateado() }}</td>
                     </tr>
                 @endforeach
@@ -276,16 +350,45 @@
                     <tr class="capital">
                         <td>Abono a capital</td>
                         <td>—</td>
+                        @if ($recibo->esFactura())
+                            <td>1</td>
+                            <td>{{ $aCapital->formateado() }}</td>
+                        @endif
                         <td>{{ $aCapital->formateado() }}</td>
                     </tr>
                 @endunless
+
+                @if ($recibo->esFactura() && $recibo->aplicaciones->isEmpty() && $aCapital->esCero())
+                    <tr>
+                        <td>
+                            {{ $recibo->concepto?->etiqueta() ?? 'Pago' }}
+                            @if ($recibo->rotuloDeLotes() !== '—') · lote {{ $recibo->rotuloDeLotes() }} @endif
+                        </td>
+                        <td>—</td>
+                        <td>1</td>
+                        <td>{{ $recibo->montoTotal()->formateado() }}</td>
+                        <td>{{ $recibo->montoTotal()->formateado() }}</td>
+                    </tr>
+                @endif
             </tbody>
         </table>
     @endif
 
     <div class="total">
+        {{-- El desglose lo pide el Art. 10, num. 15-16, y sale del modelo:
+             qué parte del cobro grava es una decisión que se toma en un solo
+             lugar. Ver Recibo::desgloseFiscal(). --}}
+        @if ($recibo->esFactura())
+            <div class="impuesto">
+                @foreach ($recibo->desgloseFiscal() as $renglon => $importe)
+                    <span>{{ $renglon }}</span>
+                    <span class="cifra">{{ $importe->formateado() }}</span>
+                @endforeach
+            </div>
+        @endif
+
         <div class="cifra">
-            <span class="rotulo">Total recibido</span>
+            <span class="rotulo">{{ $recibo->esFactura() ? 'Total' : 'Total recibido' }}</span>
             <span class="monto">{{ $recibo->montoTotal()->formateado() }}</span>
         </div>
         {{-- A un número se le agrega un cero con un trazo; a la cantidad en
@@ -326,13 +429,61 @@
         <p class="nota">{{ $recibo->getAttribute('observaciones') }}</p>
     @endif
 
-    {{-- La Clausula Segunda, modulo g-i, pide el recibo interno correlativo
-         «con NO VALIDO PARA CREDITO FISCAL». Esas palabras son texto del
-         contrato, no una parafrasis nuestra, y son las que evitan que
-         alguien intente presentar este papel ante el SAR. R10: no se usa
-         CAI, asi que este recibo nunca va a ser un comprobante fiscal. --}}
-    <p class="nota"><strong>NO VÁLIDO PARA CRÉDITO FISCAL</strong></p>
-    <p class="nota">Documento de uso interno.</p>
+    @if ($recibo->esFactura())
+        {{-- ═══ EL BLOQUE FISCAL ═══
+
+             Acuerdo 481-2017, Art. 10: numeros 8 (rango autorizado), 9 (fecha
+             limite de emision), 10 (CAI) y 6 (destino de cada ejemplar). Van
+             juntos y en recuadro porque son datos que se BUSCAN, no que se
+             leen de corrido.
+
+             El numero interno tambien se imprime, chiquito: es el que cuadra
+             la caja (R12) y el que va a buscar quien reciba un reclamo. Dos
+             numeros en un papel no confunden si uno esta grande arriba y el
+             otro dice para que sirve. --}}
+        <div class="fiscal">
+            <div><span class="rotulo">CAI:</span> <span class="cai">{{ $recibo->getAttribute('cai') }}</span></div>
+            @if ($recibo->rangoAutorizado())
+                <div><span class="rotulo">Rango autorizado:</span> {{ $recibo->rangoAutorizado() }}</div>
+            @endif
+            <div><span class="rotulo">Fecha límite de emisión:</span> {{ $recibo->fecha_limite_emision?->format('d/m/Y') }}</div>
+
+            @if (($facturacion ?? null)?->getAttribute('direccion_casa_matriz'))
+                <div><span class="rotulo">Casa matriz:</span> {{ $facturacion->getAttribute('direccion_casa_matriz') }}</div>
+            @endif
+            @if (($facturacion ?? null)?->getAttribute('direccion_establecimiento'))
+                <div><span class="rotulo">Establecimiento:</span> {{ $facturacion->getAttribute('direccion_establecimiento') }}</div>
+            @endif
+
+            {{-- Quien imprime el papel. Con talonario van los datos de la
+                 imprenta; siendo autoimpresor —que es el caso de esta
+                 lotificadora— va el numero de la resolucion que lo autoriza.
+                 Sale solo si esta cargado: un renglon vacio en el pie de una
+                 factura se ve peor que no tenerlo. --}}
+            @if (($facturacion ?? null)?->getAttribute('imprenta_nombre'))
+                <div>
+                    <span class="rotulo">Imprenta:</span> {{ $facturacion->getAttribute('imprenta_nombre') }}
+                    @if (($facturacion ?? null)?->getAttribute('imprenta_rtn')) · RTN {{ $facturacion->getAttribute('imprenta_rtn') }} @endif
+                </div>
+            @endif
+            @if (($facturacion ?? null)?->getAttribute('imprenta_certificado'))
+                <div><span class="rotulo">Autorización:</span> {{ $facturacion->getAttribute('imprenta_certificado') }}</div>
+            @endif
+
+            <div class="destino">
+                Original: cliente · Copia: obligado tributario emisor.
+                Control interno N.º {{ $recibo->folio() }}.
+            </div>
+        </div>
+    @else
+        {{-- La Clausula Segunda, modulo g-i, pide el recibo interno correlativo
+             «con NO VALIDO PARA CREDITO FISCAL». Esas palabras son texto del
+             contrato, no una parafrasis nuestra, y son las que evitan que
+             alguien intente presentar este papel ante el SAR. Sin CAI, este
+             papel nunca va a ser un comprobante fiscal. --}}
+        <p class="nota"><strong>NO VÁLIDO PARA CRÉDITO FISCAL</strong></p>
+        <p class="nota">Documento de uso interno.</p>
+    @endif
 
     <div class="firmas">
         <div class="firma">Recibí conforme</div>

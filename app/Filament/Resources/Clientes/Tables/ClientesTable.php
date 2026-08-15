@@ -6,6 +6,7 @@ namespace App\Filament\Resources\Clientes\Tables;
 
 use App\Domain\ValueObjects\DNI;
 use App\Domain\ValueObjects\Monto;
+use App\Filament\Support\BuscarNombre;
 use App\Filament\Support\ListadoDelCliente;
 use App\Models\Cliente;
 use Filament\Actions\Action;
@@ -54,9 +55,15 @@ class ClientesTable
                 ->withCount(['ventas', 'apartados', 'recibos'])
                 ->addSelect(['saldo_pendiente' => Cliente::consultaDeSaldo()]))
             ->columns([
+                /*
+                | Sin acentos a proposito: se teclea DIAZ y tiene que salir
+                | DÍAZ. El nombre guardado conserva su tilde —es el que se
+                | imprime en el contrato—; lo que se dobla es la busqueda.
+                | Ver BuscarNombre y SinAcentos (13-ago-2026).
+                */
                 TextColumn::make('nombre')
                     ->label('Cliente')
-                    ->searchable()
+                    ->searchable(query: BuscarNombre::propio())
                     ->sortable()
                     ->weight('medium'),
 
