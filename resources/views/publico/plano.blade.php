@@ -385,6 +385,39 @@
         .dibujo svg { display: block; width: 100%; height: auto; }
         .escala { margin: .5rem 0 0; font-size: .6875rem; color: var(--suave); text-align: center; }
 
+        /*
+         * ═══ LA FICHA EN UN TELEFONO: EL PRECIO PRIMERO ═══
+         *
+         * Lo vio Mauricio el 23-ago: «el usuario en teléfono debe hacer mucho
+         * scroll». El scroll era el sintoma; el problema era el ORDEN.
+         *
+         * El croquis es un SVG cuadrado al 100 % del ancho: en un telefono de
+         * 390 px mide 322 de alto. Casi una pantalla entera para confirmar
+         * que un lote es un rectangulo — y empujaba el precio y la cuota a la
+         * segunda, que es exactamente lo que la persona vino a ver.
+         *
+         * En escritorio no pasa: ahi las dos columnas van lado a lado y se ve
+         * todo junto. Por eso esto vive solo por debajo del punto en que la
+         * ficha se apila, y NO se toca el HTML ni el JS: es puro orden.
+         */
+        @media (max-width: 45.99rem) {
+            /* El area y la tabla de plazos, arriba del dibujo. */
+            .cuerpo > div:nth-child(2) { order: -1; }
+
+            /*
+             * El croquis a poco mas de la mitad. Sigue estando —confirma la
+             * forma y las medidas del topografo— pero deja de ser la portada.
+             */
+            .dibujo svg { max-height: 46vw; }
+
+            /*
+             * «Seguir viendo el plano» sobra en un telefono: la ✕ esta
+             * arriba, el telon cierra al tocarlo y la hoja se desliza. Tres
+             * formas de salir y un boton que ocupa una fila.
+             */
+            #cerrar-pie { display: none; }
+        }
+
         .area {
             display: flex; justify-content: space-between; align-items: baseline;
             margin: 0 0 .25rem; padding: .75rem .875rem;
