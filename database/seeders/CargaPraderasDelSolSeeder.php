@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
+use App\Domain\ValueObjects\Monto;
 use App\Models\PlanDePago;
 use App\Models\Proyecto;
 use Illuminate\Database\Seeder;
@@ -67,6 +68,11 @@ final class CargaPraderasDelSolSeeder extends Seeder
      * lista depende del plazo, y por eso vender de contado al precio de
      * contado no es un descuento que pida motivo (R4).
      *
+     * ⚠️ El precio se multiplica con `Monto`, NO con `bcmul` pelado (§8.3.1).
+     * Además de ser la ley del repo —el dinero no anda suelto por ahí— evita
+     * el error que `bcmul` tira en PHPStan: exige `numeric-string` y un
+     * `string` declarado en un array no lo es.
+     *
      * @return list<array{meses: int, factor: string, etiqueta: string}>
      */
     private function escala(): array
@@ -114,7 +120,7 @@ final class CargaPraderasDelSolSeeder extends Seeder
             PlanDePago::query()->updateOrCreate(
                 ['proyecto_id' => $proyecto->getKey(), 'meses' => $tramo['meses']],
                 [
-                    'precio_vara' => bcmul($precio, $tramo['factor'], 2),
+                    'precio_vara' => new Monto($precio)->multiplicarPor($tramo['factor'])->redondeado(),
                     'etiqueta'    => $tramo['etiqueta'],
                     'activo'      => true,
                 ],
