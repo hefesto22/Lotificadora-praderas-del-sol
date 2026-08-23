@@ -251,6 +251,47 @@
             stroke-linejoin: round;
         }
 
+        /* ─── El buscador, escondido en la barra de zoom ──────────────
+           La regla 1 de esta página dice que arriba del plano no va nada, y
+           en un teléfono se nota el doble: cualquier cosa ahí le roba altura
+           justo a lo que el cliente vino a ver. Por eso es un botón más de
+           la barra y el campo aparece solo cuando se pide. */
+        .buscador {
+            position: absolute; top: .875rem; left: .75rem; right: .75rem;
+            display: none; align-items: center; z-index: 20;
+        }
+        .buscador.abierto { display: flex; }
+        .buscador > svg {
+            position: absolute; left: .8125rem; width: 1rem; height: 1rem;
+            fill: none; stroke: var(--suave); stroke-width: 2.2;
+            stroke-linecap: round; pointer-events: none;
+        }
+        .buscador input {
+            width: 100%; padding: .75rem .875rem .75rem 2.375rem;
+            border: 0; border-radius: 999px; color: var(--tinta); background: #fff;
+            /* 1rem y no menos: por debajo de 16px iOS hace zoom solo al
+               enfocar el campo, y el plano queda corrido. */
+            font: inherit; font-size: 1rem;
+            box-shadow: 0 8px 24px -8px rgba(15,23,42,.45);
+            -webkit-appearance: none; appearance: none;
+        }
+        .buscador input:focus { outline: 2px solid #34d399; outline-offset: 1px; }
+        .buscador input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+
+        .buscador-eco {
+            position: absolute; top: 3.5rem; left: 50%; transform: translateX(-50%);
+            margin: 0; padding: .3125rem .8125rem; border-radius: 999px;
+            background: rgba(15,23,42,.88); color: #fff; white-space: nowrap;
+            font-size: .75rem; font-weight: 600; pointer-events: none; z-index: 20;
+        }
+        .buscador-eco[hidden] { display: none; }
+
+        /* Lo que no coincide se apaga: el ojo va solo a lo que queda. */
+        .lote.apagado { opacity: .1; }
+
+        /* De lejos el número no se lee y solo tapa el color. Ver el JS. */
+        #rotulos { transition: opacity .18s ease; }
+
         .zoom { position: absolute; right: .75rem; bottom: 3.75rem; display: flex; flex-direction: column; gap: .5rem; }
         .zoom button {
             width: 2.75rem; height: 2.75rem; border-radius: 50%;
@@ -259,6 +300,7 @@
             box-shadow: var(--sombra); transition: transform .12s ease;
             display: flex; align-items: center; justify-content: center;
         }
+        .zoom button { display: flex; align-items: center; justify-content: center; }
         .zoom button:active { transform: scale(.92); }
 
         .leyenda {
@@ -545,7 +587,30 @@
 
         <p class="pista" id="pista">Pellizcá para acercar · tocá un lote verde para ver su precio</p>
 
+        {{-- El campo sale de la barra de zoom y no de arriba del plano.
+
+             En un teléfono el plano entero entra en 390 px: cada lote mide
+             unos 15 y su rótulo, punto y medio. Encontrar el «5-H» con el
+             dedo no se puede — y tampoco es lo que el cliente hace: le
+             mandaron un lote por WhatsApp y quiere ver ESE. --}}
+        <div class="buscador" id="buscador">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/>
+            </svg>
+            <input type="search" id="buscar" inputmode="search" autocomplete="off"
+                   enterkeyhint="search" placeholder="Lote: 5-H, H, 12…"
+                   aria-label="Buscar un lote por su código">
+        </div>
+        <p class="buscador-eco" id="buscador-eco" hidden></p>
+
         <div class="zoom">
+            <button type="button" id="lupa" aria-label="Buscar un lote">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none"
+                     stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
+                     aria-hidden="true">
+                    <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/>
+                </svg>
+            </button>
             <button type="button" id="mas" aria-label="Acercar">+</button>
             <button type="button" id="menos" aria-label="Alejar">−</button>
             <button type="button" id="ajustar" aria-label="Ver todo">⤢</button>
@@ -1767,6 +1832,9 @@
 
     var rotulos = document.getElementById('rotulos');
 
+    // El alto tipico de un rotulo, en varas. Lo llena medirRotulos().
+    var fontTipico = 1.5;
+
     /*
      * 🔴 CADA rótulo se mide contra SU lote, una sola vez al cargar.
      *
@@ -1785,6 +1853,8 @@
         if (!rotulos) { return; }
 
         var textos = rotulos.querySelectorAll('text');
+        var suma = 0;
+        var medidos = 0;
 
         for (var i = 0; i < textos.length; i++) {
             var texto = textos[i];
@@ -1811,11 +1881,52 @@
              */
             var cabe = Math.min(Math.min(w, h) * 0.34, (w / letras) * 1.15);
 
-            texto.setAttribute('font-size', Math.max(Math.min(cabe, 2.4), 0.7).toFixed(2));
+            var medida = Math.max(Math.min(cabe, 2.4), 0.7);
+
+            texto.setAttribute('font-size', medida.toFixed(2));
+
+            suma += medida;
+            medidos++;
         }
+
+        if (medidos) { fontTipico = suma / medidos; }
     })();
 
-    function aplicar() { mapa.setAttribute('viewBox', vista.join(' ')); }
+    /*
+     * ⚠️ ESTO ACOTA LA DECISION DE ARRIBA, NO LA REVIERTE.
+     *
+     * Ahi se dice que esconder los rotulos «tampoco servia: lo primero que el
+     * cliente quiere saber es CUAL lote esta mirando». Es cierto — mientras
+     * el numero SE LEA.
+     *
+     * En un telefono el plano entero entra en 390 px y el rotulo termina
+     * midiendo punto y medio: a esa escala ya no dice cual lote es —no se
+     * distingue— y ademas le tapa el color, que de lejos es lo unico que si
+     * se lee. No se esconde un rotulo: se deja de dibujar lo que dejo de
+     * serlo. Y vuelven solos al acercar, que es el gesto que la pista pide.
+     *
+     * 23-ago-2026, con el plano abierto en el telefono de Mauricio.
+     */
+    var LEGIBLE = 6.5;
+
+    function rotulosSegunEscala() {
+        if (!rotulos) { return; }
+
+        var caja = mapa.getBoundingClientRect();
+
+        if (!caja.width || !vista[2]) { return; }
+
+        rotulos.style.opacity = fontTipico * (caja.width / vista[2]) < LEGIBLE ? '0' : '1';
+    }
+
+    function aplicar() {
+        mapa.setAttribute('viewBox', vista.join(' '));
+        rotulosSegunEscala();
+    }
+
+    // Al cargar hace falta el layout ya hecho; y el telefono se gira.
+    requestAnimationFrame(rotulosSegunEscala);
+    window.addEventListener('resize', rotulosSegunEscala);
 
     function escalar(factor, px, py) {
         var nuevo = vista[2] * factor;
@@ -1979,6 +2090,154 @@
      * `aplicar()`, que son del bloque del mapa. Centrar es cambiar el
      * encuadre del SVG, no hacer scroll de la pagina.
      */
+    /*
+     * Buscar un lote por su codigo.
+     *
+     * Para el que llego por WhatsApp con un lote en la cabeza: escribe «5-H»
+     * y el plano lo lleva. Lo que no coincide se apaga en vez de esconderse,
+     * asi no se pierde la forma del terreno.
+     */
+    (function elBuscador() {
+        var caja = document.getElementById('buscador');
+        var campo = document.getElementById('buscar');
+        var lupa = document.getElementById('lupa');
+        var eco = document.getElementById('buscador-eco');
+
+        if (!caja || !campo || !lupa) { return; }
+
+        var apagados = [];
+
+        function despintar() {
+            for (var i = 0; i < apagados.length; i++) {
+                apagados[i].classList.remove('apagado');
+            }
+
+            apagados = [];
+        }
+
+        function decir(texto) {
+            if (!eco) { return; }
+
+            eco.textContent = texto || '';
+            eco.hidden = !texto;
+        }
+
+        /*
+         * Encuadra un CONJUNTO: buscar «H» tiene que mostrar la manzana
+         * entera, no uno cualquiera de sus lotes.
+         */
+        function encuadrarTodos(lotes) {
+            var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+            for (var i = 0; i < lotes.length; i++) {
+                var p = puntosDe(lotes[i].puntos);
+
+                for (var j = 0; j < p.length; j++) {
+                    if (p[j][0] < minX) { minX = p[j][0]; }
+                    if (p[j][0] > maxX) { maxX = p[j][0]; }
+                    if (p[j][1] < minY) { minY = p[j][1]; }
+                    if (p[j][1] > maxY) { maxY = p[j][1]; }
+                }
+            }
+
+            if (minX === Infinity) { return; }
+
+            var razon = inicial[3] / inicial[2];
+            var ancho = Math.max(maxX - minX, (maxY - minY) / razon) * 1.35;
+
+            // Los mismos topes que el zoom a dedo (ver centrarEn).
+            ancho = Math.min(Math.max(ancho, inicial[2] / 16), inicial[2] * 1.4);
+
+            var alto = ancho * razon;
+
+            vista = [(minX + maxX) / 2 - ancho / 2, (minY + maxY) / 2 - alto / 2, ancho, alto];
+            aplicar();
+        }
+
+        function buscar() {
+            // `normalizar()` ya existe para el enlace directo: deja «5-H»,
+            // «5h» y «5 H» iguales, que es como se escribe con el pulgar.
+            var busca = normalizar(campo.value);
+
+            despintar();
+
+            if (busca === '') { decir(''); return; }
+
+            var hallados = [];
+            var vivos = {};
+
+            /*
+             * 🔴 La coincidencia EXACTA manda sobre las parciales.
+             *
+             * «5-H» esta contenido en «15-H», asi que buscar el codigo
+             * completo devolvia dos lotes y encuadraba los dos. Quien escribe
+             * el codigo entero ya sabe cual quiere.
+             */
+            var exacto = null;
+
+            for (var i = 0; i < datos.lotes.length; i++) {
+                var rotulo = normalizar(datos.lotes[i].rotulo);
+
+                if (rotulo === busca) { exacto = datos.lotes[i]; }
+
+                if (rotulo.indexOf(busca) !== -1) { hallados.push(datos.lotes[i]); }
+            }
+
+            if (exacto) { hallados = [exacto]; }
+
+            for (var h = 0; h < hallados.length; h++) { vivos[hallados[h].id] = true; }
+
+            if (!hallados.length) {
+                decir('Ningun lote con «' + campo.value.trim() + '»');
+
+                return;
+            }
+
+            var figuras = mapa.querySelectorAll('polygon[data-lote]');
+
+            for (var k = 0; k < figuras.length; k++) {
+                if (!vivos[figuras[k].getAttribute('data-lote')]) {
+                    figuras[k].classList.add('apagado');
+                    apagados.push(figuras[k]);
+                }
+            }
+
+            // Con uno solo no hay nada que elegir: se va derecho.
+            if (hallados.length === 1) {
+                centrarEn(hallados[0]);
+                decir(hallados[0].rotulo + (hallados[0].seCotiza ? ' · disponible' : ' · no disponible'));
+
+                return;
+            }
+
+            encuadrarTodos(hallados);
+            decir(hallados.length + ' lotes');
+        }
+
+        lupa.addEventListener('click', function () {
+            if (caja.classList.toggle('abierto')) {
+                campo.focus();
+
+                return;
+            }
+
+            campo.value = '';
+            despintar();
+            decir('');
+        });
+
+        campo.addEventListener('input', buscar);
+
+        // Enter cierra el teclado y deja ver el plano; no hay formulario que
+        // enviar, asi que sin esto el telefono recarga la pagina.
+        campo.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter') { return; }
+
+            e.preventDefault();
+            campo.blur();
+        });
+    })();
+
     (function abrirElDelEnlace() {
         var lote = loteDelHash();
 
