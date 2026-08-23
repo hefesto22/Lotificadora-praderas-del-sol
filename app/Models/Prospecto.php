@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Override;
 
 /**
@@ -36,11 +37,8 @@ use Override;
  */
 #[Fillable([
     'proyecto_id',
-    'lote_id',
     'nombre',
     'telefono',
-    'mensaje',
-    'plazo_meses',
     'ip',
     'atendido_el',
     'atendido_por',
@@ -58,7 +56,6 @@ class Prospecto extends Model
     protected function casts(): array
     {
         return [
-            'plazo_meses' => 'integer',
             'atendido_el' => 'datetime',
         ];
     }
@@ -72,13 +69,18 @@ class Prospecto extends Model
     }
 
     /**
-     * Por cual lote preguntaba. Null si escribio por el proyecto en general.
+     * Por cuales lotes pregunto, del mas reciente al mas viejo.
      *
-     * @return BelongsTo<Lote, $this>
+     * Antes era un `lote_id` y una fila por consulta: la misma persona
+     * preguntando por tres lotes eran tres prospectos, y «ya lo llame»
+     * quedaba marcado en uno solo mientras los otros dos seguian pidiendo
+     * llamada. Ver la migracion del 23-ago-2026.
+     *
+     * @return HasMany<LoteConsultado, $this>
      */
-    public function lote(): BelongsTo
+    public function consultas(): HasMany
     {
-        return $this->belongsTo(Lote::class);
+        return $this->hasMany(LoteConsultado::class)->orderByDesc('ultima_vez');
     }
 
     /**
@@ -95,21 +97,19 @@ class Prospecto extends Model
     }
 
     /**
-     * Como se lee el plazo que miraba cuando escribio.
+     * Los codigos de los lotes por los que pregunto, para una celda.
      *
-     * Es media conversacion: quien miraba 48 meses no quiere lo mismo que
-     * quien miraba contado, y saberlo antes de marcar el telefono cambia como
-     * arranca la llamada.
+     * Se lee de la relacion ya cargada: la tabla la precarga con `with()`, y
+     * asi la lista de prospectos no hace una consulta por fila.
      */
-    public function plazoEnPalabras(): string
+    public function lotesEnUnaLinea(): string
     {
-        $meses = $this->getAttribute('plazo_meses');
+        $codigos = $this->consultas
+            ->map(static fn (LoteConsultado $consulta): ?string => $consulta->lote?->getAttribute('codigo'))
+            ->filter(static fn (?string $codigo): bool => is_string($codigo) && $codigo !== '')
+            ->all();
 
-        if (! is_int($meses)) {
-            return 'No indicó';
-        }
-
-        return $meses === 0 ? 'Contado' : $meses.' meses';
+        return $codigos === [] ? '—' : implode(' · ', $codigos);
     }
 
     /**

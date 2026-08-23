@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Prospectos\Tables;
 
 use App\Filament\Support\BuscarNombre;
+use App\Models\LoteConsultado;
 use App\Models\Prospecto;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Textarea;
@@ -30,6 +31,12 @@ final class ProspectosTable
     public static function configure(Table $table): Table
     {
         return $table
+            /*
+             * Las consultas y sus lotes, de una vez. Sin esto, una lista de
+             * treinta prospectos con tres lotes cada uno son noventa
+             * consultas para dibujar una sola columna.
+             */
+            ->modifyQueryUsing(static fn (Builder $query): Builder => $query->with(['consultas.lote']))
             ->columns([
                 TextColumn::make('created_at')
                     ->label('Escribió')
@@ -51,17 +58,47 @@ final class ProspectosTable
                     ->copyMessage('Teléfono copiado')
                     ->url(fn (Prospecto $record): string => 'tel:'.$record->getAttribute('telefono')),
 
-                TextColumn::make('lote.codigo')
-                    ->label('Lote')
+                /*
+                 * TODOS los lotes por los que preguntó, no el primero.
+                 *
+                 * Desde el 23-ago el prospecto es la persona: preguntar por
+                 * tres lotes es una fila con tres insignias, no tres filas
+                 * con el mismo teléfono. La que lleva un «×2» es alguien que
+                 * volvió a preguntar por el mismo lote — está decidido, y esa
+                 * es la llamada que conviene hacer primero.
+                 */
+                TextColumn::make('lotes')
+                    ->label('Preguntó por')
                     ->badge()
                     ->color('info')
                     ->placeholder('Sin lote')
-                    ->searchable(),
+                    ->searchable(query: static fn (Builder $query, string $search): Builder => $query
+                        ->whereHas('consultas.lote', static fn (Builder $lote): Builder => $lote
+                            ->where('codigo', 'ilike', "%{$search}%")))
+                    ->getStateUsing(static fn (Prospecto $record): array => $record->consultas
+                        ->map(static function (LoteConsultado $consulta): ?string {
+                            $codigo = $consulta->lote?->getAttribute('codigo');
 
-                TextColumn::make('plazo_meses')
+                            if (! is_string($codigo) || $codigo === '') {
+                                return null;
+                            }
+
+                            $veces = $consulta->getAttribute('veces');
+
+                            return is_int($veces) && $veces > 1 ? $codigo.' ×'.$veces : $codigo;
+                        })
+                        ->filter(static fn (?string $codigo): bool => $codigo !== null)
+                        ->values()
+                        ->all()),
+
+                TextColumn::make('miraba')
                     ->label('Miraba')
-                    ->formatStateUsing(fn (Prospecto $record): string => $record->plazoEnPalabras())
-                    ->color('gray'),
+                    ->color('gray')
+                    ->placeholder('—')
+                    // El plazo de la ÚLTIMA consulta: `consultas` viene
+                    // ordenada por `ultima_vez` descendente.
+                    ->getStateUsing(static fn (Prospecto $record): ?string => $record->consultas
+                        ->first()?->plazoEnPalabras()),
 
                 TextColumn::make('proyecto.nombre')
                     ->label('Proyecto')

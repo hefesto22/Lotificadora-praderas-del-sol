@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Models\Lote;
+use App\Models\LoteConsultado;
 use App\Models\Prospecto;
 use App\Models\Proyecto;
 use Illuminate\Http\RedirectResponse;
@@ -78,20 +79,118 @@ final class RegistrarInteresController
 
         $lote = $this->loteDe($datos['lote_id'] ?? null, $proyecto);
 
-        Prospecto::query()->create([
-            'proyecto_id' => $proyecto->getKey(),
-            'lote_id'     => $lote?->getKey(),
-            'nombre'      => $datos['nombre'],
-            'telefono'    => $datos['telefono'],
-            'mensaje'     => $datos['mensaje'] ?? null,
-            'plazo_meses' => $datos['plazo'] ?? null,
-            'ip'          => $request->ip(),
-        ]);
+        $nombre = is_string($datos['nombre']) ? $datos['nombre'] : '';
+        $telefono = is_string($datos['telefono']) ? $datos['telefono'] : '';
 
-        return $this->despedir($proyecto, $lote, is_string($datos['nombre']) ? $datos['nombre'] : null);
+        $prospecto = $this->personaDe($proyecto, $nombre, $telefono, $request->ip());
+
+        $this->anotarLaConsulta(
+            $prospecto,
+            $lote,
+            is_int($datos['plazo'] ?? null) ? $datos['plazo'] : null,
+            is_string($datos['mensaje'] ?? null) ? $datos['mensaje'] : null,
+        );
+
+        return $this->despedir($proyecto, $lote, $nombre === '' ? null : $nombre);
     }
 
     // ─── Interno ──────────────────────────────────────────────────────
+
+    /**
+     * La PERSONA, buscada por su teléfono.
+     *
+     * ═══ POR QUE NO ES SIEMPRE UNA FILA NUEVA ═══
+     *
+     * Lo pidió Mauricio el 23-ago viendo la lista: «si la misma persona
+     * contacta no hay necesidad de hacer 2, solo que aparezca por cuáles
+     * lotes fue que contactó; sería identificado por el número de teléfono».
+     *
+     * Y el problema era peor que la repetición: con una fila por consulta,
+     * «ya lo llamé» quedaba marcado en UNA y las otras seguían pidiendo
+     * llamada. Se terminaba llamando dos veces a la misma persona.
+     *
+     * ⚠️ Se busca por `telefono_clave` —solo los dígitos, columna GENERADA
+     * por Postgres— así que «3301-2827» y «33012827» encuentran a la misma
+     * persona. El teléfono se guarda igual como lo escribió, que es como lo
+     * va a reconocer quien lo lea.
+     */
+    private function personaDe(Proyecto $proyecto, string $nombre, string $telefono, ?string $ip): Prospecto
+    {
+        $clave = preg_replace('/\D+/', '', $telefono) ?? '';
+
+        $prospecto = Prospecto::query()
+            ->where('proyecto_id', $proyecto->getKey())
+            ->where('telefono_clave', $clave)
+            ->first();
+
+        if ($prospecto instanceof Prospecto) {
+            /*
+             * Gana el nombre del ÚLTIMO: es el que la persona acaba de
+             * teclear. Si la primera vez puso «juan» y ahora «Juan Pérez», el
+             * segundo es el bueno. La marca de atendido NO se toca — que haya
+             * vuelto a escribir no deshace la llamada que ya le hicieron.
+             */
+            $prospecto->update(['nombre' => $nombre, 'telefono' => $telefono]);
+
+            return $prospecto;
+        }
+
+        return Prospecto::query()->create([
+            'proyecto_id' => $proyecto->getKey(),
+            'nombre'      => $nombre,
+            'telefono'    => $telefono,
+            'ip'          => $ip,
+        ]);
+    }
+
+    /**
+     * El lote por el que preguntó, sumado a lo que ya sabíamos de él.
+     *
+     * Volver a preguntar por el MISMO lote no agrega una fila: suma una vez y
+     * corre la fecha. Una persona que preguntó tres veces por el mismo lote
+     * es un dato —está decidida— y tres filas iguales no lo dicen mejor.
+     *
+     * El plazo y el mensaje se pisan con los últimos: si antes miraba contado
+     * y ahora 48 meses, lo que importa para la llamada es lo de ahora.
+     */
+    private function anotarLaConsulta(Prospecto $prospecto, ?Lote $lote, ?int $plazo, ?string $mensaje): void
+    {
+        $busca = LoteConsultado::query()->where('prospecto_id', $prospecto->getKey());
+
+        // `where('lote_id', null)` no encuentra nunca: en SQL nada es igual a
+        // NULL. La consulta sin lote se busca con `whereNull`.
+        if ($lote instanceof Lote) {
+            $busca->where('lote_id', $lote->getKey());
+        } else {
+            $busca->whereNull('lote_id');
+        }
+
+        $consulta = $busca->first();
+        $ahora = now();
+
+        if ($consulta instanceof LoteConsultado) {
+            $veces = $consulta->getAttribute('veces');
+
+            $consulta->update([
+                'veces'       => (is_int($veces) ? $veces : 1) + 1,
+                'ultima_vez'  => $ahora,
+                'plazo_meses' => $plazo ?? $consulta->getAttribute('plazo_meses'),
+                'mensaje'     => $mensaje ?? $consulta->getAttribute('mensaje'),
+            ]);
+
+            return;
+        }
+
+        LoteConsultado::query()->create([
+            'prospecto_id' => $prospecto->getKey(),
+            'lote_id'      => $lote?->getKey(),
+            'plazo_meses'  => $plazo,
+            'mensaje'      => $mensaje,
+            'veces'        => 1,
+            'primera_vez'  => $ahora,
+            'ultima_vez'   => $ahora,
+        ]);
+    }
 
     private function loteDe(mixed $id, Proyecto $proyecto): ?Lote
     {

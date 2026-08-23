@@ -11,6 +11,7 @@ use App\Models\Bloque;
 use App\Models\Cliente;
 use App\Models\Compromiso;
 use App\Models\Lote;
+use App\Models\LoteConsultado;
 use App\Models\PlanDePago;
 use App\Models\Prospecto;
 use App\Models\Proyecto;
@@ -306,11 +307,18 @@ describe('Plano público — el formulario de interés', function (): void {
         /** @var Prospecto $prospecto */
         $prospecto = Prospecto::query()->sole();
 
+        /** @var LoteConsultado $consulta */
+        $consulta = LoteConsultado::query()->sole();
+
         expect($prospecto->getAttribute('nombre'))->toBe('Marlon Andrés Zelaya')
-            ->and((int) $prospecto->getAttribute('lote_id'))->toBe((int) $this->libre->getKey())
             ->and((int) $prospecto->getAttribute('proyecto_id'))->toBe((int) $this->proyecto->getKey())
-            ->and($prospecto->getAttribute('plazo_meses'))->toBe(12)
-            ->and($prospecto->estaAtendido())->toBeFalse();
+            ->and($prospecto->estaAtendido())->toBeFalse()
+            // El lote vive en su propia fila desde el 23-ago: el prospecto es
+            // la persona, y por cuales lotes pregunto es lo que le cuelga.
+            ->and((int) $consulta->getAttribute('prospecto_id'))->toBe((int) $prospecto->getKey())
+            ->and((int) $consulta->getAttribute('lote_id'))->toBe((int) $this->libre->getKey())
+            ->and($consulta->getAttribute('plazo_meses'))->toBe(12)
+            ->and($consulta->getAttribute('veces'))->toBe(1);
 
         /*
          * El número del proyecto, no el del cliente: ocho dígitos hondureños
@@ -321,6 +329,46 @@ describe('Plano público — el formulario de interés', function (): void {
         expect($respuesta->headers->get('Location'))
             ->toContain('wa.me/50499887766')
             ->toContain(rawurlencode((string) $this->libre->getAttribute('codigo')));
+    });
+
+    /*
+    | 🔴 23-ago-2026, visto por Mauricio en la lista con tres filas y dos
+    | personas: «si la misma persona contacta no hay necesidad de hacer 2,
+    | solo que aparezca por cuales lotes fue que contacto».
+    |
+    | Y el problema era peor que la repeticion: con una fila por consulta,
+    | «ya lo llame» quedaba marcado en UNA y las otras seguian pidiendo
+    | llamada.
+    */
+    test('la misma persona por dos lotes es UN prospecto con dos consultas', function (): void {
+        $otro = $this->libre;
+
+        $pregunta = fn (int $lote, string $telefono): mixed => $this->post(
+            route('plano.interes', ['slug' => 'praderas-del-sol']),
+            ['nombre' => 'Marlon Zelaya', 'telefono' => $telefono, 'plazo' => 12, 'lote_id' => $lote],
+        );
+
+        $pregunta($otro->getKey(), '9911-2233');
+
+        // El MISMO numero, escrito distinto: la clave son solo los digitos.
+        $pregunta($otro->getKey(), '99112233');
+
+        expect(Prospecto::query()->count())->toBe(1)
+            ->and(LoteConsultado::query()->count())->toBe(1)
+            // Preguntar dos veces por el mismo lote no duplica: cuenta.
+            ->and(LoteConsultado::query()->sole()->getAttribute('veces'))->toBe(2);
+    });
+
+    test('el nombre que queda es el ultimo que tecleo', function (): void {
+        $pregunta = fn (string $nombre): mixed => $this->post(
+            route('plano.interes', ['slug' => 'praderas-del-sol']),
+            ['nombre' => $nombre, 'telefono' => '9911-2233', 'lote_id' => $this->libre->getKey()],
+        );
+
+        $pregunta('marlon');
+        $pregunta('Marlon Andrés Zelaya');
+
+        expect(Prospecto::query()->sole()->getAttribute('nombre'))->toBe('Marlon Andrés Zelaya');
     });
 
     /*
