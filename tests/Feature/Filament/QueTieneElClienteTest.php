@@ -105,6 +105,22 @@ describe('El link abre el listado ya filtrado', function (): void {
             ->assertDontSee((string) $this->ventaDelOtro->getAttribute('numero_contrato'));
     });
 
+    /*
+    | 🔴 EL QUE ATA EL LINK CON LA PESTAÑA POR DEFECTO
+    |
+    | Desde el 22-ago Ventas abre en «Vigente». El contador de la ficha
+    | cuenta TODOS los estados, así que sin el `activeTab` del link este
+    | cliente vería «Ventas 1» y una pantalla vacía. Es el mismo contador
+    | que miente del §9.E6, del lado del listado.
+    */
+    test('también la que ya se liquidó, que es la que el contador incluye', function (): void {
+        $this->venta->update(['estado' => EstadoVenta::Liquidada, 'cerrada_el' => today()]);
+
+        $this->get(ListadoDelCliente::ventas($this->cliente))
+            ->assertOk()
+            ->assertSee((string) $this->venta->getAttribute('numero_contrato'));
+    });
+
     test('sus apartados', function (): void {
         $this->get(ListadoDelCliente::apartados($this->cliente))
             ->assertOk()
@@ -139,7 +155,11 @@ test('el contador dice lo mismo que la pantalla que abre', function (): void {
     // Sin esto, tres ceros contra tres listas vacías pasarían el test.
     expect([$ventas, $apartados, $recibos])->each->toBeGreaterThan(0);
 
+    // Parado en «Todas», igual que el link real: `ListadoDelCliente::ventas()`
+    // manda `activeTab` justamente porque el contador cuenta todos los
+    // estados y la pantalla abre en «Vigente».
     Livewire::test(ListVentas::class)
+        ->set('activeTab', ListVentas::TODAS)
         ->filterTable('cliente', $this->cliente->getKey())
         ->assertCountTableRecords($ventas);
 

@@ -17,6 +17,21 @@ class ListRecibos extends ListRecords
     protected static string $resource = ReciboResource::class;
 
     /**
+     * Sin migas de pan, como el plano (23-ago-2026).
+     *
+     * «Recibos › Listado» arriba del título «Recibos» es la misma palabra dos
+     * veces y una ruta de un solo salto. Para volver está el menú de la
+     * izquierda, que además dice dónde estás parado sin gastar un renglón.
+     *
+     * @return array<string>
+     */
+    #[Override]
+    public function getBreadcrumbs(): array
+    {
+        return [];
+    }
+
+    /**
      * @return array<int, mixed>
      */
     #[Override]

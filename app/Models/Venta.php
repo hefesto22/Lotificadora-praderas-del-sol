@@ -6,18 +6,25 @@ namespace App\Models;
 
 use App\Domain\Enums\EstadoVenta;
 use App\Domain\ValueObjects\Monto;
+use App\Models\Pivots\DuenoDelExpediente;
 use App\Traits\HasAuditFields;
+use Carbon\CarbonImmutable;
 use Database\Factories\VentaFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Support\Facades\DB;
 use Override;
+use Spatie\Activitylog\Models\Activity;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
 
@@ -144,14 +151,46 @@ class Venta extends Model
      * Los duenos del expediente (R8), con su marca de titular y su orden
      * de aparicion en el contrato.
      *
-     * @return BelongsToMany<Cliente, $this>
+     * El cuarto parametro generico es el PIVOT: `->using()` lo cambia de
+     * `Pivot` a la clase propia, y sin decirlo el tipo declarado y el
+     * devuelto dejan de coincidir (BelongsToMany no es covariante).
+     *
+     * @return BelongsToMany<Cliente, $this, DuenoDelExpediente, 'pivot'>
      */
     public function clientes(): BelongsToMany
     {
         return $this->belongsToMany(Cliente::class, 'venta_cliente')
-            ->withPivot(['titular', 'orden'])
+            ->using(DuenoDelExpediente::class)
+            ->withPivot(['titular', 'orden', 'titular_hasta'])
             ->withTimestamps()
             ->orderByPivot('orden');
+    }
+
+    /**
+     * El titular, pero como RELACION.
+     *
+     * ═══ POR QUE EXISTE SI YA ESTA `titular()` ═══
+     *
+     * Porque `titular()` hace su propia consulta cada vez que se lo llama, y
+     * en una tabla de setenta expedientes eso son setenta consultas. Esta se
+     * puede precargar con `with('titulares')`: una sola para toda la página.
+     *
+     * Y hay una razón de tipos además de la de rendimiento: filtrar el pivot
+     * en el closure de un `with()` obliga a tipar el parámetro como
+     * `BelongsToMany`, que es MAS ESTRECHO que el `Builder` que Laravel
+     * declara — contravarianza rota, y PHPStan lo rechaza. Con la relación
+     * nombrada acá, la pantalla precarga pasando un string y no hay closure
+     * que tipar.
+     *
+     * En plural porque una relación `hasMany`-ish devuelve colección: hoy
+     * siempre trae uno —solo un dueño lleva la marca— pero el tipo no puede
+     * prometer lo que la base no obliga.
+     *
+     * @return BelongsToMany<Cliente, $this, DuenoDelExpediente, 'pivot'>
+     */
+    public function titulares(): BelongsToMany
+    {
+        return $this->clientes()->wherePivot('titular', true);
     }
 
     /**
@@ -162,6 +201,40 @@ class Venta extends Model
     public function compromisos(): HasMany
     {
         return $this->hasMany(Compromiso::class);
+    }
+
+    /**
+     * Las llamadas de cobro que se le hicieron a este expediente.
+     *
+     * @return HasMany<GestionDeCobro, $this>
+     */
+    public function gestiones(): HasMany
+    {
+        return $this->hasMany(GestionDeCobro::class)
+            ->orderByDesc('contactado_el')
+            ->orderByDesc('id');
+    }
+
+    /**
+     * La última llamada, que es la que manda.
+     *
+     * ═══ POR QUE LA ULTIMA Y NO «SI HAY ALGUNA» ═══
+     *
+     * Porque una promesa vieja no sobrevive a una llamada nueva. Si el 20
+     * prometió pagar el 30 y el 22 lo vuelven a llamar y no atiende, el
+     * expediente tiene que volver a la lista el 23 —no el 30—: lo que se
+     * sabe de ese cliente es lo último que pasó, no lo más conveniente.
+     *
+     * ⚠️ El desempate por `id` no es decorativo: `contactado_el` es una
+     * FECHA, y dos llamadas del mismo día empatan siempre. Sin el segundo
+     * criterio, cuál de las dos gana lo decidiría el orden físico de las
+     * filas.
+     *
+     * @return HasOne<GestionDeCobro, $this>
+     */
+    public function ultimaGestion(): HasOne
+    {
+        return $this->hasOne(GestionDeCobro::class)->latestOfMany(['contactado_el', 'id']);
     }
 
     /**
@@ -245,6 +318,81 @@ class Venta extends Model
     public function reprogramaciones(): HasMany
     {
         return $this->hasMany(Reprogramacion::class)->latest();
+    }
+
+    /**
+     * Lo que se le cambió a este expediente, y quién — 22-ago-2026.
+     *
+     * ═══ QUE CUENTA COMO UNA ACTUALIZACION ═══
+     *
+     * Dos cosas, y las dos por la misma razón: cambian lo que dice el
+     * contrato sin dejar rastro en ninguna otra pantalla.
+     *
+     *   1. **La venta**: estado, montos, plazo, y el cambio de titular —que
+     *      `CambioDeTitular` asienta contra la venta justamente para esto—.
+     *
+     *   2. **Sus dueños**: el nombre y si están activos. Corregir «ORTIZ»
+     *      por «ORTIS» no toca ni una columna de `ventas`, pero cambia el
+     *      nombre que sale impreso en el estado de cuenta y en el recibo.
+     *      Es del expediente aunque la fila viva en `clientes`.
+     *
+     * Lo que NO entra: recibos, documentos y reprogramaciones. Los tres
+     * tienen su propia pestaña al lado, y repetirlos acá taparía lo que sí
+     * es una modificación — un expediente a 48 meses junta cientos de
+     * recibos y la corrección de un apellido quedaría enterrada.
+     *
+     * ═══ 🔴 TIENE QUE SER UNA RELACION, AUNQUE EL TIPO DIGA OTRA COSA ═══
+     *
+     * La primera versión devolvía un `Builder` de Eloquent, porque el método
+     * de Filament que lo consume está tipado `Relation | Builder`. **El tipo
+     * miente**: `Table::getRelationshipQuery()` hace `$relationship
+     * ->getQuery()`, y eso solo funciona sobre una relación —ahí devuelve el
+     * builder de Eloquent—. Sobre un builder de Eloquent baja un nivel más y
+     * devuelve el query builder CRUDO, que ya no encaja con el tipo de
+     * retorno: seis tests en rojo con un TypeError de vendor que no nombra
+     * ni la venta ni la pestaña. Medido el 22-ago-2026.
+     *
+     * ⚠️ Y `noConstraints` no es una astucia: una relación normal trae
+     * clavado su `where subject_id = <esta venta>`, y con esa condición
+     * suelta afuera el `orWhere` de los dueños traería los cambios de
+     * clientes de OTROS expedientes. Sin ella, el paréntesis de abajo es la
+     * única condición y cualquier filtro que Filament agregue después entra
+     * con AND sobre el conjunto entero, que es lo que uno espera.
+     *
+     * Por lo mismo esto NO se puede usar con `with()`: el eager loading
+     * agregaría su propio `whereIn` por fuera del paréntesis.
+     *
+     * @return HasMany<Activity, $this>
+     */
+    public function actualizaciones(): HasMany
+    {
+        /*
+         * El pivot crudo y no `clientes()`: ahí adentro están también los ex
+         * titulares —los que tienen `titular_hasta`—, y que alguien haya
+         * dejado de ser dueño no borra lo que se le corrigió mientras lo era.
+         */
+        $duenos = DB::table('venta_cliente')
+            ->where('venta_id', $this->getKey())
+            ->select('cliente_id');
+
+        /** @var HasMany<Activity, $this> $relacion */
+        $relacion = Relation::noConstraints(fn (): HasMany => $this->hasMany(Activity::class, 'subject_id'));
+
+        $relacion->where(function (Builder $query) use ($duenos): void {
+            $query
+                ->where(function (Builder $laVenta): void {
+                    $laVenta
+                        ->where('subject_type', self::class)
+                        ->where('subject_id', $this->getKey());
+                })
+                ->orWhere(function (Builder $susDuenos) use ($duenos): void {
+                    $susDuenos
+                        ->where('subject_type', Cliente::class)
+                        ->whereIn('subject_id', $duenos);
+                });
+        });
+
+        return $relacion->latest();
     }
 
     /**
@@ -345,6 +493,27 @@ class Venta extends Model
         return $this->clientes()->wherePivot('titular', true)->first();
     }
 
+    /**
+     * Quienes fueron titulares de este expediente y dejaron de serlo.
+     *
+     * Siguen siendo dueños listados —no se les borra la fila— porque sus
+     * recibos apuntan acá y porque el expediente tiene que poder contar su
+     * propia historia sin ir a la bitácora. Ver `CambioDeTitular`.
+     *
+     * @return Collection<int, Cliente>
+     */
+    public function titularesAnteriores(): Collection
+    {
+        return $this->clientes()
+            ->wherePivotNotNull('titular_hasta')
+            // reorder(): `clientes()` ya ordena por `orden` y orderByPivot
+            // APPENDEA, asi que sin esto la lista sale por posicion en el
+            // contrato y no por fecha —y con dos cesiones se lee al reves—.
+            ->reorder()
+            ->orderByPivot('titular_hasta')
+            ->get();
+    }
+
     // ─── Estado ───────────────────────────────────────────────────────
 
     public function esBorrador(): bool
@@ -363,6 +532,53 @@ class Venta extends Model
     public function esDeContado(): bool
     {
         return (int) $this->getAttribute('plazo_meses') === 0;
+    }
+
+    /**
+     * El expediente que ya no debe nada deja de estar vigente.
+     *
+     * ═══ POR QUE ACA, SI ESTE MODELO NO CAMBIA ESTADOS ═══
+     *
+     * Porque hay DOS momentos en que una venta puede quedar en cero, y son de
+     * dos Services distintos:
+     *
+     *  1. El último pago la termina de pagar → `RegistroDePagos`.
+     *  2. **Nace pagada**: la venta de contado. Se firma, se cobra el 100%
+     *     como prima y no genera ni una cuota, así que jamás pasa por un
+     *     cobro. Hasta el 23-ago-2026 se quedaba «Vigente» para siempre —con
+     *     botón de cobrar sobre un contrato saldado—, y lo cazó Mauricio:
+     *     «ya fueron pagados en su totalidad, no tiene lógica que sigan
+     *     vigentes».
+     *
+     * Dos lugares que escriben el mismo cierre son dos lugares donde
+     * olvidarse de `cerrada_el`, y el CHECK `ventas_cierre_segun_estado_chk`
+     * exige que el estado y la fecha vayan juntos o no vayan. Por eso el
+     * cierre es UNA operación, acá, y los Services la llaman.
+     *
+     * ⚠️ La condición NO es «fue de contado»: es «no queda saldo». Un
+     * contrato de tres lotes puede llevar uno al contado y dos financiados, y
+     * ese sigue vigente porque todavía debe. Preguntar por `plazo_meses = 0`
+     * cerraría contratos con cuotas por cobrar.
+     *
+     * ⚠️ Se mira el saldo de las CUOTAS, no la mora. Un contrato con todo el
+     * capital pagado y mora suelta se liquida igual: la mora es un cargo del
+     * atraso, no parte del precio, y dejar el expediente abierto por ella
+     * haría que un cliente que ya pagó su lote figure debiendo el lote.
+     */
+    public function liquidarSiYaNoDebe(CarbonImmutable $cuando): void
+    {
+        if ($this->getAttribute('estado') !== EstadoVenta::Vigente) {
+            return;
+        }
+
+        if (! $this->saldoPendiente()->esCero()) {
+            return;
+        }
+
+        $this->update([
+            'estado'     => EstadoVenta::Liquidada,
+            'cerrada_el' => $cuando->toDateString(),
+        ]);
     }
 
     // ─── Scopes ───────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\PrecioPactado;
 use App\Domain\Ventas\RegistroDeVentas;
 use App\Filament\Resources\Ventas\Pages\ViewVenta;
+use App\Filament\Support\ModoDeCobro;
 use App\Models\Bloque;
 use App\Models\Cliente;
 use App\Models\Cuota;
@@ -79,6 +80,9 @@ beforeEach(function (): void {
      * diferencia de la cuota, acá no hay un número esperado.
      */
     $this->reparto = fn (array $extra = []): array => array_merge([
+        // El abono entra por el modal de cobro desde el 14-ago-2026.
+        'modo' => ModoDeCobro::Abono->value,
+
         'abonar_'.$this->primerLote->getKey()    => true,
         'abono_'.$this->primerLote->getKey()     => '20000.00',
         'modalidad_'.$this->primerLote->getKey() => ModalidadDeReprogramacion::AcortarPlazo->value,
@@ -103,7 +107,7 @@ beforeEach(function (): void {
 */
 test('los dos lotes se abonan en un solo recibo', function (): void {
     ($this->expediente)()
-        ->callAction('abonar_a_capital', ($this->reparto)())
+        ->callAction('cobrar', ($this->reparto)())
         ->assertHasNoActionErrors();
 
     $recibo = Recibo::query()->where('concepto', ConceptoDeRecibo::AbonoCapital)->sole();
@@ -131,7 +135,7 @@ test('los dos lotes se abonan en un solo recibo', function (): void {
 */
 test('cada lote se reprograma con la modalidad que le tocó', function (): void {
     ($this->expediente)()
-        ->callAction('abonar_a_capital', ($this->reparto)())
+        ->callAction('cobrar', ($this->reparto)())
         ->assertHasNoActionErrors();
 
     $delPrimero = Reprogramacion::query()->where('compromiso_id', $this->primerLote->getKey())->sole();
@@ -156,7 +160,7 @@ test('cada lote se reprograma con la modalidad que le tocó', function (): void 
 */
 test('si un lote se pasa, no se abona ninguno', function (): void {
     ($this->expediente)()
-        ->callAction('abonar_a_capital', ($this->reparto)([
+        ->callAction('cobrar', ($this->reparto)([
             'abono_'.$this->segundoLote->getKey() => '999999.00',
         ]))
         ->assertHasNoActionErrors();
@@ -184,7 +188,7 @@ test('el lote que no alcanza se registra como pago normal, y el otro reprograma'
         ->update(['fecha_vencimiento' => today()->subMonths(2)->toDateString()]);
 
     ($this->expediente)()
-        ->callAction('abonar_a_capital', ($this->reparto)())
+        ->callAction('cobrar', ($this->reparto)())
         ->assertHasNoActionErrors();
 
     $recibo = Recibo::query()->where('concepto', ConceptoDeRecibo::AbonoCapital)->sole();
@@ -205,7 +209,7 @@ test('el lote que no alcanza se registra como pago normal, y el otro reprograma'
 */
 test('el lote que no se marca queda intacto', function (): void {
     ($this->expediente)()
-        ->callAction('abonar_a_capital', ($this->reparto)([
+        ->callAction('cobrar', ($this->reparto)([
             'abonar_'.$this->segundoLote->getKey() => false,
         ]))
         ->assertHasNoActionErrors();

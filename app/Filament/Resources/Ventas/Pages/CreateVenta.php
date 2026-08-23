@@ -6,6 +6,7 @@ namespace App\Filament\Resources\Ventas\Pages;
 
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Exceptions\GrupoOlympoException;
+use App\Domain\Exceptions\VentaInvalidaException;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\PrecioPactado;
 use App\Domain\Ventas\RegistroDeVentas;
@@ -55,8 +56,26 @@ class CreateVenta extends CreateRecord
         $registro = app(RegistroDeVentas::class);
 
         try {
+            /*
+             * 🔴 SIN PLAN DE PAGO NO SE VENDE (23-ago-2026). La misma regla
+             * que en el plano, preguntada en el mismo lugar
+             * —`Proyecto::tieneConQueVender()`— para que no se puedan separar.
+             *
+             * Adentro del `try` a propósito: la excepción es del dominio y ya
+             * cae en el `catch` de abajo, que la muestra como notificación y
+             * deja el formulario lleno. Un `throw` afuera daría un 500 y le
+             * borraría a quien atiende todo lo que acababa de teclear.
+             */
+            $proyecto = Proyecto::query()->findOrFail($data['proyecto_id']);
+
+            if (! $proyecto->tieneConQueVender()) {
+                throw VentaInvalidaException::porProyectoSinPlanDePago(
+                    (string) $proyecto->getAttribute('nombre'),
+                );
+            }
+
             return $registro->activar(
-                proyecto: Proyecto::query()->findOrFail($data['proyecto_id']),
+                proyecto: $proyecto,
                 lotes: $this->lotes($data),
                 clientes: $this->clientes($data),
                 prima: new Monto((string) ($data['prima'] ?? '0')),

@@ -8,6 +8,7 @@ use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\UnidadDeArea;
 use App\Domain\Exceptions\GrupoOlympoException;
+use App\Domain\Exceptions\VentaInvalidaException;
 use App\Domain\Lotes\RegistroDeReservas;
 use App\Domain\Plano\AcomodadorDelPlano;
 use App\Domain\Plano\Dxf\ImportadorDeDxf;
@@ -42,6 +43,7 @@ use App\Models\Proyecto;
 use App\Models\Venta;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Hidden;
@@ -107,6 +109,23 @@ class VerPlano extends Page
     }
 
     /**
+     * Sin migas de pan — pedido de Mauricio, 23-ago-2026.
+     *
+     * «Proyectos › RESIDENCIAL PRADERAS DEL SOL › Plano de RESIDENCIAL
+     * PRADERAS DEL SOL» dice tres veces dónde estás parado, y la tercera
+     * repite palabra por palabra el título que está justo debajo. Nadie
+     * necesita la ruta acá: para volver está «Volver al proyecto», que es un
+     * botón y no un renglón de texto.
+     *
+     * @return array<string>
+     */
+    #[Override]
+    public function getBreadcrumbs(): array
+    {
+        return [];
+    }
+
+    /**
      * @return array<int, Action>
      */
     #[Override]
@@ -115,9 +134,16 @@ class VerPlano extends Page
         return [
             $this->accionDeImportar(),
 
+            /*
+             * 🔴 Con permiso propio desde el 23-ago-2026. `visible()` es lo
+             * que saca el botón de la pantalla; la guarda de verdad está
+             * adentro de `->action()`, porque una acción de Filament se monta
+             * por URL y el botón no es una frontera.
+             */
             Action::make('acomodar')
                 ->label('Acomodar plano')
                 ->icon(Heroicon::OutlinedSquares2x2)
+                ->visible(fn (): bool => auth()->user()?->can('acomodarPlano', Proyecto::class) === true)
                 ->modalHeading('Acomodar el plano de forma esquemática')
                 ->modalDescription(
                     'Dibuja los lotes que YA existen, en el orden de su código y cada uno con su área '.
@@ -153,6 +179,8 @@ class VerPlano extends Page
                         ->helperText('El espacio de calle que queda entre un bloque y el siguiente.'),
                 ])
                 ->action(function (array $data): void {
+                    $this->exigirPermisoDelPlano('acomodarPlano');
+
                     /** @var Proyecto $proyecto */
                     $proyecto = $this->getRecord();
 
@@ -280,6 +308,21 @@ class VerPlano extends Page
                                 'Al vender cuenta como parte de la prima. Si vence sin que el cliente vuelva, '.
                                 'el lote se libera y el dinero se devuelve.'
                             ),
+
+                        /*
+                         * La misma puerta que en la venta, y por lo mismo: el
+                         * apartado cobra plata de verdad y quema un numero de
+                         * recibo. Acá la pregunta es más corta porque el
+                         * trámite es más corto — lo que se puede equivocar es
+                         * el lote, la seña y a nombre de quién.
+                         */
+                        Checkbox::make('confirmado')
+                            ->label('Revisé el lote, la seña y a nombre de quién queda.')
+                            ->accepted()
+                            ->columnSpanFull()
+                            ->validationMessages([
+                                'accepted' => 'Falta confirmar que revisaste los datos del apartado.',
+                            ]),
                     ]),
 
                 /*
@@ -365,7 +408,14 @@ class VerPlano extends Page
                 'armado el plan de cuotas. Si un lote venia apartado, tiene que ser a nombre del titular.'
             )
             ->modalSubmitActionLabel('Firmar la venta')
-            ->modalWidth('3xl')
+            /*
+             * 🔴 5xl desde el 23-ago-2026. En 3xl todo caía en una columna
+             * angosta con media pantalla vacía a los lados, y firmar una venta
+             * pedía tres pantallazos de scroll. Lo pidió Mauricio mirando una
+             * venta de contado: «se quiere ver los datos sin tener que hacer
+             * tanto scroll, aprovechá mejor el espacio».
+             */
+            ->modalWidth('5xl')
             ->fillForm(fn (array $arguments): array => $this->datosInicialesDeVenta($arguments))
             ->schema([
                 Hidden::make('lote_id'),
@@ -412,10 +462,28 @@ class VerPlano extends Page
                             ->content(fn (Get $get): HtmlString => $this->tablaDeLotes($get)),
                     ]),
 
+                /*
+                 * 🔴 DE CONTADO ESTA SECCION NO SALE (23-ago-2026).
+                 *
+                 * Sus tres números son «Valor», «Prima» y «Saldo a financiar»,
+                 * y de contado la prima ES el valor y el saldo es L 0.00: tres
+                 * casillas para decir un solo número, más una escalera de
+                 * cuotas que dice «De contado, sin cuotas». Un cuarto de la
+                 * altura del modal contando algo que no pasa.
+                 *
+                 * Lo que de contado SÍ hace falta —cuánto es y que se cobra
+                 * todo hoy— ya lo dice la línea de «Antes de firmar», que está
+                 * pegada al botón, que es donde se lee.
+                 *
+                 * Financiado no se toca: ahí los tres números son distintos
+                 * entre sí y la escalera es la respuesta a «¿cuánto pago por
+                 * mes?», que con plazos mezclados no tiene una sola.
+                 */
                 Section::make('Lo que se va a firmar')
                     ->description('Con el mismo motor que despues guarda la venta.')
                     ->icon(Heroicon::OutlinedDocumentCheck)
                     ->columns(3)
+                    ->visible(fn (Get $get): bool => ! $this->soloContado($get))
                     ->schema([
                         Placeholder::make('resumen_valor')
                             ->label('Valor')
@@ -487,16 +555,56 @@ class VerPlano extends Page
                             ->visible(fn (Get $get): bool => ! $get('cotizado'))
                             ->dehydratedWhenHidden(),
 
+                        /*
+                         * 🔴 OBLIGATORIA Y MAYOR QUE CERO cuando hay cuotas.
+                         *
+                         * Pedido de Mauricio el 14-ago-2026. Una venta
+                         * financiada sin prima es la que se cae: el cliente
+                         * se lleva el lote sin haber puesto nada, y el dia
+                         * que deja de pagar no hay nada retenido con que
+                         * liquidar la rescision (R22).
+                         *
+                         * CUANTO cobrar sigue siendo decision comercial: el
+                         * sistema exige que haya prima, no cuanta. Un piso
+                         * en el codigo obliga a pelearse con el sistema el
+                         * dia que negocien distinto.
+                         *
+                         * Al contado no se pide: ahi la prima ES el valor y
+                         * la impone `primaDelRenglon()` — el campo queda solo
+                         * como referencia de lo que se va a cobrar.
+                         */
                         MontoField::make('prima', 'Prima')
                             ->live(onBlur: true)
                             ->visible(fn (Get $get): bool => ! $get('cotizado'))
                             ->dehydratedWhenHidden()
-                            ->helperText('Se paga completa al firmar (R5).'),
+                            ->required(fn (Get $get): bool => ! $this->soloContado($get))
+                            ->rules(fn (Get $get): array => $this->soloContado($get)
+                                ? []
+                                : ['gt:0'])
+                            ->validationMessages(['gt' => 'Con plan de cuotas la prima no puede ser L 0.00.'])
+                            ->helperText(fn (Get $get): string => $this->soloContado($get)
+                                ? 'Al contado no se teclea: la prima es el valor entero y se paga completo al firmar.'
+                                : 'Se paga completa al firmar (R5), y no puede ser cero.'),
 
+                        /*
+                         * Sin cuotas no hay dia de pago. Lo pidio Mauricio el
+                         * 14-ago-2026 viendo el modal de una venta de contado:
+                         * preguntar «¿que dia paga?» cuando no va a pagar
+                         * ningun dia mas es pedir un dato que no significa
+                         * nada, y quien atiende se queda dudando si entendio
+                         * mal la venta.
+                         *
+                         * `dehydratedWhenHidden()`: el valor viaja igual
+                         * aunque no se vea. La columna `ventas.dia_pago` es
+                         * NOT NULL con CHECK de 1 a 31, y una venta de
+                         * contado tambien tiene que guardarse.
+                         */
                         Select::make('dia_pago')
                             ->label('Dia de pago')
                             ->options($this->diasDelMes())
-                            ->required()
+                            ->required(fn (Get $get): bool => ! $this->soloContado($get))
+                            ->visible(fn (Get $get): bool => ! $this->soloContado($get))
+                            ->dehydratedWhenHidden()
                             ->live()
                             ->native(false)
                             ->helperText('En los meses cortos se corre al ultimo dia.'),
@@ -569,11 +677,83 @@ class VerPlano extends Page
                             ->rows(2)
                             ->columnSpanFull(),
                     ]),
+
+                /*
+                 * ═══ 🔴 LA ULTIMA PUERTA ANTES DE QUEMAR UN CORRELATIVO ═══
+                 *
+                 * Lo pidio Mauricio el 14-ago-2026: «que aparezca una alerta
+                 * cuando le de vender, para que confirmen que estan seguros de
+                 * esa venta, en ese plazo y con ese precio por vara y cuota
+                 * mensual, en una tabla, para mayor seguridad ya que se pueden
+                 * equivocar».
+                 *
+                 * La tabla ya estaba —«Que se lleva», mas arriba— pero se
+                 * podia firmar de largo sin mirarla. Lo que faltaba no era el
+                 * dato: era el ACTO de confirmarlo.
+                 *
+                 * ═══ POR QUE UN CHECKBOX Y NO UN SEGUNDO MODAL ═══
+                 *
+                 * Porque este ya es un modal, y Filament no encadena uno sobre
+                 * otro sin pelearse con Livewire. Y porque un modal encima de
+                 * otro se cierra con el mismo gesto reflejo con el que se
+                 * abrio: no hace leer nada. Un checkbox obligatorio, al lado
+                 * del resumen y arriba del boton, es la unica friccion que
+                 * de verdad obliga a mirar.
+                 *
+                 * ⚠️ Se repiten los numeros que MAS caro salen mal —plazo,
+                 * precio por unidad y cuota— aunque ya esten arriba. La
+                 * repeticion es el punto: quien scrolleo hasta aca sin leer,
+                 * los ve una vez mas justo antes de apretar.
+                 */
+                Section::make('Antes de firmar, revisá esto con el cliente')
+                    ->description('Se va a numerar el expediente y estos números quedan congelados. Deshacerlo después es una rescisión.')
+                    ->icon(Heroicon::OutlinedExclamationTriangle)
+                    ->schema([
+                        Placeholder::make('confirmacion_tabla')
+                            ->hiddenLabel()
+                            ->columnSpanFull()
+                            ->content(fn (Get $get): HtmlString => $this->tablaDeLotes($get)),
+
+                        Placeholder::make('confirmacion_plata')
+                            ->hiddenLabel()
+                            ->columnSpanFull()
+                            ->content(fn (Get $get): string => sprintf(
+                                'Valor %s · Prima %s · %s',
+                                $this->cuenta($get, 'valor'),
+                                $this->cuenta($get, 'prima'),
+                                $this->soloContado($get)
+                                    ? 'DE CONTADO: se cobra todo hoy y no quedan cuotas'
+                                    : 'Saldo a financiar '.$this->cuenta($get, 'saldo'),
+                            )),
+
+                        Checkbox::make('confirmado')
+                            ->label('Revisé el plazo, el precio y la cuota con el cliente, y están correctos.')
+                            ->accepted()
+                            ->columnSpanFull()
+                            ->validationMessages([
+                                'accepted' => 'Falta confirmar que revisaste los números antes de firmar.',
+                            ]),
+                    ]),
             ])
             ->action(function (array $arguments, array $data): void {
                 $this->conElLote($arguments, function (Lote $lote) use ($data): string {
                     /** @var Proyecto $proyecto */
                     $proyecto = $this->getRecord();
+
+                    /*
+                     * 🔴 SIN PLAN DE PAGO NO SE VENDE (23-ago-2026).
+                     *
+                     * Acá y no solo en el botón: el botón se deshabilita, pero
+                     * esta acción se monta desde JS —`$wire.mountAction(...)`—
+                     * y eso se dispara desde la consola del navegador en diez
+                     * segundos. Es la misma lección que `modo` en el modal de
+                     * cobro: un campo se falsifica, un botón se rehabilita.
+                     */
+                    if (! $proyecto->tieneConQueVender()) {
+                        throw VentaInvalidaException::porProyectoSinPlanDePago(
+                            (string) $proyecto->getAttribute('nombre'),
+                        );
+                    }
 
                     $titular = Cliente::query()->findOrFail($this->entero($data, 'cliente_id', 0));
                     $clientes = $this->clientesDeLaVenta($titular, $data);
@@ -602,12 +782,21 @@ class VerPlano extends Page
 
                     foreach ($lotes as $uno) {
                         $suyo = $porLote[(int) $uno->getKey()] ?? null;
-                        $prima = $this->monto($suyo['prima'] ?? '0');
+                        $precioDelLote = $this->monto($suyo['precio'] ?? '0');
+
+                        // El mismo calculo que la previsualizacion, para que
+                        // lo que se firma sea lo que se vio.
+                        $prima = $this->primaDelRenglon(
+                            $suyo['plazo'] ?? 0,
+                            new Monto($precioDelLote->multiplicarPor($this->areaDe($uno))->redondeado()),
+                            $this->monto($suyo['prima'] ?? '0'),
+                        );
+
                         $primaTotal = $primaTotal->sumar($prima);
 
                         $precios[] = new PrecioPactado(
                             loteId: (int) $uno->getKey(),
-                            precioVara: $this->monto($suyo['precio'] ?? '0'),
+                            precioVara: $precioDelLote,
                             motivo: $motivo,
                             plazoMeses: $suyo['plazo'] ?? 0,
                             prima: $prima,
@@ -634,6 +823,9 @@ class VerPlano extends Page
                             ?? FormaDePago::Efectivo,
                         referenciaPrima: $this->texto($data, 'referencia_prima', '') ?: null,
                     );
+
+                    // El contrato ya existe: lo que sigue pasa en su ficha.
+                    $this->destinoDespues = VentaResource::getUrl('view', ['record' => $venta]);
 
                     return $this->avisoDeVenta($venta, $lotes, $titular, count($clientes));
                 });
@@ -899,11 +1091,6 @@ class VerPlano extends Page
     public function cobrarDesdeElPlanoAction(): Action
     {
         return CobrarUnPago::desdeElPlano();
-    }
-
-    public function abonarDesdeElPlanoAction(): Action
-    {
-        return CobrarUnPago::abonoDesdeElPlano();
     }
 
     /**
@@ -1204,12 +1391,15 @@ class VerPlano extends Page
     {
         $escrita = $this->texto($arguments, 'prima', '');
 
-        if ($escrita !== '') {
-            return $escrita;
-        }
-
+        /*
+         * 🔴 El orden importa, y estaba al reves. Al contado el valor MANDA
+         * sobre lo tecleado: el campo del modal del lote nace en «0.00», que
+         * es «algo escrito» para cualquier comparacion contra vacio, y ese
+         * 0.00 ganaba. Resultado: saldo distinto de cero con plazo 0, y la
+         * venta de contado no se podia firmar. Ver `primaDelRenglon()`.
+         */
         if ($plazo !== 0 || ! $lote instanceof Lote) {
-            return null;
+            return $escrita !== '' ? $escrita : null;
         }
 
         $precioVara = $this->monto($precio);
@@ -1395,6 +1585,58 @@ class VerPlano extends Page
     }
 
     /**
+     * 🔴 AL CONTADO LA PRIMA **ES** EL VALOR, teclee lo que teclee.
+     *
+     * ═══ EL BUG QUE ESTO CIERRA — 14-ago-2026 ═══
+     *
+     * Marcar «Al Contado» y firmar tiraba *«El plazo de 0 meses no es valido:
+     * tiene que ser de 1 a 600 meses»*, y una venta de contado no se podia
+     * hacer por ninguna pantalla del sistema.
+     *
+     * El dominio nunca estuvo roto: `PlanDeCuotas::nuevo()` devuelve un plan
+     * VACIO cuando el saldo da cero. Lo que pasaba es que la pantalla mandaba
+     * la prima en **L 0.00** —el valor con que nace el campo del modal del
+     * lote—, asi que el saldo no daba cero, el motor se iba por el camino
+     * financiado y ahi el plazo 0 no existe. El mensaje culpaba al plazo
+     * cuando el problema era la prima: **peor que reventar**.
+     *
+     * `primaInicial()` ya intentaba resolverlo precargando el valor, pero
+     * miraba si el vendedor «habia escrito algo» — y `0.00` es algo.
+     *
+     * Por eso no se precarga: se IMPONE. Al contado, cuanto se paga no es
+     * una negociacion, es una definicion —el valor entero, el dia que se
+     * firma (R5)— y dejarlo tecleable solo abre la puerta a firmar una venta
+     * de contado que en realidad no lo es.
+     *
+     * ⚠️ Vive acá y lo llaman los DOS caminos —la previsualizacion y la
+     * firma—, porque el dia que digan cosas distintas el cliente firma una y
+     * el sistema guarda la otra.
+     */
+    private function primaDelRenglon(int $plazo, Monto $valor, Monto $tecleada): Monto
+    {
+        return $plazo === 0 ? $valor : $tecleada;
+    }
+
+    /**
+     * ¿Todos los lotes de este contrato van al contado?
+     *
+     * Con uno solo financiado hay cuotas, y donde hay cuotas hace falta el
+     * dia de pago y una prima de verdad. La pregunta es por TODOS y no por
+     * «el primero» a proposito: un contrato puede llevar un lote de contado
+     * y otro a 48 meses.
+     */
+    private function soloContado(Get $get): bool
+    {
+        $renglones = $this->renglonesEnPantalla($get);
+
+        if ($renglones === []) {
+            return false;
+        }
+
+        return array_all($renglones, fn ($renglon): bool => $renglon['plazo'] === 0);
+    }
+
+    /**
      * @return list<array{lote: int, plazo: int, precio: string, prima: string, tasa: string|null}>
      */
     private function condicionesDe(mixed $crudo): array
@@ -1548,9 +1790,13 @@ class VerPlano extends Page
             }
 
             $precio = $this->monto($condicion['precio']);
-            $prima = $this->monto($condicion['prima']);
             $area = $this->areaDe($lote);
             $valor = new Monto($precio->multiplicarPor($area)->redondeado());
+            $prima = $this->primaDelRenglon(
+                $condicion['plazo'],
+                $valor,
+                $this->monto($condicion['prima']),
+            );
             $plan = null;
             $error = '';
 
@@ -1967,6 +2213,25 @@ class VerPlano extends Page
     }
 
     /**
+     * A donde ir cuando el movimiento termina, si no es de vuelta al plano.
+     *
+     * ═══ POR QUE UNA PROPIEDAD Y NO UN PARAMETRO ═══
+     *
+     * `conElLote()` envuelve TODOS los movimientos del plano —apartar, donar,
+     * liberar, guardar para herencia— y los cinco terminan igual: de vuelta al
+     * plano, que es donde quien atiende sigue trabajando.
+     *
+     * La venta es el unico que no. Ensanchar la firma de la envoltura para el
+     * caso raro obligaria a tocar los cinco; esto lo pone solo el que lo
+     * necesita, adentro de su propio `->action()`, y `conElLote()` lo lee sin
+     * saber de quien vino.
+     *
+     * Privada: Livewire no la serializa y no hace falta que lo haga — se
+     * escribe y se consume dentro del mismo request.
+     */
+    private ?string $destinoDespues = null;
+
+    /**
      * Lo que se lee en la notificacion despues de firmar.
      *
      * @param list<Lote> $lotes
@@ -2077,6 +2342,26 @@ class VerPlano extends Page
     }
 
     /**
+     * 🔴 La frontera de verdad de los dos botones del encabezado.
+     *
+     * `visible()` decide qué se DIBUJA; esto decide qué se PUEDE. Una acción
+     * de Filament se monta por URL o desde la consola del navegador, así que
+     * un botón escondido no es una guarda — es la misma lección que `modo` en
+     * el modal de cobro y que vender sin plan de pago.
+     *
+     * Los dos preguntan por el mismo lado —`ProyectoPolicy`— para que no
+     * puedan desincronizarse con lo que decide `visible()`.
+     */
+    private function exigirPermisoDelPlano(string $habilidad): void
+    {
+        abort_unless(
+            auth()->user()?->can($habilidad, Proyecto::class) === true,
+            403,
+            'No tenés permiso para cargar el plano de un desarrollo.',
+        );
+    }
+
+    /**
      * Corre un movimiento sobre el lote de los argumentos y avisa.
      *
      * Las excepciones del dominio se muestran como notificacion y no como
@@ -2111,7 +2396,17 @@ class VerPlano extends Page
 
         Notification::make()->title($mensaje)->success()->send();
 
-        $this->redirect(ProyectoResource::getUrl('plano', ['record' => $this->getRecord()]));
+        /*
+         * Al plano, salvo que el movimiento haya pedido otra cosa. Despues de
+         * FIRMAR una venta lo que sigue no esta en el plano: es imprimir el
+         * contrato, mirar el plan de cuotas o cobrar. Quedarse aca obliga a ir
+         * a buscar el expediente que uno acaba de crear. Lo pidio Mauricio el
+         * 14-ago-2026, viendo la notificacion del contrato REB-2026-0003.
+         */
+        $this->redirect(
+            $this->destinoDespues
+            ?? ProyectoResource::getUrl('plano', ['record' => $this->getRecord()])
+        );
     }
 
     /**
@@ -2246,6 +2541,8 @@ class VerPlano extends Page
             ->label('Importar plano DXF')
             ->icon(Heroicon::OutlinedArrowUpTray)
             ->color('primary')
+            // Ver el comentario del botón «Acomodar plano» (23-ago-2026).
+            ->visible(fn (): bool => auth()->user()?->can('importarPlano', Proyecto::class) === true)
             ->modalHeading('Importar el plano desde AutoCAD')
             ->modalDescription(
                 'Lee las polilineas cerradas del archivo y crea un lote por cada una, con su '.
@@ -2306,6 +2603,8 @@ class VerPlano extends Page
                     ->label('Capa de las calles (opcional)'),
             ])
             ->action(function (array $data): void {
+                $this->exigirPermisoDelPlano('importarPlano');
+
                 $contenido = $this->contenidoDelArchivo($data['archivo'] ?? null);
 
                 if ($contenido === null) {
@@ -2472,7 +2771,6 @@ class VerPlano extends Page
              * pregunta aca para no DIBUJAR el boton del abono a quien no
              * puede; el borde de verdad esta adentro de la accion.
              */
-            'cobros' => ['puedeAbonar' => CobrarUnPago::seLePermiteAbonar()],
 
             /*
              * Los planes NO pasan por PlanoDelProyecto: son del negocio y

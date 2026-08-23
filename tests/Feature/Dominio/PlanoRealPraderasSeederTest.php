@@ -19,7 +19,12 @@ use Database\Seeders\PlanoRealPraderasSeeder;
 /** Los 24 del plano, de la A a la X: el DXF nativo los trae rotulados. */
 const BLOQUES = 24;
 
-const TOTAL_LOTES = 301;
+/**
+ * 301 hasta el 22-ago-2026, cuando se releyó la manzana I del DXF y
+ * aparecieron los 8 que la primera lectura no había cerrado: I-8 a I-15,
+ * la segunda fila entera. Ver docs/plano-real.md.
+ */
+const TOTAL_LOTES = 309;
 
 /**
  * Las calles no se cargan: el calco del plano nativo las dibuja con sus
@@ -54,7 +59,7 @@ describe('PlanoRealPraderasSeeder', function (): void {
             ->and($calles)->toHaveCount(TOTAL_CALLES)
             ->and($proyecto->getAttribute('plano_esquematico'))->toBeFalse();
 
-        // Los 301 dibujados: el plano nativo cierra todas las caras.
+        // Todos dibujados: el plano nativo cierra todas las caras.
         expect($lotes->filter(fn (Lote $l): bool => ! $l->tienePoligono()))->toBeEmpty();
     });
 
@@ -69,6 +74,35 @@ describe('PlanoRealPraderasSeeder', function (): void {
 
         expect($nombres)->toBe(range('A', 'X'))
             ->and($nombres)->toHaveCount(BLOQUES);
+    });
+
+    test('la manzana I entra con sus dos filas, no con una', function (): void {
+        $proyecto = sembrarPlanoReal();
+
+        /*
+        | 22-ago-2026. El archivo traía I-1 a I-7 —la fila de arriba— y
+        | nada más. En el plano del Ing. Menjívar la manzana I tiene DOS
+        | filas: la de arriba de 12.50V x 20.00V, y la de atrás de
+        | 12.50V x 27.00V, más el par en cuña del extremo (I-8 e I-9).
+        |
+        | El faltante no se veía: siete lotes seguidos y numerados no se
+        | leen como una manzana partida a la mitad. Lo notó Mauricio
+        | mirando el mapa contra el PDF del topógrafo.
+        */
+        /** @var Bloque $manzana */
+        $manzana = Bloque::query()
+            ->where('proyecto_id', $proyecto->getKey())
+            ->where('nombre', 'I')
+            ->sole();
+
+        $numeros = Lote::query()
+            ->where('bloque_id', $manzana->getKey())
+            ->orderByRaw('numero::int')
+            ->pluck('numero')
+            ->all();
+
+        expect($numeros)->toBe(array_map(strval(...), range(1, 15)))
+            ->and($manzana->getAttribute('lotes_planificados'))->toBe(15);
     });
 
     test('no entra ninguna cara que no sea un lote vendible', function (): void {

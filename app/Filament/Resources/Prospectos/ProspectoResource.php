@@ -6,6 +6,7 @@ namespace App\Filament\Resources\Prospectos;
 
 use App\Filament\Resources\Prospectos\Pages\ListProspectos;
 use App\Filament\Resources\Prospectos\Tables\ProspectosTable;
+use App\Filament\Support\Menu;
 use App\Models\Prospecto;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -53,7 +54,7 @@ class ProspectoResource extends Resource
     #[Override]
     public static function getNavigationGroup(): ?string
     {
-        return 'Lotificación';
+        return Menu::DIA_A_DIA;
     }
 
     #[Override]

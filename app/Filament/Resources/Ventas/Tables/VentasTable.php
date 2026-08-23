@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Ventas\Tables;
 
 use App\Domain\Enums\EstadoVenta;
+use App\Domain\ValueObjects\Monto;
 use App\Filament\Support\CobrarUnPago;
 use App\Models\Cuota;
 use App\Models\Venta;
@@ -53,8 +54,39 @@ class VentasTable
                     ->deLotesVivos()
                     ->selectRaw('COALESCE(SUM(monto - monto_pagado), 0)')
                     ->whereColumn('cuotas.venta_id', 'ventas.id'),
+                ])
+                /*
+                 * Cuántas cuotas vencidas tiene cada expediente, por el mismo
+                 * camino que el saldo: una subconsulta correlacionada, no un
+                 * método por fila.
+                 *
+                 * Los filtros son los de `ComoVaElNegocio::vencidoAHoy()` y
+                 * los del contador del menú, y tienen que seguir siéndolo:
+                 * tres pantallas contando lo mismo con criterios distintos es
+                 * peor que no tener ninguna.
+                 */
+                ->addSelect(['cuotas_vencidas' => Cuota::query()
+                    ->vencidas()
+                    ->deLotesVivos()
+                    ->selectRaw('COUNT(*)')
+                    ->whereColumn('cuotas.venta_id', 'ventas.id'),
                 ]))
             ->columns([
+                /*
+                 * ═══ ACÁ ADENTRO YA VIENE EL EXPEDIENTE ═══
+                 *
+                 * `RPS-2026-0116` **es** el expediente 0116: `numero_contrato`
+                 * se arma como código + año + el mismo secuencial que se
+                 * guarda en `numero_expediente`, con el mismo relleno de
+                 * ceros (ver `ConsumoDeCorrelativos::numeroDeContrato`, que
+                 * lo dice con todas las letras: «son el mismo numero»).
+                 *
+                 * Por eso la columna «Expediente» se fue el 22-ago: repetía
+                 * cuatro dígitos que ya estaban tres centímetros a la
+                 * izquierda. No se pierde nada — buscar «0116» acá encuentra
+                 * el contrato igual, porque la búsqueda es por coincidencia
+                 * parcial.
+                 */
                 TextColumn::make('numero_contrato')
                     ->label('Contrato')
                     ->searchable()
@@ -62,16 +94,18 @@ class VentasTable
                     ->weight('medium')
                     ->copyable(),
 
-                TextColumn::make('numero_expediente')
-                    ->label('Expediente')
-                    ->formatStateUsing(fn (?int $state): string => $state === null ? '—' : str_pad((string) $state, 4, '0', STR_PAD_LEFT))
-                    ->sortable()
-                    ->toggleable(),
-
+                /*
+                 * Sin `wrap()` desde el 22-ago. Un nombre como «MAURICIO
+                 * CRUZ» partía en dos renglones y la fila entera pasaba de
+                 * ~55 px a 94: con 116 ventas, el triple de scroll para
+                 * mostrar lo mismo. Se corta con «…» y el completo sale en el
+                 * tooltip, que es lo que hace falta para reconocerlo.
+                 */
                 TextColumn::make('titular')
                     ->label('Titular')
                     ->getStateUsing(static fn (Venta $record): string => (string) ($record->clientes->first()?->getAttribute('nombre') ?? '—'))
-                    ->wrap(),
+                    ->limit(24)
+                    ->tooltip(static fn (Venta $record): ?string => $record->clientes->first()?->getAttribute('nombre')),
 
                 TextColumn::make('compromisos_count')
                     ->label('Lotes')
@@ -97,9 +131,18 @@ class VentasTable
                     ->alignEnd()
                     ->sortable(),
 
+                /*
+                 * 🔴 `state()` y NO `formatStateUsing()`. Con el formatter,
+                 * el `?? 'Contado'` era código MUERTO: Filament ni siquiera
+                 * llama al callback cuando el valor de la columna es null, así
+                 * que las ventas de contado salían con la celda **vacía** y se
+                 * leían como un dato que falta. Encontrado el 22-ago mirando
+                 * la pantalla, no el código. `state()` corre siempre.
+                 */
                 TextColumn::make('cuota_mensual')
                     ->label('Cuota')
-                    ->formatStateUsing(static fn (Venta $record): string => $record->montoCuotaMensual()?->formateado() ?? 'Contado')
+                    ->state(static fn (Venta $record): string => $record->montoCuotaMensual()?->formateado() ?? 'De contado')
+                    ->color(static fn (Venta $record): ?string => $record->montoCuotaMensual() instanceof Monto ? null : 'gray')
                     ->alignEnd()
                     ->toggleable(),
 
@@ -109,12 +152,75 @@ class VentasTable
                     ->alignEnd()
                     ->sortable(),
 
-                TextColumn::make('estado')
-                    ->label('Estado')
+                /*
+                 * ═══ LA COLUMNA QUE CONTESTA «¿A QUIEN HAY QUE LLAMAR?» ═══
+                 *
+                 * Hasta el 22-ago acá decía «Vigente» en verde, para los 116.
+                 * El menú avisaba de 68 expedientes vencidos y esta pantalla
+                 * —la que se abre para trabajarlos— no decía CUALES: el que
+                 * pagó todo y el que debe cinco cuotas se veían igual.
+                 *
+                 * Y el estado ya estaba dicho dos veces: las pestañas de
+                 * arriba filtran por Vigente / Liquidada / Rescindida /
+                 * Anulada, con su conteo al lado.
+                 *
+                 * Así que la columna cambió de pregunta. Sobre un expediente
+                 * VIGENTE dice cómo va el cobro; sobre uno cerrado sigue
+                 * diciendo su estado, porque ahí «al día» no significa nada.
+                 */
+                TextColumn::make('cuotas_vencidas')
+                    ->label('Cobro')
                     ->badge()
-                    ->formatStateUsing(static fn (EstadoVenta $state): string => $state->etiqueta())
-                    ->color(static fn (EstadoVenta $state): string => $state->color())
-                    ->sortable(),
+                    ->state(static function (Venta $record): string {
+                        $estado = $record->getAttribute('estado');
+
+                        if ($estado !== EstadoVenta::Vigente) {
+                            return $estado instanceof EstadoVenta ? $estado->etiqueta() : '—';
+                        }
+
+                        $vencidas = (int) $record->getAttribute('cuotas_vencidas');
+
+                        return match (true) {
+                            $vencidas === 0 => 'Al día',
+                            $vencidas === 1 => '1 vencida',
+                            default         => "{$vencidas} vencidas",
+                        };
+                    })
+                    ->color(static function (Venta $record): string {
+                        $estado = $record->getAttribute('estado');
+
+                        if ($estado !== EstadoVenta::Vigente) {
+                            return $estado instanceof EstadoVenta ? $estado->color() : 'gray';
+                        }
+
+                        return (int) $record->getAttribute('cuotas_vencidas') === 0 ? 'success' : 'danger';
+                    })
+                    ->tooltip(static function (Venta $record): ?string {
+                        $vencidas = (int) $record->getAttribute('cuotas_vencidas');
+
+                        return $record->getAttribute('estado') === EstadoVenta::Vigente && $vencidas > 0
+                            ? 'Cuotas con fecha pasada que todavía deben algo. R2: el atraso no genera cargo.'
+                            : null;
+                    })
+                    /*
+                     * Ordena por la subconsulta, no por el texto: `state()`
+                     * arma la etiqueta en PHP y Postgres no la conoce. Lo más
+                     * atrasado primero, que es para lo que se ordena esto.
+                     *
+                     * 🔴 `$direction` EN INGLES, y no es un descuido. Filament
+                     * inyecta los argumentos de sus closures POR NOMBRE, no por
+                     * posición: con `$direccion` el panel tira un 500 —
+                     * «[$direccion] was unresolvable»— apenas alguien hace clic
+                     * en el encabezado. Los nombres de estos parámetros son API,
+                     * no se traducen.
+                     *
+                     * Y el ternario tampoco sobra: `orderBy()` de Laravel 13
+                     * pide un `'asc'|'desc'` literal, mientras que Filament
+                     * tipa esto como `string` a secas. Sin normalizar, el
+                     * análisis estático se planta acá.
+                     */
+                    ->sortable(query: static fn (Builder $query, string $direction): Builder => $query
+                        ->orderBy('cuotas_vencidas', $direction === 'desc' ? 'desc' : 'asc')),
 
                 TextColumn::make('fecha_contrato')
                     ->label('Firmado')
@@ -187,7 +293,14 @@ class VentasTable
                  * las tres pantallas abren el MISMO. Cero código de dinero
                  * duplicado, y quien cobra se queda donde estaba.
                  */
-                CobrarUnPago::accion(),
+                /*
+                 * `iconButton()` solo ACA: el mismo `CobrarUnPago::accion()`
+                 * lo usan el expediente y el plano, y ahí va con su texto. En
+                 * una tabla de 25 filas, «Registrar un pago» escrito 25 veces
+                 * gasta un cuarto del ancho para decir siempre lo mismo — el
+                 * texto pasa al tooltip y el clic es el mismo.
+                 */
+                CobrarUnPago::accion()->iconButton(),
 
                 ActionGroup::make([
                     ViewAction::make(),

@@ -10,6 +10,7 @@ use App\Filament\Resources\Facturaciones\Pages\ListFacturaciones;
 use App\Filament\Resources\Facturaciones\RelationManagers\AutorizacionesRelationManager;
 use App\Filament\Resources\Facturaciones\Schemas\FacturacionForm;
 use App\Filament\Resources\Facturaciones\Tables\FacturacionesTable;
+use App\Filament\Support\Menu;
 use App\Models\Facturacion;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -32,7 +33,7 @@ class FacturacionResource extends Resource
     protected static ?string $model = Facturacion::class;
 
     #[Override]
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentText;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentCheck;
 
     #[Override]
     protected static ?string $recordTitleAttribute = 'nombre';
@@ -49,7 +50,7 @@ class FacturacionResource extends Resource
     #[Override]
     public static function getNavigationGroup(): ?string
     {
-        return 'Administración';
+        return Menu::ADMINISTRACION;
     }
 
     #[Override]

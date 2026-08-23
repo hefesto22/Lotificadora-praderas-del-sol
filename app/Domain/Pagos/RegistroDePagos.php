@@ -832,6 +832,328 @@ final readonly class RegistroDePagos
     }
 
     /**
+     * Pronto pago: saldar uno o varios lotes perdonando parte del saldo.
+     *
+     * ═══ QUE PIDIO MAURICIO, TEXTUAL (23-AGO-2026) ═══
+     *
+     * «Digamos tiene 1, 2 o mas lotes y quiere pagar el restante de uno y solo
+     * ha dado una cuota y quiere pagar todo el lote 2 pero pide un descuento:
+     * se le coloca cuanto se le dio de descuento en ese lote y que pague el
+     * resto, y ya quedaria pagado. Esto sucede en casos reales.»
+     *
+     * Sin tope —cuanto se descuenta lo decide la lotificadora, no el sistema—
+     * pero con motivo obligatorio, igual que el descuento al vender (R4).
+     *
+     * ═══ NO ES UN ABONO A CAPITAL, Y POR ESO NO REPROGRAMA ═══
+     *
+     * Un abono baja el capital y REESCRIBE lo que falta. Un pronto pago
+     * TERMINA el plan del lote: no queda nada que reamortizar, asi que no pasa
+     * por `EfectoDelAbono` ni deja constancia de reprogramacion. Las cuotas se
+     * quedan donde estan, saldadas — el expediente sigue mostrando el plan
+     * completo y donde cayo cada leimpira.
+     *
+     * ═══ EL DINERO A LAS CUOTAS MAS VIEJAS; EL PERDON, A LA COLA ═══
+     *
+     * Es el mismo FIFO de siempre: lo que el cliente entrega salda desde la
+     * cuota mas vieja, y el descuento cubre exactamente lo que quedo sin
+     * alcanzar. Cualquier otro reparto —prorratear el descuento entre todas—
+     * daria el mismo total con renglones que nadie puede explicar en el
+     * mostrador.
+     *
+     * ═══ 🔴 LA CAJA RECIBE SOLO LO QUE ENTRO ═══
+     *
+     * `recibos.monto` es lo que el cliente entrego, ni un centavo mas. El
+     * descuento no pasa por el corte de caja: se perdona, no se cobra. Vive en
+     * `aplicaciones_de_pago.capital_condonado`, renglon por renglon.
+     *
+     * ⚠️ El recibo sale con concepto `AbonoCapital`, asi que **no se puede
+     * anular**: `anular()` los rechaza porque tocaron el plan. Es a proposito y
+     * es lo mismo que ya pasa con un abono. Revertir un pronto pago es otro
+     * tramite con su propio motivo, y todavia no existe.
+     *
+     * @param list<array{lote: Compromiso, descuento: Monto}> $renglones
+     * @param string $motivo obligatorio: sin el no hay descuento
+     *
+     * @return list<Recibo> un papel por cada titular de recibo
+     *
+     * @throws PagoInvalidoException
+     */
+    public function prontoPago(
+        Venta $venta,
+        Cliente $cliente,
+        array $renglones,
+        string $motivo,
+        FormaDePago $forma,
+        ?string $referencia = null,
+        ?CarbonImmutable $fecha = null,
+        ?string $observaciones = null,
+    ): array {
+        return $this->porCadaNombre(
+            $renglones,
+            fn (array $suyos): Recibo => $this->saldarLosDeUnMismoNombre(
+                $venta,
+                $cliente,
+                $suyos,
+                $motivo,
+                $forma,
+                $referencia,
+                $fecha,
+                $observaciones,
+            ),
+        );
+    }
+
+    /**
+     * Los lotes que comparten titular de recibo: UN solo papel.
+     *
+     * @param list<array{lote: Compromiso, descuento: Monto}> $renglones
+     *
+     * @throws PagoInvalidoException
+     */
+    private function saldarLosDeUnMismoNombre(
+        Venta $venta,
+        Cliente $cliente,
+        array $renglones,
+        string $motivo,
+        FormaDePago $forma,
+        ?string $referencia,
+        ?CarbonImmutable $fecha,
+        ?string $observaciones,
+    ): Recibo {
+        if ($renglones === []) {
+            throw PagoInvalidoException::porNoElegirNingunLote();
+        }
+
+        $porQue = trim($motivo);
+
+        if ($porQue === '') {
+            throw PagoInvalidoException::porFaltarElMotivoDelDescuento();
+        }
+
+        $vistos = [];
+
+        foreach ($renglones as $renglon) {
+            $id = (int) $renglon['lote']->getKey();
+
+            if (in_array($id, $vistos, true)) {
+                throw PagoInvalidoException::porLoteRepetido($this->codigo($renglon['lote']));
+            }
+
+            $vistos[] = $id;
+        }
+
+        $cuando = $fecha ?? CarbonImmutable::parse(today()->toDateString());
+        $this->verificarLaFecha($venta, $cuando);
+        $limpia = trim($referencia ?? '');
+
+        // El orden del bloqueo, igual para todos. Ver `cobrarVariosLotes()`.
+        usort(
+            $renglones,
+            static fn (array $uno, array $otro): int => (int) $uno['lote']->getKey() <=> (int) $otro['lote']->getKey(),
+        );
+
+        return DB::transaction(function () use (
+            $venta,
+            $cliente,
+            $renglones,
+            $porQue,
+            $forma,
+            $limpia,
+            $cuando,
+            $observaciones
+        ): Recibo {
+            /*
+             * FASE 1 — releer bloqueando, calcular y rechazar. Sin escribir una
+             * sola fila: si algo de esto se cae, el correlativo ni se movio.
+             */
+            $planificados = [];
+            $aEntregar = Monto::cero();
+
+            foreach ($renglones as $renglon) {
+                $lote = $renglon['lote'];
+                $descuento = $renglon['descuento'];
+
+                $pendientes = $this->pendientesBloqueadas($lote);
+                $saldo = $this->saldoDe($pendientes);
+
+                /*
+                 * Se le pasa el SALDO y no lo que el cliente entrega: con un
+                 * descuento igual al saldo, lo entregado es cero y `verificar()`
+                 * lo rechazaria por «monto no positivo», un mensaje que no dice
+                 * nada de lo que en realidad pasa. Ese caso tiene el suyo, abajo.
+                 */
+                $this->verificar($venta, $lote, $saldo, $forma, $limpia);
+
+                $mora = MoraDelLote::calcular($pendientes, $this->condicionesDe($lote), $cuando);
+
+                if (! $mora->total->esCero()) {
+                    throw PagoInvalidoException::porMoraPendienteEnProntoPago(
+                        $mora->total,
+                        $this->codigo($lote),
+                    );
+                }
+
+                if ($descuento->mayorQue($saldo)) {
+                    throw PagoInvalidoException::porDescuentoQueSuperaElSaldo(
+                        $descuento,
+                        $saldo,
+                        $this->codigo($lote),
+                    );
+                }
+
+                $planificados[] = [
+                    'lote'       => $lote,
+                    'pendientes' => $pendientes,
+                    'enDinero'   => $saldo->restar($descuento),
+                    'descuento'  => $descuento,
+                ];
+
+                $aEntregar = $aEntregar->sumar($saldo->restar($descuento));
+            }
+
+            /*
+             * Perdonarlo TODO no es un pronto pago: es una donacion, y esa es
+             * otra operacion con otro permiso. Ademas el CHECK
+             * `recibos_monto_positivo_chk` no admite un recibo de L 0.00.
+             */
+            if ($aEntregar->esCero()) {
+                throw PagoInvalidoException::porMontoNoPositivo();
+            }
+
+            /*
+             * FASE 2 — escribir. Un solo numero para todo (R12), y
+             * `compromiso_id` en NULL cuando son varios lotes.
+             *
+             * Concepto `AbonoCapital` porque este papel dio por terminado un
+             * plan: es lo que hace que `anular()` lo rechace, igual que a un
+             * abono. Ver el docblock de `prontoPago()`.
+             */
+            $recibo = $this->emitir(
+                $venta,
+                count($renglones) === 1 ? $renglones[0]['lote'] : null,
+                $cliente,
+                ConceptoDeRecibo::AbonoCapital,
+                $aEntregar,
+                $forma,
+                $limpia,
+                $cuando,
+                $observaciones,
+                array_map(static fn (array $renglon): Compromiso => $renglon['lote'], $renglones),
+            );
+
+            foreach ($planificados as $planificado) {
+                $this->saldarConDescuento($recibo, $planificado['pendientes'], $planificado['enDinero']);
+            }
+
+            $this->recalcularElResumen($venta);
+            $this->asentarElDescuento($venta, $recibo, $planificados, $porQue);
+            $this->cerrarSiQuedoPagada($venta, $cuando);
+
+            return $recibo;
+        });
+    }
+
+    /**
+     * Saldar estas cuotas: el dinero a las mas viejas, el perdon a la cola.
+     *
+     * Al salir, TODAS quedan en cero — es lo que promete un pronto pago. La
+     * cuenta cierra sola porque `enDinero` es exactamente el saldo del lote
+     * menos el descuento: lo que el dinero no alcanza a cubrir es, al centavo,
+     * lo que hay que condonar.
+     *
+     * @param Collection<int, Cuota> $pendientes
+     */
+    private function saldarConDescuento(Recibo $recibo, Collection $pendientes, Monto $enDinero): void
+    {
+        $porRepartir = $enDinero;
+
+        foreach ($pendientes as $cuota) {
+            $falta = $cuota->saldo();
+
+            if ($falta->esCero()) {
+                continue;
+            }
+
+            $enEfectivo = $porRepartir->mayorQue($falta) ? $falta : $porRepartir;
+            $porRepartir = $porRepartir->restar($enEfectivo);
+            $condonado = $falta->restar($enEfectivo);
+
+            // Interes antes que capital, el mismo orden que `repartir()`.
+            $interesPendiente = $cuota->interesPendiente();
+            $aInteres = $enEfectivo->mayorQue($interesPendiente) ? $interesPendiente : $enEfectivo;
+
+            $recibo->aplicaciones()->create([
+                'cuota_id'      => $cuota->getKey(),
+                'monto'         => $enEfectivo->redondeado(),
+                'monto_mora'    => '0.00',
+                'monto_interes' => $aInteres->redondeado(),
+                'monto_capital' => $enEfectivo->restar($aInteres)->redondeado(),
+                /*
+                 * Fuera de `monto` —no es dinero que entro— pero DENTRO de
+                 * `cuotas.monto_pagado`, que es lo que dejo saldada la cuota.
+                 * El porque de esa asimetria esta en `Cuota::capitalCondonado()`.
+                 */
+                'capital_condonado' => $condonado->redondeado(),
+            ]);
+
+            $cuota->update([
+                'monto_pagado'      => $cuota->montoTotal()->redondeado(),
+                'capital_condonado' => $cuota->capitalCondonado()->sumar($condonado)->redondeado(),
+            ]);
+        }
+    }
+
+    /**
+     * El asiento en la bitacora del expediente: quien perdono cuanto, y por que.
+     *
+     * Va contra la VENTA y no contra el recibo, igual que `CambioDeTitular`:
+     * asi sale en la pestaña «Actualizaciones» del expediente, que es donde
+     * alguien va a buscar dentro de dos años por que a este cliente se le
+     * descontaron esos lempiras.
+     *
+     * @param list<array{lote: Compromiso, pendientes: Collection<int, Cuota>, enDinero: Monto, descuento: Monto}> $planificados
+     */
+    private function asentarElDescuento(Venta $venta, Recibo $recibo, array $planificados, string $motivo): void
+    {
+        $porLote = [];
+        $total = Monto::cero();
+
+        foreach ($planificados as $planificado) {
+            if ($planificado['descuento']->esCero()) {
+                continue;
+            }
+
+            $porLote[$this->codigo($planificado['lote'])] = $planificado['descuento']->formateado();
+            $total = $total->sumar($planificado['descuento']);
+        }
+
+        // Un pronto pago sin descuento es saldar el lote y ya: no hay nada que
+        // justificar, asi que no se ensucia la bitacora con un asiento vacio.
+        if ($porLote === []) {
+            return;
+        }
+
+        activity()
+            ->performedOn($venta)
+            ->causedBy(auth()->user())
+            /*
+             * 🔴 `withChanges()` y NO `withProperties()`, por lo mismo que en
+             * `CambioDeTitular`: la pestaña «Actualizaciones» y la bitacora
+             * general leen `attribute_changes`. En `properties` el asiento
+             * quedaria guardado donde nadie lo pinta.
+             */
+            ->withChanges([
+                'old'        => ['descuento por pronto pago' => '—'],
+                'attributes' => ['descuento por pronto pago' => $total->formateado()],
+            ])
+            ->withProperty('motivo', $motivo)
+            ->withProperty('recibo', $recibo->folio())
+            ->withProperty('lotes', $porLote)
+            ->event('pronto_pago')
+            ->log('Pronto pago con descuento');
+    }
+
+    /**
      * Cobrar cuotas de varios lotes Y abonar el sobrante a capital, con UN recibo.
      *
      * ═══ QUE PIDIO MAURICIO (10-AGO-2026) ═══
@@ -1318,36 +1640,21 @@ final readonly class RegistroDePagos
     /**
      * Un expediente que terminó de pagarse deja de estar vigente.
      *
-     * ═══ POR QUE ACA Y NO EN UNA ACCION APARTE ═══
+     * No es un trámite que alguien deba acordarse de hacer: es una
+     * consecuencia aritmética del último pago. `EstadoVenta::Liquidada`
+     * existía desde la primera migración y **nadie lo asignaba nunca**.
      *
-     * `EstadoVenta::Liquidada` existía desde la primera migración y **nadie lo
-     * asignaba nunca**: una venta pagada al último centavo se quedaba
-     * «Vigente» para siempre, ofreciendo el botón de cobrar sobre un contrato
-     * que no debe nada. No es un trámite que alguien deba acordarse de hacer:
-     * es una consecuencia aritmética del último pago.
+     * ═══ POR QUE LA REGLA YA NO ESTA ACA ═══
      *
-     * El CHECK `ventas_cierre_segun_estado_chk` exige `cerrada_el` cuando el
-     * estado es uno de los cerrados, así que van juntos o no van.
-     *
-     * ⚠️ Se mira el saldo de las CUOTAS, no la mora. Un contrato con todo el
-     * capital pagado y mora suelta se liquida igual: la mora es un cargo del
-     * atraso, no parte del precio, y dejar el expediente abierto por ella haria
-     * que un cliente que ya pagó su lote figure debiendo el lote.
+     * Desde el 23-ago-2026 vive en `Venta::liquidarSiYaNoDebe()`, porque el
+     * cobro dejó de ser el único camino que deja una venta en cero: la de
+     * contado nace pagada y nunca pasa por este archivo. Este método es el
+     * nombre que usan los cuatro caminos de cobro; el porqué completo —y por
+     * qué se mira el saldo de las cuotas y no la mora— está en el modelo.
      */
     private function cerrarSiQuedoPagada(Venta $venta, CarbonImmutable $cuando): void
     {
-        if ($venta->getAttribute('estado') !== EstadoVenta::Vigente) {
-            return;
-        }
-
-        if (! $venta->saldoPendiente()->esCero()) {
-            return;
-        }
-
-        $venta->update([
-            'estado'     => EstadoVenta::Liquidada,
-            'cerrada_el' => $cuando->toDateString(),
-        ]);
+        $venta->liquidarSiYaNoDebe($cuando);
     }
 
     /**

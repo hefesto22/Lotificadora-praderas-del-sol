@@ -165,6 +165,22 @@ class ReciboInfolist
             );
         }
 
+        /*
+         * El descuento por pronto pago (23-ago-2026). Va como un renglón más
+         * del desglose aunque NO sume al total del recibo: sin él, las cuotas
+         * de arriba suman más que el «Total recibido» y el cuadro se lee como
+         * si estuviera roto. La aclaración de la segunda columna es lo que
+         * explica la diferencia.
+         */
+        $descuento = $record->capitalCondonado();
+
+        if (! $descuento->esCero()) {
+            $filas .= sprintf(
+                '<tr><td class="lote">Descuento por pronto pago</td><td class="apagado">no entró en caja</td><td class="fuerte">%s</td></tr>',
+                e($descuento->formateado()),
+            );
+        }
+
         if ($filas === '') {
             return new HtmlString('<p class="olympo-vacio">Este recibo no se aplicó a ninguna cuota.</p>');
         }

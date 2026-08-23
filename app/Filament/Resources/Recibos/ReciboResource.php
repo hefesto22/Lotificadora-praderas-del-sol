@@ -8,6 +8,7 @@ use App\Filament\Resources\Recibos\Pages\ListRecibos;
 use App\Filament\Resources\Recibos\Pages\ViewRecibo;
 use App\Filament\Resources\Recibos\Schemas\ReciboInfolist;
 use App\Filament\Resources\Recibos\Tables\RecibosTable;
+use App\Filament\Support\Menu;
 use App\Models\Recibo;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -63,7 +64,7 @@ class ReciboResource extends Resource
     #[Override]
     public static function getNavigationGroup(): ?string
     {
-        return 'Lotificación';
+        return Menu::DIA_A_DIA;
     }
 
     #[Override]

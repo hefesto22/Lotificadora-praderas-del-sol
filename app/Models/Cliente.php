@@ -8,6 +8,7 @@ use App\Domain\Enums\TipoCompromiso;
 use App\Domain\ValueObjects\DNI;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\ValueObjects\RTN;
+use App\Models\Pivots\DuenoDelExpediente;
 use App\Traits\HasAuditFields;
 use Database\Factories\ClienteFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -93,12 +94,21 @@ class Cliente extends Model
      * señor qué compró?», y un lote comprado entre marido y mujer es de los
      * dos aunque la titular sea ella.
      *
-     * @return BelongsToMany<Venta, $this>
+     * El cuarto parametro generico es el PIVOT: `->using()` lo cambia de
+     * `Pivot` a la clase propia, y sin decirlo el tipo declarado y el
+     * devuelto dejan de coincidir (BelongsToMany no es covariante).
+     *
+     * @return BelongsToMany<Venta, $this, DuenoDelExpediente, 'pivot'>
      */
     public function ventas(): BelongsToMany
     {
         return $this->belongsToMany(Venta::class, 'venta_cliente')
-            ->withPivot(['titular', 'orden'])
+            // Simetrico con `Venta::clientes()`, y no por prolijidad: sin el
+            // pivot propio `titular_hasta` sale STRING, y sin nombrarla en
+            // withPivot() sale NULL SIEMPRE aunque la fila tenga fecha. Las
+            // dos fallas son silenciosas.
+            ->using(DuenoDelExpediente::class)
+            ->withPivot(['titular', 'orden', 'titular_hasta'])
             ->withTimestamps();
     }
 

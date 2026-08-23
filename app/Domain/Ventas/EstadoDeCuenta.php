@@ -302,6 +302,17 @@ final readonly class EstadoDeCuenta
                 continue;
             }
 
+            /*
+             * 🔴 22-ago-2026. Quien cedió sus derechos SIGUE en `clientes`
+             * —su fila no se borra, ver `CambioDeTitular`— pero ya no es
+             * dueño de nada. Sin este filtro el estado de cuenta que se le
+             * entrega al cliente lo imprime bajo «Copropietarios», y el
+             * papel dice algo que la pantalla no dice.
+             */
+            if ($cliente->getAttribute('pivot')?->getAttribute('titular_hasta') !== null) {
+                continue;
+            }
+
             $otros[] = $cliente;
         }
 

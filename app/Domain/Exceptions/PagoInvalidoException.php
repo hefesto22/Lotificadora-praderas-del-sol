@@ -278,4 +278,55 @@ final class PagoInvalidoException extends GrupoOlympoException
             'cuota de ese lote, o abona mas.'
         );
     }
+
+    // ─── Pronto pago (23-ago-2026) ────────────────────────────────────
+
+    /**
+     * Sin motivo no hay descuento. Es la misma regla que R4 al vender y que
+     * la condonacion de mora: el sistema no opina CUANTO, pero exige que
+     * quede escrito POR QUE, y quien lo autorizo.
+     */
+    public static function porFaltarElMotivoDelDescuento(): self
+    {
+        return new self(
+            'Un pronto pago perdona parte del saldo, asi que hace falta escribir por que. Alcanza con '.
+            'una linea: queda en el expediente con tu nombre y la fecha, y dentro de dos anios va a '.
+            'ser lo unico que conteste por que a este cliente se le descontaron esos lempiras.'
+        );
+    }
+
+    /**
+     * El descuento no puede pasarse de lo que el lote debe: perdonar mas que
+     * el saldo dejaria a la lotificadora debiendole al cliente.
+     */
+    public static function porDescuentoQueSuperaElSaldo(Monto $descuento, Monto $saldo, string $codigo): self
+    {
+        return new self(
+            "El lote {$codigo} debe {$saldo->formateado()} y el descuento es de ".
+            "{$descuento->formateado()}. No se puede perdonar mas de lo que se debe."
+        );
+    }
+
+    /**
+     * ═══ 🔴 POR QUE SE RECHAZA EN VEZ DE COBRARLA DE PASO ═══
+     *
+     * Un pronto pago reparte el dinero del cliente contra las cuotas y perdona
+     * la cola. Meter la mora en ese reparto abre una pregunta que NADIE
+     * contesto todavia: si el descuento alcanza para la mora, ¿se perdono mora
+     * o capital? Son dos columnas distintas, dos permisos distintos y dos
+     * numeros distintos en el corte de caja.
+     *
+     * Praderas del Sol no cobra mora (R2), asi que este camino no se cruza
+     * nunca aca. Se rechaza a proposito para no adivinar una regla de negocio
+     * que todavia no existe: el dia que una lotificadora con mora lo pida, se
+     * decide con ella y con un caso real sobre la mesa.
+     */
+    public static function porMoraPendienteEnProntoPago(Monto $mora, string $codigo): self
+    {
+        return new self(
+            "El lote {$codigo} tiene {$mora->formateado()} de mora pendiente. Cobrala primero por ".
+            '«Registrar un pago» y despues hace el pronto pago: el descuento se aplica al saldo del '.
+            'plan, no a la mora.'
+        );
+    }
 }

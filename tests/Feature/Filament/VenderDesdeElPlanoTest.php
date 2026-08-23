@@ -8,6 +8,8 @@ use App\Domain\Enums\TipoCompromiso;
 use App\Domain\Lotes\RegistroDeReservas;
 use App\Domain\Ventas\RegistroDeCompromisos;
 use App\Filament\Resources\Proyectos\Pages\VerPlano;
+use App\Filament\Resources\Proyectos\ProyectoResource;
+use App\Filament\Resources\Ventas\VentaResource;
 use App\Models\Bloque;
 use App\Models\Cliente;
 use App\Models\Compromiso;
@@ -83,10 +85,17 @@ beforeEach(function (): void {
     // Disparar la accion es lo que hay que probar, y se repite en cada
     // test: el $data es lo que el formulario pregunta y los $arguments son
     // lo que manda el modal del plano.
+    /*
+    | ⚠️ `confirmado` va por DEFECTO en el helper, no en cada test. Desde el
+    | 14-ago-2026 el modal exige tildar «revisé el plazo, el precio y la
+    | cuota» antes de firmar, y esa casilla es del formulario, no del caso que
+    | cada test quiere probar. Los dos tests que SÍ prueban la casilla la
+    | mandan explícitamente en false.
+    */
     $this->vender = fn (array $data, array $arguments): object => Livewire::test(
         VerPlano::class,
         ['record' => $this->proyecto->getKey()]
-    )->callAction('venderLote', $data, $arguments);
+    )->callAction('venderLote', array_merge(['confirmado' => true], $data), $arguments);
 });
 
 /*
@@ -148,7 +157,14 @@ describe('La cotizacion del modal', function (): void {
 
         $cuadro = Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
             ->instance()
-            ->cotizar(['lote' => $lote->getKey(), 'prima' => '0']);
+            /*
+             * ⚠️ La MISMA prima que se va a firmar mas abajo, y no cero.
+             * Desde el 14-ago-2026 una venta financiada exige prima > 0, pero
+             * el motivo de fondo es mejor test: cotizar con una prima y
+             * firmar con otra comparaba dos planes distintos y podia dar
+             * igual de casualidad. Ahora las dos puntas parten del mismo dato.
+             */
+            ->cotizar(['lote' => $lote->getKey(), 'prima' => '50000.00']);
 
         $doceMeses = ['cuota' => null, 'interes' => null];
 
@@ -160,7 +176,7 @@ describe('La cotizacion del modal', function (): void {
 
         ($this->vender)(
             ['cliente_id' => $this->rosa->getKey()],
-            ['lote' => $lote->getKey(), 'plazo' => 12, 'precio' => '1500.00', 'prima' => '0.00'],
+            ['lote' => $lote->getKey(), 'plazo' => 12, 'precio' => '1500.00', 'prima' => '50000.00'],
         )->assertHasNoActionErrors();
 
         $venta = Venta::query()->firstOrFail();
@@ -191,8 +207,9 @@ describe('La cotizacion del modal', function (): void {
                 'lote'   => $lote->getKey(),
                 'plazo'  => 12,
                 'precio' => '1500.00',
-                'prima'  => '0.00',
-                'tasa'   => '6.000',
+                // Con plan de cuotas la prima no puede ser cero (14-ago-2026).
+                'prima' => '50000.00',
+                'tasa'  => '6.000',
             ],
         )->assertHasNoActionErrors();
 
@@ -460,8 +477,11 @@ describe('Apartar', function (): void {
         Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
             ->callAction(
                 'apartarLote',
-                ['cliente_id' => $this->rosa->getKey()],
-                ['lote'       => $lote->getKey(), 'senia' => '5000.00', 'vence' => today()->addDays(15)->toDateString()],
+                // `confirmado` es de la casilla del modal, no de lo que este
+                // test prueba. Va explícito porque apartar no tiene el helper
+                // que sí tiene vender: ver la nota del `$this->vender`.
+                ['confirmado' => true, 'cliente_id' => $this->rosa->getKey()],
+                ['lote' => $lote->getKey(), 'senia' => '5000.00', 'vence' => today()->addDays(15)->toDateString()],
             )
             ->assertHasNoActionErrors();
 
@@ -482,7 +502,7 @@ describe('Apartar', function (): void {
         $lote = ($this->lote)('1');
 
         Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
-            ->callAction('apartarLote', ['cliente_id' => $this->rosa->getKey()], ['lote' => $lote->getKey()])
+            ->callAction('apartarLote', ['confirmado' => true, 'cliente_id' => $this->rosa->getKey()], ['lote' => $lote->getKey()])
             ->assertHasNoActionErrors();
 
         expect(Compromiso::query()->firstOrFail()->getAttribute('vence_el')?->toDateString())
@@ -502,7 +522,7 @@ describe('Apartar', function (): void {
         $tres = ($this->lote)('3');
 
         Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
-            ->callAction('apartarLote', ['cliente_id' => $this->rosa->getKey()], [
+            ->callAction('apartarLote', ['confirmado' => true, 'cliente_id' => $this->rosa->getKey()], [
                 'lote'  => $uno->getKey(),
                 'extra' => [$dos->getKey(), $tres->getKey()],
                 'senia' => '5000.00',
@@ -534,7 +554,7 @@ describe('Apartar', function (): void {
         app(RegistroDeCompromisos::class)->apartar($dos, $this->carlos);
 
         Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
-            ->callAction('apartarLote', ['cliente_id' => $this->rosa->getKey()], [
+            ->callAction('apartarLote', ['confirmado' => true, 'cliente_id' => $this->rosa->getKey()], [
                 'lote'  => $uno->getKey(),
                 'extra' => [$dos->getKey()],
             ])
@@ -755,5 +775,191 @@ describe('Guardar para herencia', function (): void {
             ->assertHasNoActionErrors();
 
         expect($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Donado);
+    });
+});
+
+/*
+| Despues de FIRMAR, el plano deja de ser el lugar. Lo que sigue —imprimir el
+| contrato, mirar el plan, cobrar— pasa en el expediente, y quedarse en el
+| mapa obliga a ir a buscar el que uno acaba de crear. Pedido de Mauricio el
+| 14-ago-2026.
+|
+| Los otros cuatro movimientos del plano —apartar, donar, liberar, guardar
+| para herencia— siguen volviendo al plano, y eso es a proposito: ahi quien
+| atiende sigue trabajando sobre el mapa.
+*/
+test('despues de firmar, la pantalla salta al expediente', function (): void {
+    $lote = ($this->lote)('21');
+
+    ($this->vender)(
+        ['cliente_id' => $this->rosa->getKey()],
+        ['lote' => $lote->getKey(), 'plazo' => 12, 'precio' => '1500.00', 'prima' => '50000.00'],
+    )
+        ->assertHasNoActionErrors()
+        ->assertRedirect(VentaResource::getUrl('view', [
+            'record' => Venta::query()->latest('id')->firstOrFail(),
+        ]));
+});
+
+test('apartar sigue devolviendo al plano', function (): void {
+    $lote = ($this->lote)('22');
+
+    Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+        ->callAction('apartarLote', ['confirmado' => true, 'cliente_id' => $this->rosa->getKey()], ['lote' => $lote->getKey()])
+        ->assertHasNoActionErrors()
+        ->assertRedirect(ProyectoResource::getUrl('plano', ['record' => $this->proyecto]));
+});
+
+/*
+|--------------------------------------------------------------------------
+| La última puerta antes de quemar un correlativo — 14-ago-2026
+|--------------------------------------------------------------------------
+| «Que aparezca una alerta cuando le dé vender, para que confirmen que están
+| seguros de esa venta, en ese plazo y con ese precio por vara y cuota
+| mensual» — Mauricio.
+|
+| La tabla con esos números ya estaba en el modal. Lo que faltaba no era el
+| dato: era el ACTO de confirmarlo. Sin la casilla tildada no se firma, y eso
+| es lo que estos dos tests sostienen.
+*/
+test('sin confirmar no se firma la venta', function (): void {
+    $lote = ($this->lote)('31');
+
+    ($this->vender)(
+        ['cliente_id' => $this->rosa->getKey(), 'confirmado' => false],
+        ['lote' => $lote->getKey(), 'plazo' => 12, 'precio' => '1500.00', 'prima' => '50000.00'],
+    )->assertHasActionErrors(['confirmado']);
+
+    expect(Venta::query()->count())->toBe(0)
+        ->and($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Disponible);
+});
+
+test('sin confirmar no se aparta el lote', function (): void {
+    $lote = ($this->lote)('32');
+
+    Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+        ->callAction('apartarLote', [
+            'confirmado' => false,
+            'cliente_id' => $this->rosa->getKey(),
+        ], ['lote' => $lote->getKey()])
+        ->assertHasActionErrors(['confirmado']);
+
+    expect($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Disponible);
+});
+
+/**
+ * Un desarrollo recien creado: con lotes dibujados y SIN un solo plan de pago.
+ *
+ * @return array{proyecto: Proyecto, lote: Lote}
+ */
+function unDesarrolloSinPlanes(): array
+{
+    $proyecto = Proyecto::factory()->create(['codigo' => 'SPL']);
+
+    $bloque = Bloque::factory()->create([
+        'proyecto_id' => $proyecto->getKey(),
+        'nombre'      => 'A',
+    ]);
+
+    $lote = Lote::factory()
+        ->enBloque($bloque)
+        ->conMedidas('250.0000', '1400.00')
+        ->create([
+            'numero'   => '1',
+            'poligono' => [[0, 0], [10, 0], [10, 25], [0, 25]],
+        ]);
+
+    return ['proyecto' => $proyecto, 'lote' => $lote];
+}
+
+/*
+|--------------------------------------------------------------------------
+| Sin plan de pago no se vende — 23-ago-2026
+|--------------------------------------------------------------------------
+| Pedido de Mauricio, mirando el plano de un desarrollo sin planes cargados:
+| el botón «Vender este lote» estaba HABILITADO. La condición del blade era
+| `planes.length > 0 && ! hayPlan`, que con CERO planes da false — o sea que
+| el botón se bloqueaba en todos los casos MENOS en el único donde no hay ni
+| precio por vara² ni plazo con que armar el contrato. Se vendía tecleando
+| todo a mano, y ese precio no queda en ninguna lista.
+|
+| 🔴 Vender y apartar NO son lo mismo acá: vender firma un precio y un plazo
+| por cuatro años; apartar reserva y cobra una seña que se devuelve. Por eso
+| apartar sigue abierto — y esa es la mitad de la regla que hay que cuidar,
+| porque es la que deja retener a un cliente mientras se arma la lista.
+|
+| ⚠️ NO se afirma con `assertHasActionErrors`. `conElLote()` atrapa toda
+| `GrupoOlympoException` y la convierte en Notification roja, así que la
+| acción termina «sin errores» (Regla 1-sexies de [[como-verifico-antes-de-entregar]]).
+| Lo único que prueba algo es la BASE: que no quedó venta.
+*/
+describe('Sin plan de pago no se vende', function (): void {
+    test('el proyecto sabe si tiene con que vender', function (): void {
+        ['proyecto' => $sinPlanes] = unDesarrolloSinPlanes();
+
+        expect($sinPlanes->tieneConQueVender())->toBeFalse()
+            ->and($this->proyecto->tieneConQueVender())->toBeTrue();
+    });
+
+    /*
+    | Un plan APAGADO no cuenta. Es el caso de la lista vieja que se
+    | desactiva al subir precios: mientras no haya una nueva, no se vende.
+    */
+    test('un plan desactivado no habilita la venta', function (): void {
+        ['proyecto' => $proyecto] = unDesarrolloSinPlanes();
+
+        PlanDePago::factory()->delProyecto($proyecto)->aPlazo(12, '1500.00')->create(['activo' => false]);
+
+        expect($proyecto->tieneConQueVender())->toBeFalse();
+    });
+
+    /*
+    | 🔴 EL BORDE DE VERDAD: el botón se deshabilita en la pantalla, pero la
+    | acción se monta desde JS con `$wire.mountAction(...)`, y eso se dispara
+    | desde la consola del navegador en diez segundos. Acá se llama derecho,
+    | como lo haría cualquiera con las herramientas de desarrollador abiertas.
+    */
+    test('llamar la accion a mano tampoco vende', function (): void {
+        ['proyecto' => $proyecto, 'lote' => $lote] = unDesarrolloSinPlanes();
+
+        Livewire::test(VerPlano::class, ['record' => $proyecto->getKey()])
+            ->callAction('venderLote', [
+                'confirmado' => true,
+                'cliente_id' => $this->rosa->getKey(),
+            ], [
+                'lote'   => $lote->getKey(),
+                'plazo'  => 12,
+                'precio' => '1500.00',
+                'prima'  => '10000.00',
+            ])
+            /*
+             * 🔴 ESTA LINEA ES LA QUE HACE QUE EL TEST PRUEBE ALGO.
+             *
+             * Sin ella, «no se creó la venta» también sería cierto si el
+             * formulario se hubiera caído por validación —un campo que falta,
+             * una fecha mal— y el test pasaría sin ejercer la guarda ni una
+             * vez. Exigir que NO haya errores de acción deja una sola
+             * explicación posible: el formulario validó, la acción corrió, y
+             * lo que frenó la venta fue la guarda.
+             */
+            ->assertHasNoActionErrors();
+
+        expect(Venta::query()->where('proyecto_id', $proyecto->getKey())->count())->toBe(0)
+            ->and($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Disponible);
+    });
+
+    /*
+    | La mitad útil de la regla, y la que Mauricio pidió explícitamente:
+    | «que no se pueda vender si no hay planes, en apartar sí».
+    */
+    test('pero apartar SI se puede, y cobra la seña', function (): void {
+        ['proyecto' => $proyecto, 'lote' => $lote] = unDesarrolloSinPlanes();
+
+        Livewire::test(VerPlano::class, ['record' => $proyecto->getKey()])
+            ->callAction('apartarLote', ['confirmado' => true, 'cliente_id' => $this->rosa->getKey()], ['lote' => $lote->getKey()])
+            ->assertHasNoActionErrors();
+
+        expect(Compromiso::query()->where('lote_id', $lote->getKey())->count())->toBe(1)
+            ->and($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Apartado);
     });
 });

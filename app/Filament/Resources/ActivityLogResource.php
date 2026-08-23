@@ -6,6 +6,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\ActivityLogResource\Pages\ListActivityLogs;
 use App\Filament\Resources\ActivityLogResource\Pages\ViewActivityLog;
+use App\Filament\Support\Menu;
 use BackedEnum;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\DatePicker;
@@ -61,7 +62,7 @@ class ActivityLogResource extends Resource
     #[Override]
     public static function getNavigationGroup(): ?string
     {
-        return 'Administración';
+        return Menu::ADMINISTRACION;
     }
 
     #[Override]

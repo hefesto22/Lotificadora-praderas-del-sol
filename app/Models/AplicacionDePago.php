@@ -28,6 +28,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'monto_interes',
     'monto_capital',
     'mora_condonada',
+    'capital_condonado',
 ])]
 #[Table(name: 'aplicaciones_de_pago')]
 class AplicacionDePago extends Model
@@ -88,12 +89,33 @@ class AplicacionDePago extends Model
     }
 
     /**
-     * Lo que este renglon le aplico a la cuota: interes + capital, sin mora.
-     * Es lo que movio `cuotas.monto_pagado`.
+     * Lo que este renglon perdono de CAPITAL en un pronto pago (23-ago-2026).
+     *
+     * Tambien fuera de `monto` —no es dinero que entro— pero, a diferencia de
+     * la mora, SI esta adentro de `cuotas.monto_pagado`. El porque esta en
+     * `Cuota::capitalCondonado()`; en dos palabras: catorce pantallas leen el
+     * saldo como `monto - monto_pagado` en SQL crudo.
+     */
+    public function capitalCondonado(): Monto
+    {
+        return $this->parte('capital_condonado');
+    }
+
+    /**
+     * Lo que este renglon le aplico a la cuota: interes + capital + lo
+     * perdonado, sin mora. Es lo que movio `cuotas.monto_pagado`.
+     *
+     * 🔴 ES LA DEFINICION UNICA, y `anular()` tiene que usar ESTE metodo para
+     * devolver el saldo. Repetir la suma alla —como estuvo hasta el
+     * 23-ago-2026— hacia que el dia que apareciera una parte nueva, una de
+     * las dos se quedara vieja: el recibo anulado devolveria de menos y la
+     * cuota quedaria pagada sin que nadie la hubiera pagado.
      */
     public function montoALaCuota(): Monto
     {
-        return $this->montoInteres()->sumar($this->montoCapital());
+        return $this->montoInteres()
+            ->sumar($this->montoCapital())
+            ->sumar($this->capitalCondonado());
     }
 
     private function parte(string $columna): Monto

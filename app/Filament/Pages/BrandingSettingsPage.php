@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
+use App\Filament\Support\Menu;
 use App\Models\BrandingSetting;
 use App\Support\ImageOptimizer;
 use BackedEnum;
@@ -60,7 +61,7 @@ class BrandingSettingsPage extends Page
     #[Override]
     public static function getNavigationGroup(): ?string
     {
-        return 'Sistema';
+        return Menu::SISTEMA;
     }
 
     #[Override]

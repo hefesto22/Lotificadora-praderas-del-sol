@@ -14,6 +14,7 @@ use App\Filament\Resources\Clientes\RelationManagers\VentasRelationManager;
 use App\Filament\Resources\Clientes\Schemas\ClienteForm;
 use App\Filament\Resources\Clientes\Schemas\ClienteInfolist;
 use App\Filament\Resources\Clientes\Tables\ClientesTable;
+use App\Filament\Support\Menu;
 use App\Models\Cliente;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -57,7 +58,7 @@ class ClienteResource extends Resource
     #[Override]
     public static function getNavigationGroup(): ?string
     {
-        return 'Lotificación';
+        return Menu::DIA_A_DIA;
     }
 
     #[Override]

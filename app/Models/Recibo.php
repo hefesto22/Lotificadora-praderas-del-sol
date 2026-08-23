@@ -598,6 +598,34 @@ class Recibo extends Model
         return $this->montoDeColumna('mora_condonada');
     }
 
+    /**
+     * Lo que este papel perdono de SALDO: el descuento de un pronto pago
+     * (23-ago-2026). Tampoco esta adentro de `monto` — no entro por la puerta.
+     *
+     * ⚠️ DERIVADO de los renglones, no una columna del recibo. La mora si
+     * tiene la suya porque el corte de caja la agrupa en SQL; esta no la
+     * agrupa nadie, y una columna que solo se lee de a un recibo por vez es
+     * una copia mas que se puede desincronizar de sus renglones.
+     */
+    public function capitalCondonado(): Monto
+    {
+        $total = Monto::cero();
+
+        foreach ($this->aplicaciones as $aplicacion) {
+            $total = $total->sumar($aplicacion->capitalCondonado());
+        }
+
+        return $total;
+    }
+
+    /**
+     * ¿Este papel lleva un descuento por pronto pago?
+     */
+    public function tuvoDescuento(): bool
+    {
+        return ! $this->capitalCondonado()->esCero();
+    }
+
     public function cobroMora(): bool
     {
         return ! $this->montoMora()->esCero();

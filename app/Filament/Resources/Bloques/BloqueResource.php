@@ -11,6 +11,7 @@ use App\Filament\Resources\Bloques\Pages\ViewBloque;
 use App\Filament\Resources\Bloques\Schemas\BloqueForm;
 use App\Filament\Resources\Bloques\Schemas\BloqueInfolist;
 use App\Filament\Resources\Bloques\Tables\BloquesTable;
+use App\Filament\Support\Menu;
 use App\Models\Bloque;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -59,7 +60,7 @@ class BloqueResource extends Resource
     #[Override]
     public static function getNavigationGroup(): ?string
     {
-        return 'Lotificación';
+        return Menu::DESARROLLO;
     }
 
     #[Override]

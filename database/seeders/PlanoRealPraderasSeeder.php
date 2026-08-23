@@ -39,7 +39,7 @@ use RuntimeException;
  * La unidad la declara el propio archivo: `$DIMLFAC = 1.1976`, o sea
  * 1 vara = 0.835 m exactos.
  *
- * Los 301 vienen dibujados
+ * Los 309 vienen dibujados
  * ------------------------
  * Ninguno viaja sin poligono. NOTA_SIN_DIBUJO queda de red: si un dia el
  * JSON trae una cara que no cierra, el lote entra igual -con su area y su
@@ -50,6 +50,13 @@ use RuntimeException;
  * El unico con el dibujo peleado con su area es el X-15, y viaja MARCADO
  * por poligonoDesalineado() (§8.2). Hay un test que se pone rojo si
  * aparece un segundo.
+ *
+ * Si el plano crece con la base ya operando
+ * -----------------------------------------
+ * Este seeder REEMPLAZA el trazado, y por eso se detiene solo en cuanto
+ * hay un lote fuera de `disponible`. Para agregar lo que falte sin tocar
+ * lo vendido esta `olympo:completar-plano`, que lee este mismo archivo y
+ * solo INSERTA. Paso el 22-ago-2026 con la manzana I.
  *
  * Ver docs/plano-real.md para el detalle de como se leyo el archivo.
  */

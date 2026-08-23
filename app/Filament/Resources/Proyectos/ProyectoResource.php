@@ -16,6 +16,7 @@ use App\Filament\Resources\Proyectos\RelationManagers\PlanesDePagoRelationManage
 use App\Filament\Resources\Proyectos\Schemas\ProyectoForm;
 use App\Filament\Resources\Proyectos\Schemas\ProyectoInfolist;
 use App\Filament\Resources\Proyectos\Tables\ProyectosTable;
+use App\Filament\Support\Menu;
 use App\Models\Proyecto;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -58,7 +59,7 @@ class ProyectoResource extends Resource
     #[Override]
     public static function getNavigationGroup(): ?string
     {
-        return 'Lotificación';
+        return Menu::DESARROLLO;
     }
 
     #[Override]

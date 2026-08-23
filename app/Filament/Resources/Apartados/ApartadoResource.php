@@ -7,6 +7,7 @@ namespace App\Filament\Resources\Apartados;
 use App\Domain\Enums\TipoCompromiso;
 use App\Filament\Resources\Apartados\Pages\ListApartados;
 use App\Filament\Resources\Apartados\Tables\ApartadosTable;
+use App\Filament\Support\Menu;
 use App\Models\Compromiso;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -73,7 +74,7 @@ class ApartadoResource extends Resource
     #[Override]
     public static function getNavigationGroup(): ?string
     {
-        return 'Lotificación';
+        return Menu::DIA_A_DIA;
     }
 
     #[Override]

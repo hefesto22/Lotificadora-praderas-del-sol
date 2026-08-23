@@ -4,16 +4,32 @@
 <x-filament-panels::page>
     @php
         $resumen = $plano['resumen'];
-        $tarjetas = [
-            ['etiqueta' => 'Lotes',       'valor' => array_sum($resumen),    'color' => null],
+
+        /*
+        | 🔴 LAS OCHO TARJETAS SE FUERON — pedido de Mauricio, 23-ago-2026:
+        | «no son necesarias esas cards ya que todo se ve en el plano».
+        |
+        | Y es cierto de los CONTEOS: el plano ya dice cuántos hay de cada
+        | color, mirándolo. Ocupaban media pantalla arriba del mapa, que es
+        | justo lo que uno vino a ver.
+        |
+        | ⚠️ Pero las tarjetas cargaban ADEMAS la leyenda de colores, y eso no
+        | está en ninguna otra parte: sin ella, verde/azul/morado no significan
+        | nada para quien abre el plano por primera vez. Por eso queda una
+        | tira fina con el punto, la palabra y el número — la misma
+        | información en una línea en vez de en dos filas de cajas.
+        |
+        | Y solo salen los estados QUE EXISTEN en este desarrollo: en Praderas
+        | son tres, no ocho. Un contador en cero es un renglón que no informa.
+        */
+        $leyenda = array_values(array_filter([
             ['etiqueta' => 'Disponibles', 'valor' => $resumen['disponible'], 'color' => EstadoLote::Disponible->colorHex()],
             ['etiqueta' => 'Apartados',   'valor' => $resumen['apartado'],   'color' => EstadoLote::Apartado->colorHex()],
             ['etiqueta' => 'Vendidos',    'valor' => $resumen['vendido'],    'color' => EstadoLote::Vendido->colorHex()],
-            ['etiqueta' => 'Cancelados',  'valor' => $resumen['cancelado'],  'color' => EstadoLote::Cancelado->colorHex()],
             ['etiqueta' => 'Reservados',  'valor' => $resumen['reservado'],  'color' => EstadoLote::Reservado->colorHex()],
             ['etiqueta' => 'Donados',     'valor' => $resumen['donado'],     'color' => EstadoLote::Donado->colorHex()],
-            ['etiqueta' => 'Sin dibujar', 'valor' => $plano['sinDibujar'],   'color' => null],
-        ];
+            ['etiqueta' => 'Cancelados',  'valor' => $resumen['cancelado'],  'color' => EstadoLote::Cancelado->colorHex()],
+        ], static fn (array $renglon): bool => $renglon['valor'] > 0));
 
         /*
         | Los tres numeros de R14, para proponerlos en el panel de apartar en
@@ -39,21 +55,68 @@
         internamente no existirian y esto saldria sin estilos.
     --}}
     <style>
-        .plano-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
-        @media (min-width: 640px) { .plano-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-        @media (min-width: 1024px) { .plano-stats { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
-
         .plano-card {
             border: 1px solid rgb(228 228 231); background: #fff;
             border-radius: .75rem; padding: 1rem;
         }
         .dark .plano-card { border-color: rgba(255, 255, 255, .1); background: rgb(24 24 27); }
 
-        .plano-stat-label { display: flex; align-items: center; gap: .5rem; font-size: .75rem; font-weight: 500; color: rgb(113 113 122); }
-        .dark .plano-stat-label { color: rgb(161 161 170); }
         .plano-stat-punto { width: .625rem; height: .625rem; border-radius: 9999px; flex-shrink: 0; }
-        .plano-stat-valor { margin-top: .25rem; font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; color: rgb(9 9 11); }
-        .dark .plano-stat-valor { color: #fff; }
+
+        /* ── La barra que reemplazo a las ocho tarjetas ───────────── */
+        .plano-barra {
+            display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1.25rem;
+            justify-content: space-between;
+        }
+
+        .plano-buscar { position: relative; flex: 0 1 30rem; display: flex; align-items: center; }
+
+        /* La lupa: sin ella el campo se leia como una barra decorativa. */
+        .plano-buscar-lupa {
+            position: absolute; left: .75rem; width: 1.05rem; height: 1.05rem;
+            color: rgb(113 113 122); pointer-events: none;
+        }
+        .dark .plano-buscar-lupa { color: rgb(161 161 170); }
+
+        .plano-buscar input {
+            width: 100%; border: 1px solid rgb(212 212 216); background: #fff;
+            border-radius: .625rem; padding: .5625rem 5rem .5625rem 2.25rem;
+            font-size: .875rem; color: rgb(9 9 11);
+            box-shadow: 0 1px 2px rgba(9, 9, 11, .06), inset 0 1px 0 rgba(9, 9, 11, .02);
+        }
+        .plano-buscar input::placeholder { color: rgb(113 113 122); }
+        /* La ✕ nativa de type="search" se encimaba con «Limpiar». */
+        .plano-buscar input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+        .plano-buscar input:hover { border-color: rgb(161 161 170); }
+        .plano-buscar input:focus {
+            outline: none; border-color: rgb(13 148 136);
+            box-shadow: 0 0 0 3px rgba(20, 184, 166, .18);
+        }
+        .dark .plano-buscar input {
+            background: rgb(24 24 27); border-color: rgba(255, 255, 255, .18); color: #fff;
+            box-shadow: none;
+        }
+        .dark .plano-buscar input::placeholder { color: rgb(161 161 170); }
+
+        .plano-buscar button {
+            position: absolute; right: .375rem; border: 0; background: transparent;
+            font-size: .75rem; font-weight: 500; color: rgb(113 113 122);
+            padding: .25rem .5rem; border-radius: .375rem; cursor: pointer;
+        }
+        .plano-buscar button:hover { background: rgb(244 244 245); color: rgb(9 9 11); }
+        .dark .plano-buscar button:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+
+        .plano-leyenda { font-size: .75rem; color: rgb(113 113 122); }
+        .dark .plano-leyenda { color: rgb(161 161 170); }
+        .plano-chips { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem 1rem; }
+        .plano-chip { display: inline-flex; align-items: center; gap: .375rem; white-space: nowrap; }
+        .plano-chip strong, .plano-hallazgo strong {
+            font-variant-numeric: tabular-nums; color: rgb(9 9 11); font-weight: 600;
+        }
+        .dark .plano-chip strong, .dark .plano-hallazgo strong { color: #fff; }
+        .plano-hallazgo { white-space: nowrap; }
+
+        [x-cloak] { display: none !important; }
 
         .plano-esquema {
             margin-top: 1rem; border-radius: .75rem; padding: .875rem 1rem;
@@ -368,20 +431,6 @@
 
     </style>
 
-    <div class="plano-stats">
-        @foreach ($tarjetas as $tarjeta)
-            <div class="plano-card">
-                <div class="plano-stat-label">
-                    @if ($tarjeta['color'] !== null)
-                        <span class="plano-stat-punto" style="background: {{ $tarjeta['color'] }}"></span>
-                    @endif
-                    {{ $tarjeta['etiqueta'] }}
-                </div>
-                <div class="plano-stat-valor">{{ $tarjeta['valor'] }}</div>
-            </div>
-        @endforeach
-    </div>
-
     @if ($plano['esquematico'] && $plano['hayGeometria'])
         <div class="plano-esquema">
             <strong>Este plano es un esquema, no el plano del topógrafo.</strong>
@@ -410,13 +459,61 @@
                 medidas: @js($plano['medidas']),
                 donaciones: @js($plano['donaciones']),
                 herencia: @js($plano['herencia']),
-                cobros: @js($cobros),
 
                 base: @js($plano['viewBox']).split(' ').map(Number),
                 vista: { x: 0, y: 0, w: 1, h: 1 },
                 seleccionado: null,
                 abierto: false,
                 prima: '',
+
+                /* ── El buscador del plano (23-ago-2026) ──────────────
+                   Se busca contra CUATRO campos porque son las cuatro
+                   maneras en que alguien nombra un lote de memoria: por el
+                   codigo (RPS-Q-003), por el rotulo del plano (Q-3), por
+                   quien lo tiene, y por el numero de contrato. */
+                busqueda: '',
+
+                get hayBusqueda() {
+                    return this.busqueda.trim() !== '';
+                },
+
+
+                /* 🔴 Ni mayusculas ni tildes — pedido de Mauricio, 23-ago-2026.
+                   Los nombres de la cartera vieja vienen del cuaderno y estan
+                   escritos como salio: MARIA, María, MARÍA. Quien busca teclea
+                   como se le ocurre. NFD parte cada letra acentuada en letra +
+                   marca, y la marca se borra: «María» y «MARIA» se vuelven la
+                   misma cadena antes de comparar. */
+                sinAdornos(texto) {
+                    return texto
+                        .normalize('NFD')
+                        .replace(/[\u0300-\u036f]/g, '')
+                        .toLowerCase()
+                        .trim();
+                },
+
+                coincide(lote) {
+                    const q = this.sinAdornos(this.busqueda);
+
+                    if (q === '') {
+                        return true;
+                    }
+
+                    return [lote.codigo, lote.rotulo, lote.cliente, lote.cartera?.contrato]
+                        .some((campo) => typeof campo === 'string' && this.sinAdornos(campo).includes(q));
+                },
+
+                /* Los que NO coinciden se ATENUAN, no se esconden. Esconderlos
+                   dejaria tres poligonos flotando en blanco y el plano perderia
+                   lo unico que un plano aporta: DONDE queda cada uno. Asi se ve
+                   que los tres lotes del señor estan pegados en el bloque Q. */
+                atenuado(lote) {
+                    return this.hayBusqueda && ! this.coincide(lote);
+                },
+
+                get encontrados() {
+                    return this.lotes.filter((lote) => this.coincide(lote)).length;
+                },
 
                 /* Lo que se cotiza en el modal viaja al formulario de venta:
                    el plazo elegido y, si se toco, el precio de esa fila. */
@@ -1214,6 +1311,60 @@ get hayInteres() {
             :class="completo ? 'plano-grid plano-completo' : 'plano-grid'"
             x-on:keydown.escape.window="if (abierto) { cerrar() } else { completo = false }"
         >
+        {{-- 🔴 EL BUSCADOR (23-ago-2026). Todo pasa en el navegador: los lotes ya
+             viajan enteros al Alpine —con su codigo, su rotulo, su cliente y su
+             contrato—, asi que buscar no toca el servidor y el plano responde
+             mientras se teclea. Un ida y vuelta por letra sobre 309 lotes seria
+             mas lento que leerlos a ojo. --}}
+            <div class="plano-barra">
+                <div class="plano-buscar">
+                    <svg class="plano-buscar-lupa" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                        <circle cx="9" cy="9" r="6"></circle>
+                        <path d="M13.5 13.5 L17.5 17.5" stroke-linecap="round"></path>
+                    </svg>
+                    <input
+                        type="search"
+                        x-model="busqueda"
+                        placeholder="Buscar por cliente, código de lote o contrato…"
+                        aria-label="Buscar en el plano"
+                        x-on:keydown.escape.stop="busqueda = ''"
+                    >
+                    <button type="button" x-show="hayBusqueda" x-on:click="busqueda = ''" x-cloak>Limpiar</button>
+                </div>
+
+                <div class="plano-leyenda">
+                    {{-- Buscando, el conteo por estado no sirve: lo que importa es
+                         cuantos quedaron encendidos. --}}
+                    <span x-show="hayBusqueda" x-cloak class="plano-hallazgo">
+                        <strong x-text="encontrados"></strong>
+                        <span x-text="encontrados === 1 ? 'lote' : 'lotes'"></span>
+                        de {{ count($plano['lotes']) }}
+                    </span>
+
+                    <span x-show="! hayBusqueda" class="plano-chips">
+                        @foreach ($leyenda as $renglon)
+                            <span class="plano-chip">
+                                <span class="plano-stat-punto" style="background: {{ $renglon['color'] }}"></span>
+                                {{ $renglon['etiqueta'] }}
+                                <strong>{{ $renglon['valor'] }}</strong>
+                            </span>
+                        @endforeach
+                    </span>
+                </div>
+            </div>
+
+            {{-- ⚠️ ESTE SI SE QUEDA, y por eso no era una tarjeta mas: un lote sin
+                 dibujar es EXACTAMENTE el que no se puede ver en el plano. Es el
+                 caso de la manzana I del 22-ago, donde faltaban ocho y ningun
+                 control lo atrapaba. Sale solo cuando hay alguno. --}}
+            @if ($plano['sinDibujar'] > 0)
+                <div class="plano-esquema">
+                    <strong>{{ $plano['sinDibujar'] }} {{ $plano['sinDibujar'] === 1 ? 'lote cargado no está dibujado' : 'lotes cargados no están dibujados' }}.</strong>
+                    No aparecen en el plano y por eso no se pueden ver ni buscar acá — se venden igual desde Ventas.
+                    Para dibujarlos, «Acomodar plano».
+                </div>
+            @endif
+
             <div class="plano-card plano-lienzo">
                 <svg
                     x-ref="lienzo"
@@ -1265,7 +1416,7 @@ get hayInteres() {
                         <polygon
                             points="{{ $lote['puntos'] }}"
                             fill="{{ $lote['color'] }}"
-                            fill-opacity="0.78"
+                            :fill-opacity="atenuado(lotes[{{ $indice }}]) ? 0.07 : 0.78"
                             stroke-linejoin="round"
                             vector-effect="non-scaling-stroke"
                             class="lote"
@@ -1623,6 +1774,10 @@ get hayInteres() {
                                                         Falta cargar el precio <span x-text="medidas.porUnidad"></span> de cada plazo. Se cargan en el
                                                         proyecto, pestaña «Planes de pago»; en cuanto haya uno, este
                                                         cuadro calcula la cuota de cada plan sobre este lote.
+                                                        <strong>Hasta entonces este lote no se puede vender</strong> —no
+                                                        hay precio ni plazo con que armar el contrato—, pero sí se puede
+                                                        <strong>apartar</strong>: la seña lo reserva sin fijar precio y
+                                                        después cuenta como parte de la prima.
                                                     </p>
                                                 </template>
 
@@ -1738,14 +1893,23 @@ get hayInteres() {
                                                      desde la barra, que es la unica que sabe cuantos
                                                      son y cuanto suman. --}}
                                                 <template x-if="carrito.length === 0">
+                                                    {{-- 🔴 SIN PLANES NO SE VENDE (23-ago-2026, pedido de
+                                                         Mauricio). La condicion vieja era
+                                                         `planes.length > 0 && ! hayPlan`, que con CERO planes
+                                                         da FALSE: el boton quedaba habilitado justo en el unico
+                                                         caso donde no hay ni precio por vara ni plazo con que
+                                                         armar el contrato. Se vendia tecleando todo a mano.
+                                                         Apartar no se toca: reserva sin fijar precio. --}}
                                                     <button
                                                         type="button"
                                                         class="plano-accion plano-accion-vender plano-accion-ancha"
-                                                        :disabled="planes.length > 0 && ! hayPlan"
+                                                        :disabled="planes.length === 0 || ! hayPlan"
                                                         x-on:click="$wire.mountAction('venderLote', cotizacion); abierto = false"
-                                                        x-text="planes.length > 0 && ! hayPlan
-                                                            ? 'Marcá primero un plazo'
-                                                            : (seleccionado.estado === 'apartado' ? 'Convertir en venta' : 'Vender este lote')"
+                                                        x-text="planes.length === 0
+                                                            ? 'Sin plan de pago no se puede vender'
+                                                            : (! hayPlan
+                                                                ? 'Marcá primero un plazo'
+                                                                : (seleccionado.estado === 'apartado' ? 'Convertir en venta' : 'Vender este lote'))"
                                                     ></button>
                                                 </template>
 
@@ -1874,9 +2038,19 @@ get hayInteres() {
                                      el lote y del otro lado se sube a su contrato.
 
                                      `seCobra` es que la venta este vigente: una liquidada o
-                                     rescindida no recibe dinero. `cobros.puedeAbonar` es
-                                     R21 —el receptor cobra, la administradora reprograma—,
-                                     y se verifica otra vez del lado del servidor. --}}
+                                     rescindida no recibe dinero.
+
+                                     🔴 Y hay UN SOLO boton (23-ago-2026, pedido de Mauricio:
+                                     «solo deberia mostrar registrar un pago ya que al
+                                     presionarlo se puede hacer abono a capital»). Al lado
+                                     vivia «Abonar a capital», que era de cuando el modal
+                                     cobraba una sola cosa. Desde el 10-ago el modal abre con
+                                     los cuatro modos adentro —cuota, abono, ambas, pronto
+                                     pago— y ofrecer uno de ellos aparte era la misma puerta
+                                     dibujada dos veces: quien la tomaba entraba al mismo
+                                     modal con una opcion MENOS. R21 no se pierde: el toggle
+                                     de adentro ya dibuja solo los modos que ese usuario
+                                     puede, y el servidor lo verifica igual. --}}
                                 <template x-if="seleccionado.cartera && seleccionado.cartera.seCobra">
                                     <div class="plano-acciones">
                                         <button
@@ -1886,16 +2060,6 @@ get hayInteres() {
                                         >
                                             Registrar un pago
                                         </button>
-
-                                        <template x-if="cobros.puedeAbonar">
-                                            <button
-                                                type="button"
-                                                class="plano-accion plano-accion-ancha"
-                                                x-on:click="$wire.mountAction('abonarDesdeElPlano', { lote: seleccionado.id }); abierto = false"
-                                            >
-                                                Abonar a capital
-                                            </button>
-                                        </template>
 
                                         <button
                                             type="button"

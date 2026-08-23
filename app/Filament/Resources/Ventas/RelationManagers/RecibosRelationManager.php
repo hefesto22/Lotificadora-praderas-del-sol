@@ -54,11 +54,28 @@ class RecibosRelationManager extends RelationManager
                 ->with('compromiso.lote')
                 ->withCount('impresiones'))
             ->columns([
+                /*
+                 * 🔴 La descripcion con el numero de FACTURA no es adorno.
+                 *
+                 * El listado general de Recibos ya la traia; esta tabla —la
+                 * que se mira parado en el expediente— no, y el 14-ago-2026
+                 * eso hizo que Mauricio preguntara donde estaba el boton para
+                 * emitir la factura de una venta de contado. Ya estaba
+                 * emitida: la 000-001-01-00000003, en este mismo renglon. Lo
+                 * que faltaba era que el renglon lo dijera.
+                 *
+                 * Dos numeros en una fila no confunden si uno esta arriba y
+                 * grande —el interno, el que cuadra la caja— y el otro debajo
+                 * y chico, con su nombre.
+                 */
                 TextColumn::make('numero')
                     ->label('Recibo')
                     ->weight('bold')
                     ->sortable()
-                    ->formatStateUsing(static fn (Recibo $record): string => $record->folio()),
+                    ->formatStateUsing(static fn (Recibo $record): string => $record->folio())
+                    ->description(static fn (Recibo $record): ?string => $record->esFactura()
+                        ? 'Factura '.$record->numeroDelPapel()
+                        : null),
 
                 TextColumn::make('fecha')
                     ->label('Fecha')

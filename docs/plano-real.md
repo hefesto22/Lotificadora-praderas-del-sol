@@ -1,6 +1,11 @@
 # De dónde sale la geometría de Praderas del Sol
 
-Los 301 lotes que dibuja `VerPlano` salen del **DXF nativo de Civil 3D**
+> **22-ago-2026 — la manzana I estaba a medias.** La primera lectura dejó
+> 301 lotes; el plano tiene 309. Faltaba la segunda fila entera de la
+> manzana I (I-8 a I-15). Ver [La manzana I](#la-manzana-i-el-faltante-que-no-se-veía)
+> al final. Los números de este documento ya están corregidos.
+
+Los 309 lotes que dibuja `VerPlano` salen del **DXF nativo de Civil 3D**
 con el que el Ing. Gerson Menjívar levantó el plano (`PLANO DIONEL
 CORPUS.dxf`, abril 2026). Este documento explica cómo se leyó, **qué número
 es exacto y cuál es derivado**, y qué queda marcado para revisar.
@@ -20,7 +25,7 @@ volver a pedir el equivocado.
 | Capas | — | una sola, `0` | **200+, de plantilla Civil 3D** |
 | Texto seleccionable | **0** | **0** | **705** (652 `TEXT` + 53 `MTEXT`) |
 | Coordenadas | puntos de hoja | pulgadas de hoja | **metros de campo** |
-| Lotes que se pudieron cerrar | 265 | 281 | **301** |
+| Lotes que se pudieron cerrar | 265 | 281 | **309** |
 | Error contra el área impresa | 0.4–0.5 % | 0.01–0.15 % | **0.006 % mediana** |
 
 Los dos primeros son la misma impresión: alguien abrió el ploteo y lo
@@ -63,15 +68,15 @@ sobre el área **impresa** en el plano.
    ni numeración por posición. El plano trae 305 rótulos `vr2` y cada uno
    cayó dentro de una sola cara.
 
-   Cuatro de esos 305 no son lotes y no se cargan: las dos áreas verdes
-   (4,668.94 y 2,436.33 vr²) y los dos restos de finca (17,198.06 y
-   12,213.06). Quedan **301**.
+   Cuatro de esos rótulos no son lotes y no se cargan: las dos áreas
+   verdes (4,668.94 y 2,436.33 vr²) y los dos restos de finca (17,198.06 y
+   12,213.06).
 
-4. **El número y el bloque se leen, no se deducen.** Los 304 números y las
-   24 letras `BLOQUE` son texto real. La numeración serpentina por posición
+4. **El número y el bloque se leen, no se deducen.** Los números y las 24
+   letras `BLOQUE` son texto real. La numeración serpentina por posición
    que usaba la versión anterior ya no existe.
 
-Resultado: **301 lotes en 24 bloques, de la A a la X**, 85,310.81 vr² en
+Resultado: **309 lotes en 24 bloques, de la A a la X**, 87,959.26 vr² en
 total, 233 de ellos el lote tipo de 12.50 V × 20.00 V = 250.00 vr².
 
 | Dibujo contra texto impreso | |
@@ -90,9 +95,9 @@ lote en dos, y de paso cruza en diagonal la calle entre P y O.
 
 No es lindero de nada actual. Los diez lotes que atraviesa —**A-1 a A-7 y
 P-1 a P-3**— se venden enteros, y sus áreas impresas lo demuestran. Así
-que se quita **antes** de armar las caras, no después: con eso los 304
-rótulos caen cada uno dentro de una cara entera y **no queda una sola cara
-que reparar**.
+que se quita **antes** de armar las caras, no después: con eso los rótulos
+caen cada uno dentro de una cara entera y **no queda una sola cara que
+reparar**.
 
 Cómo se encontró, para poder repetirlo: el interior de un lote está vacío,
 así que **cualquier trazo que lo cruce por dentro no es lindero de nadie**.
@@ -130,7 +135,7 @@ segundo.
 
 **Exacto**
 
-- El **área** de los 301 lotes: es el literal del rótulo del plano.
+- El **área** de los 309 lotes: es el literal del rótulo del plano.
 - El **número** de lote y la **letra de bloque**: son el texto del plano.
 - La **forma y la posición** de cada lote, salvo el X-15.
 
@@ -170,3 +175,71 @@ PRECIO_VARA=1500 php artisan db:seed --class=PlanoRealPraderasSeeder
 
 Reemplaza el trazado anterior del mismo proyecto (`RPS`). Si algún lote ya
 está apartado o vendido, **no borra nada** y se detiene.
+
+**Con la base ya operando esa puerta está cerrada**, y es justo cuando
+aparecen los faltantes. Para eso está `olympo:completar-plano`, que lee
+este mismo archivo y solo **inserta** lo que no existe:
+
+```bash
+php artisan olympo:completar-plano RPS database/data/praderas-plano.json --ensayo
+php artisan olympo:completar-plano RPS database/data/praderas-plano.json
+```
+
+No borra, no renumera y no repinta: un lote que ya está en la base no se
+toca ni aunque el archivo diga otra cosa. Las diferencias las informa y
+las deja para que las mire una persona.
+
+## La manzana I: el faltante que no se veía
+
+**22-ago-2026.** Mauricio comparó el mapa contra el PDF del topógrafo y
+notó que la manzana I terminaba en el I-7. En el plano tiene **quince**
+lotes, en dos filas:
+
+| | Lotes | Medida | Área |
+|---|---|---|---|
+| Fila del frente | I-1 a I-6 | 12.50 V × 20.00 V | 250.00 vr² |
+| Esquina del frente | I-7 | 19.81 V × 20.00 V | 330.79 vr² |
+| La cuña | I-8 | 12.00 V × 23.07 V | 260.10 vr² |
+| | I-9 | 15.00 V × 24.92 V | 363.35 vr² |
+| Fila de atrás | I-10 a I-15 | 12.50 V × 27.00 V | 337.50 vr² |
+
+Los ocho que faltaban suman **2,648.45 vr²**, y la manzana pasa de
+1,830.79 a **4,479.24 vr²**.
+
+**Por qué no se vio antes.** Siete lotes seguidos, numerados del 1 al 7,
+no se leen como media manzana: se leen como una manzana chica. El faltante
+no deja hueco en el mapa —la fila de atrás simplemente no está dibujada— y
+ningún control lo podía atrapar, porque todos los controles comparan el
+dibujo contra el **rótulo del propio lote**, y un lote que no se leyó no
+tiene rótulo que comparar.
+
+**Lo que sí lo habría atrapado**, y queda anotado para la próxima lectura
+de un DXF: **contar los rótulos `vr2` del archivo y compararlos contra los
+lotes cargados.** El plano trae más rótulos de área que lotes tiene la
+base; esa resta es la lista de lo que la lectura dejó afuera.
+
+**Cómo se reconstruyeron.** Con el mismo método del resto del documento
+—caras del grafo de linderos, rótulo adentro, área del texto impreso— y la
+transformación de campo a varas resuelta contra el calco, que ya está en
+coordenadas de varas: 25 rótulos con nombre único (`BLOQUE A` … `CALLE
+PUBLICA.`) dan la escala y el traslado por mínimos cuadrados, con
+**0.006 varas de residuo máximo**.
+
+El control es el de siempre, el área dibujada contra la impresa:
+
+| Los ocho nuevos | |
+|---|---|
+| Error máximo | **0.0093 %** (I-13 e I-15) |
+| Error mínimo | 0.0006 % (I-9) |
+
+Están por debajo del percentil 90 de los 301 que ya estaban, así que
+ninguno sale marcado por `poligonoDesalineado()` y el X-15 sigue siendo el
+único. Los ocho polígonos **comparten vértice** con los lotes de la fila
+del frente que ya estaban cargados —la manzana cierra— y ninguno se
+traslapa con ningún otro lote del plano.
+
+**Lo que el plano tiene y el sistema sigue sin cargar:** las manzanas de la
+segunda serie, `A-1` a `F-1`, que en el DXF están dibujadas y rotuladas
+igual que las demás. Quedan afuera a propósito —22-ago-2026, Mauricio:
+«solo esos hacen falta»—, no por un tropiezo de la lectura. Si algún día
+entran, entran por `olympo:completar-plano`.

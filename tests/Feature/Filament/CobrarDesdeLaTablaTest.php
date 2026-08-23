@@ -141,7 +141,15 @@ describe('Quién ve el botón en la fila', function (): void {
             'cerrada_el' => today(),
         ]);
 
-        Livewire::test(ListVentas::class)->assertActionHidden(($this->enElListado)());
+        /*
+         * 🔴 El `set('activeTab')` es lo que hace que este test pruebe algo.
+         * Desde el 22-ago la pantalla abre en «Vigente», y un rescindido no
+         * está en esa lista: sin pararse en «Todas», `assertActionHidden`
+         * pasa porque la FILA no existe, no porque el botón esté oculto.
+         */
+        Livewire::test(ListVentas::class)
+            ->set('activeTab', ListVentas::TODAS)
+            ->assertActionHidden(($this->enElListado)());
     });
 });
 

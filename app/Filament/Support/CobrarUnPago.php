@@ -75,17 +75,34 @@ use Illuminate\Support\HtmlString;
  * instancia con la venta que le tocó. Sin estado compartido entre filas: dos
  * modales abiertos sobre dos ventas distintas no se pisan.
  *
- * ═══ LAS DOS PUERTAS AL MISMO MODAL ═══
+ * ═══ UNA SOLA PUERTA, DESDE EL 14-AGO-2026 ═══
  *
- * - `accion()` — nombre `cobrar`, abre en «Cuota». Es la de todos los días y
- *   va en la tabla, en la ficha del cliente y en el expediente.
- * - `abonoDirecto()` — nombre `abonar_a_capital`, el MISMO modal abierto en
- *   «Abono». Es el trámite de la administradora y por eso conserva su botón
- *   propio en el expediente, con su permiso propio (R21).
+ * `accion()` — nombre `cobrar`. Abre en «Cuota» y va en la tabla, en la ficha
+ * del cliente y en el expediente. **Es la única.**
  *
- * Los dos nombres se conservaron a propósito: `CobrarDesdeElExpedienteTest` y
- * `AbonarACapitalTest` disparan las acciones por nombre, así que sirvieron de
- * red para la mudanza sin tocarles una línea.
+ * Hasta hoy habia una segunda, `abonoDirecto()`, que abria el MISMO modal en
+ * «Abono» y tenia su propio boton en el expediente. Lo saco Mauricio: «solo
+ * deberia estar el boton de registrar pago, ya que al presionarlo se puede
+ * hacer lo de abonar a capital». Tiene razon — dos puertas a la misma pantalla
+ * obligan a decidir ANTES de entrar algo que se decide adentro, y quien
+ * atiende duda si son dos tramites distintos.
+ *
+ * ⚠️ Sacar el boton NO aflojo el permiso de R21. La frontera nunca estuvo en
+ * el boton: esta en `modos()`, que solo ofrece «Abono» y «Ambas» a quien
+ * `puedeReprogramar()`. El receptor abre el mismo modal y ve una sola opcion.
+ *
+ * 🔴 Los tests que probaban esa frontera miraban si el BOTON estaba dibujado.
+ * Ahora preguntan por `seLePermiteAbonar()`, que es donde el permiso vive de
+ * verdad: un test que mira un boton pasa igual el dia que el boton se dibuja
+ * bien y el permiso de adentro se rompe.
+ *
+ * 🔴 Y el 23-ago-2026 cayo tambien el del PLANO, por lo mismo y a pedido de
+ * Mauricio: «solo deberia mostrar registrar un pago ya que al presionarlo se
+ * puede hacer abono a capital». Cuando este comentario se escribio, el acceso
+ * directo del panel se ganaba su lugar; despues el modal estreno el toggle de
+ * cuatro modos y el atajo paso a ser la misma puerta con una opcion MENOS.
+ * Un boton que existia por una razon puede dejar de tenerla sin que nadie lo
+ * mueva: lo que cambio fue el modal, no el boton.
  *
  * ⚠️ El 10-ago, más tarde, `AbonarACapitalTest` SÍ tuvo que cambiar: el abono
  * pasó de un `Select` de un lote a renglones por lote, y eso es un cambio
@@ -106,22 +123,6 @@ final readonly class CobrarUnPago
             ->color('success')
             ->visible(static fn (Venta $record): bool => self::seLePuedeCobrar($record)
                 && auth()->user()?->can('create', Recibo::class) === true);
-    }
-
-    /**
-     * El mismo modal, abierto en «Abono a capital» (R21).
-     *
-     * No es una copia: es `modal()` con otro valor inicial del toggle. Lo que
-     * cambia de verdad es el permiso, que acá es el caro.
-     */
-    public static function abonoDirecto(): Action
-    {
-        return self::modal('abonar_a_capital', ModoDeCobro::Abono)
-            ->label('Abonar a capital')
-            ->icon(Heroicon::OutlinedArrowTrendingDown)
-            ->color('primary')
-            ->visible(static fn (Venta $record): bool => self::seLePuedeCobrar($record)
-                && self::puedeReprogramar());
     }
 
     /**
@@ -151,22 +152,6 @@ final readonly class CobrarUnPago
             ->label('Registrar un pago')
             ->icon(Heroicon::OutlinedBanknotes)
             ->color('success');
-    }
-
-    /**
-     * 🔴 El abono desde el plano, con el MISMO dueño que en el expediente.
-     *
-     * R21 dice que el receptor cobra y la administradora reprograma. Que el
-     * botón salga en otra pantalla no cambia quién puede apretarlo: acá se
-     * verifica igual, y adentro de `->action()` —no solo al dibujarlo—,
-     * porque una acción de Filament se puede montar por URL.
-     */
-    public static function abonoDesdeElPlano(): Action
-    {
-        return self::modalDelPlano('abonarDesdeElPlano', ModoDeCobro::Abono)
-            ->label('Abonar a capital')
-            ->icon(Heroicon::OutlinedArrowTrendingDown)
-            ->color('primary');
     }
 
     /**
@@ -263,22 +248,6 @@ final readonly class CobrarUnPago
     }
 
     /**
-     * 🔴 «Este contrato lleva tres lotes», dicho antes de cobrar.
-     *
-     * El aviso que hace que esto se pueda abrir desde un lote sin mentir.
-     * El recibo es del CONTRATO —un contrato de varios lotes se cobra en
-     * uno solo, y por eso `Recibo::compromiso_id` queda vacío a
-     * propósito—, así que quien entró haciendo clic en RPS-C-009 tiene que
-     * enterarse de que el papel que va a imprimir también cubre C-010 y
-     * C-011. Sin esta línea, el mismo gesto significa dos cosas distintas
-     * según por dónde se haya entrado.
-     *
-     * En un contrato de un solo lote —la mayoría— no aparece nada: no hay
-     * nada que aclarar y una advertencia de más se deja de leer.
-     *
-     * @return list<Component>
-     */
-    /**
      * 🔴 QUE PAPEL VA A SALIR, DICHO ANTES DE COBRAR.
      *
      * ═══ DE DONDE SALIO ESTO ═══
@@ -341,12 +310,31 @@ final readonly class CobrarUnPago
             ];
         }
 
+        /*
+         * 🔴 EL CASO NORMAL NO DICE NADA — pedido de Mauricio, 23-ago-2026:
+         * «el proyecto ya se les entrega configurado, no hay necesidad de que
+         * se los diga».
+         *
+         * Y tiene razón: en un desarrollo que no factura, «Recibo interno» sale
+         * en TODOS los cobros, todos los días, y nunca cambia. Un renglón que
+         * siempre dice lo mismo no informa: enseña a saltear ese pedazo de la
+         * pantalla — y el día que ahí diga otra cosa, tampoco se va a leer.
+         *
+         * ⚠️ Lo que SÍ se queda son los dos casos en que el renglón dice algo
+         * que quien cobra no puede adivinar, y los dos están arriba de esta
+         * línea: el aviso de «configurado para facturar pero hoy no puede»
+         * —que nació de un ensayo real el 14-ago, donde el papel salió interno
+         * en silencio— y el de FACTURA con CAI, que además quema un
+         * correlativo del SAR. Sacar los tres habría sido obedecer de más.
+         */
+        if (! $puede) {
+            return [];
+        }
+
         return [
             Placeholder::make('papel')
                 ->label('Papel que sale')
-                ->content($puede
-                    ? sprintf('FACTURA con CAI — %s', $facturacion?->getAttribute('nombre') ?? '')
-                    : 'Recibo interno — comprobante de caja, sin valor fiscal')
+                ->content(sprintf('FACTURA con CAI — %s', $facturacion?->getAttribute('nombre') ?? ''))
                 ->columnSpanFull(),
         ];
     }
@@ -389,6 +377,22 @@ final readonly class CobrarUnPago
         ];
     }
 
+    /**
+     * 🔴 «Este contrato lleva tres lotes», dicho antes de cobrar.
+     *
+     * El aviso que hace que esto se pueda abrir desde un lote sin mentir.
+     * El recibo es del CONTRATO —un contrato de varios lotes se cobra en
+     * uno solo, y por eso `Recibo::compromiso_id` queda vacío a
+     * propósito—, así que quien entró haciendo clic en RPS-C-009 tiene que
+     * enterarse de que el papel que va a imprimir también cubre C-010 y
+     * C-011. Sin esta línea, el mismo gesto significa dos cosas distintas
+     * según por dónde se haya entrado.
+     *
+     * En un contrato de un solo lote —la mayoría— no aparece nada: no hay
+     * nada que aclarar y una advertencia de más se deja de leer.
+     *
+     * @return list<Component>
+     */
     private static function avisoDelContrato(Venta $venta): array
     {
         $codigos = $venta->compromisos()
@@ -475,6 +479,22 @@ final readonly class CobrarUnPago
         return auth()->user()?->can('reprogramar', Venta::class) === true;
     }
 
+    /**
+     * 🔴 La otra frontera, desde el 23-ago-2026: quién puede DESCONTAR.
+     *
+     * Aparte de `puedeReprogramar()` a propósito. Reprogramar reparte la misma
+     * deuda de otra forma y no le cuesta un centavo a la lotificadora; un
+     * pronto pago perdona saldo, sin tope. Son dos llaves y quien tiene una no
+     * tiene por qué tener la otra.
+     *
+     * Se pregunta en dos momentos —para armar el toggle y antes de ejecutar—
+     * y el segundo es el que protege.
+     */
+    private function puedeDarDescuento(): bool
+    {
+        return auth()->user()?->can('prontoPago', Venta::class) === true;
+    }
+
     // ─── El formulario ────────────────────────────────────────────────
 
     /**
@@ -516,6 +536,15 @@ final readonly class CobrarUnPago
              */
             $datos["abonar_{$id}"] = count($lotes) === 1;
             $datos["modalidad_{$id}"] = ModalidadDeReprogramacion::AcortarPlazo->value;
+
+            /*
+             * El pronto pago, por lo mismo que el abono: con un solo lote no
+             * hay nada que elegir. El descuento sí nace vacío siempre — cuánto
+             * se rebaja lo decide la lotificadora caso por caso, y proponer un
+             * número sería el sistema sugiriendo cuánta plata regalar.
+             */
+            $datos["saldar_{$id}"] = count($lotes) === 1;
+            $datos["descuento_{$id}"] = null;
         }
 
         return $datos;
@@ -571,10 +600,24 @@ final readonly class CobrarUnPago
                 ->visible(fn (Get $get): bool => $this->modoDeLaPantalla($get) === ModoDeCobro::Ambas)
                 ->helperText('Lo que entregó el cliente. Abajo marcás qué cuotas cubre; lo que sobre baja capital.'),
 
-            // ── Las cuotas: el mismo widget para «Cuota» y para «Ambas» ─
+            /*
+             * ── Las cuotas: el mismo widget para «Cuota» y para «Ambas» ─
+             *
+             * ⚠️ Se nombran los DOS modos, en positivo. Estuvo escrito como
+             * «distinto de Abono» hasta el 23-ago-2026, y el día que apareció
+             * un cuarto modo esa condición lo incluyó sola: el pronto pago
+             * abría con la sección de cuotas encima de la suya, marcada y con
+             * montos. No rompía nada —el Service ignora esos campos— pero
+             * pedía dos cosas a la vez y ninguna era la que se estaba
+             * haciendo. Una lista negra crece sola con cada modo nuevo.
+             */
             Section::make('¿Qué viene a pagar?')
                 ->description('Puede ser menos que la cuota: lo que falte se arrastra, sin recargo (R2).')
-                ->visible(fn (Get $get): bool => $this->modoDeLaPantalla($get) !== ModoDeCobro::Abono)
+                ->visible(fn (Get $get): bool => in_array(
+                    $this->modoDeLaPantalla($get),
+                    [ModoDeCobro::Cuota, ModoDeCobro::Ambas],
+                    true,
+                ))
                 ->schema($this->renglonesDeCobro()),
 
             /*
@@ -592,6 +635,19 @@ final readonly class CobrarUnPago
                 ->description('El monto de cada lote lo escribís vos: el sistema no reparte nada solo (R21).')
                 ->visible(fn (Get $get): bool => $this->modoDeLaPantalla($get) === ModoDeCobro::Abono)
                 ->schema($this->renglonesDeAbono()),
+
+            /*
+             * ── El pronto pago, desde el 23-ago-2026 ───────────────────
+             *
+             * Se marca el lote, se escribe CUANTO se le descontó, y abajo sale
+             * lo que el cliente tiene que entregar. El monto no se teclea: es
+             * el saldo menos el descuento, y hacer que quien atiende lo calcule
+             * a mano con el cliente enfrente es pedir un error de mil lempiras.
+             */
+            Section::make('¿Qué lotes salda?')
+                ->description('Cada lote marcado queda en cero. Escribí el descuento que se le dio; el resto lo entrega el cliente.')
+                ->visible(fn (Get $get): bool => $this->modoDeLaPantalla($get) === ModoDeCobro::ProntoPago)
+                ->schema($this->renglonesDeProntoPago()),
 
             /*
              * ── «Ambas» sigue contra UN lote ───────────────────────────
@@ -654,6 +710,17 @@ final readonly class CobrarUnPago
                     ? $this->efectoDeAmbas($get)
                     : $this->efectoDeCadaLote($get)),
 
+            /*
+             * §10.8 otra vez: el número que el cliente tiene que sacar de la
+             * cartera, ANTES de confirmar. Es el único de todo el modal que se
+             * dice en voz alta con el cliente enfrente.
+             */
+            Placeholder::make('lo_que_entrega')
+                ->label('Cuánto tiene que entregar')
+                ->columnSpanFull()
+                ->visible(fn (Get $get): bool => $this->modoDeLaPantalla($get) === ModoDeCobro::ProntoPago)
+                ->content(fn (Get $get): HtmlString => $this->loQueEntrega($get)),
+
             DatePicker::make('fecha')
                 ->label('Fecha del pago')
                 ->required()
@@ -685,9 +752,13 @@ final readonly class CobrarUnPago
                 ->required()
                 ->rows(2)
                 ->maxLength(500)
-                ->placeholder('Abono a capital solicitado por el cliente')
-                ->visible(fn (Get $get): bool => $this->modoDeLaPantalla($get)->reprograma())
-                ->helperText('Queda con tu usuario y la fecha. El mes que viene alguien va a preguntar por qué cambió el número (R21).'),
+                ->placeholder(fn (Get $get): string => $this->modoDeLaPantalla($get)->perdonaSaldo()
+                    ? 'Cliente de años, cancela y pidió rebaja'
+                    : 'Abono a capital solicitado por el cliente')
+                ->visible(fn (Get $get): bool => $this->modoDeLaPantalla($get)->exigeMotivo())
+                ->helperText(fn (Get $get): string => $this->modoDeLaPantalla($get)->perdonaSaldo()
+                    ? 'Queda con tu usuario y la fecha, en el expediente. Dentro de dos años va a ser lo único que conteste por qué a este cliente se le descontó.'
+                    : 'Queda con tu usuario y la fecha. El mes que viene alguien va a preguntar por qué cambió el número (R21).'),
 
             Textarea::make('observaciones')
                 ->label('Observaciones')
@@ -704,12 +775,20 @@ final readonly class CobrarUnPago
     {
         $opciones = [ModoDeCobro::Cuota->value => ModoDeCobro::Cuota->etiqueta()];
 
-        if (! self::puedeReprogramar()) {
-            return $opciones;
+        /*
+         * ⚠️ Sin `return` temprano desde el 23-ago-2026: son DOS permisos
+         * independientes. Con la salida anticipada, quien tuviera
+         * `ProntoPago:Venta` y no `Reprogramar:Venta` no vería su opción — un
+         * permiso concedido que la pantalla se comía en silencio.
+         */
+        if (self::puedeReprogramar()) {
+            $opciones[ModoDeCobro::Abono->value] = ModoDeCobro::Abono->etiqueta();
+            $opciones[ModoDeCobro::Ambas->value] = ModoDeCobro::Ambas->etiqueta();
         }
 
-        $opciones[ModoDeCobro::Abono->value] = ModoDeCobro::Abono->etiqueta();
-        $opciones[ModoDeCobro::Ambas->value] = ModoDeCobro::Ambas->etiqueta();
+        if ($this->puedeDarDescuento()) {
+            $opciones[ModoDeCobro::ProntoPago->value] = ModoDeCobro::ProntoPago->etiqueta();
+        }
 
         return $opciones;
     }
@@ -902,6 +981,93 @@ final readonly class CobrarUnPago
         return $renglones;
     }
 
+    /**
+     * Un renglón por lote que debe: la casilla y su descuento (23-ago-2026).
+     *
+     * ⚠️ NO hay campo de monto, y eso es lo que hace usable la pantalla: lo
+     * que el cliente entrega es el saldo menos el descuento, y hacer que quien
+     * atiende lo reste de cabeza con el cliente enfrente es pedir un error de
+     * mil lempiras. El número sale abajo, en «Cuánto tiene que entregar».
+     *
+     * @return list<Component>
+     */
+    private function renglonesDeProntoPago(): array
+    {
+        $lotes = $this->lotesQueDeben();
+
+        if ($lotes === []) {
+            return [
+                Placeholder::make('sin_saldo_pronto_pago')
+                    ->hiddenLabel()
+                    ->content('Este expediente no debe nada: no hay nada que saldar.'),
+            ];
+        }
+
+        $renglones = [];
+
+        foreach ($lotes as $lote) {
+            $id = (int) $lote->getKey();
+
+            $renglones[] = Grid::make(12)->schema([
+                Checkbox::make("saldar_{$id}")
+                    ->label(sprintf(
+                        '%s — debe %s',
+                        (string) $lote->lote?->getAttribute('codigo'),
+                        $this->saldoDe($lote)->formateado(),
+                    ))
+                    ->live()
+                    ->columnSpan(7),
+
+                MontoField::make("descuento_{$id}", 'Descuento')
+                    ->hiddenLabel()
+                    ->live(onBlur: true)
+                    ->visible(fn (Get $get): bool => $get("saldar_{$id}") === true)
+                    ->helperText('Sin rebaja, dejalo en 0.')
+                    ->columnSpan(5),
+            ]);
+        }
+
+        return $renglones;
+    }
+
+    /**
+     * Los lotes marcados del pronto pago, en el formato que pide el Service.
+     *
+     * ⚠️ Un descuento vacío es CERO, no «saltear este lote»: quien marcó la
+     * casilla quiere saldarlo, con rebaja o sin ella. Es la diferencia con el
+     * abono, donde un monto vacío sí es un renglón que no existe.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return list<array{lote: Compromiso, descuento: Monto}>
+     */
+    private function renglonesDeProntoPagoTecleados(array $data): array
+    {
+        $renglones = [];
+
+        foreach ($this->lotesQueDeben() as $lote) {
+            $id = (int) $lote->getKey();
+
+            if (($data["saldar_{$id}"] ?? false) !== true) {
+                continue;
+            }
+
+            $crudo = $data["descuento_{$id}"] ?? null;
+            $texto = is_string($crudo) ? trim($crudo) : '';
+
+            // El mismo `preg_match` que el abono: el borde del dinero no se
+            // confía de la pantalla, aunque la validación ya lo impida.
+            $renglones[] = [
+                'lote'      => $lote,
+                'descuento' => preg_match('/^\d+(\.\d{1,2})?$/', $texto) === 1
+                    ? new Monto($texto)
+                    : Monto::cero(),
+            ];
+        }
+
+        return $renglones;
+    }
+
     // ─── Lo que se ejecuta ────────────────────────────────────────────
 
     /**
@@ -928,11 +1094,28 @@ final readonly class CobrarUnPago
             return;
         }
 
+        /*
+         * 🔴 El mismo borde, para la otra llave (23-ago-2026). Un descuento es
+         * plata que la lotificadora deja de cobrar, y `modo` sigue siendo un
+         * campo del formulario.
+         */
+        if ($modo->perdonaSaldo() && ! $this->puedeDarDescuento()) {
+            Notification::make()
+                ->title('No se registró el movimiento')
+                ->body('Dar un descuento por pronto pago es de la administración. Este pago se puede registrar como cuota.')
+                ->danger()
+                ->persistent()
+                ->send();
+
+            return;
+        }
+
         try {
             $recibos = match ($modo) {
-                ModoDeCobro::Cuota => $this->soloLaCuota($data),
-                ModoDeCobro::Abono => $this->soloElAbono($data),
-                ModoDeCobro::Ambas => $this->laCuotaYElAbono($data),
+                ModoDeCobro::Cuota      => $this->soloLaCuota($data),
+                ModoDeCobro::Abono      => $this->soloElAbono($data),
+                ModoDeCobro::Ambas      => $this->laCuotaYElAbono($data),
+                ModoDeCobro::ProntoPago => $this->soloElProntoPago($data),
             };
         } catch (GrupoOlympoException $error) {
             // El mensaje del dominio ya está escrito para quien atiende.
@@ -954,6 +1137,16 @@ final readonly class CobrarUnPago
          * código del lote y no por el concepto: un abono que no alcanzó a
          * reprogramar nada también se emite como `cuota`.
          */
+        // El pronto pago no reprograma nada, así que su aviso es otro: dice
+        // cuánto entró y cuánto se perdonó.
+        if ($modo->perdonaSaldo()) {
+            foreach ($recibos as $recibo) {
+                $this->avisarDelProntoPago($recibo);
+            }
+
+            return;
+        }
+
         $codigoDelAbono = $modo === ModoDeCobro::Ambas
             ? (string) $this->loteElegido($data)->lote()->value('codigo')
             : null;
@@ -1001,6 +1194,25 @@ final readonly class CobrarUnPago
             venta: $this->venta,
             cliente: $this->quienPaga(),
             renglones: $this->renglonesDeAbonoTecleados($data),
+            motivo: is_string($data['motivo'] ?? null) ? $data['motivo'] : '',
+            forma: FormaDePago::from((string) $data['forma_pago']),
+            referencia: is_string($data['referencia'] ?? null) ? $data['referencia'] : null,
+            fecha: CarbonImmutable::parse((string) $data['fecha']),
+            observaciones: is_string($data['observaciones'] ?? null) ? $data['observaciones'] : null,
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     *
+     * @return list<Recibo>
+     */
+    private function soloElProntoPago(array $data): array
+    {
+        return app(RegistroDePagos::class)->prontoPago(
+            venta: $this->venta,
+            cliente: $this->quienPaga(),
+            renglones: $this->renglonesDeProntoPagoTecleados($data),
             motivo: is_string($data['motivo'] ?? null) ? $data['motivo'] : '',
             forma: FormaDePago::from((string) $data['forma_pago']),
             referencia: is_string($data['referencia'] ?? null) ? $data['referencia'] : null,
@@ -1152,6 +1364,147 @@ final readonly class CobrarUnPago
         return new HtmlString($avisos === []
             ? $html
             : $html.'<p class="olympo-nota">'.e(implode(' ', $avisos)).'</p>');
+    }
+
+    /**
+     * El número que se dice en voz alta: cuánto saca el cliente de la cartera.
+     *
+     * ═══ POR QUE ESTO NO ES UN ADORNO ═══
+     *
+     * Es el único dato del modal que NO se teclea y que sin embargo decide la
+     * operación. Quien atiende marca dos lotes, escribe dos descuentos y tiene
+     * que decir un número — sin esta línea lo calcularía de cabeza, con el
+     * cliente esperando, y un error acá no lo atrapa ningún CHECK: el pago
+     * entra por lo que se haya tecleado.
+     *
+     * El aviso del descuento que se pasa del saldo también sale acá: el
+     * Service lo rechaza igual, pero verlo antes de apretar es la diferencia
+     * entre corregir un número y explicar por qué no se pudo cobrar.
+     */
+    private function loQueEntrega(Get $get): HtmlString
+    {
+        /** @var list<array{codigo: string, saldo: Monto, descuento: Monto}> $marcados */
+        $marcados = [];
+
+        foreach ($this->lotesQueDeben() as $lote) {
+            $id = (int) $lote->getKey();
+
+            if ($get("saldar_{$id}") !== true) {
+                continue;
+            }
+
+            $marcados[] = [
+                'codigo'    => (string) $lote->lote?->getAttribute('codigo'),
+                'saldo'     => $this->saldoDe($lote),
+                'descuento' => $this->montoTecleado($get, "descuento_{$id}") ?? Monto::cero(),
+            ];
+        }
+
+        $resumen = self::resumenDeProntoPago($marcados);
+
+        if ($resumen['renglones'] === []) {
+            return new HtmlString($resumen['avisos'] === []
+                ? '<p class="olympo-vacio">Marcá los lotes que se saldan.</p>'
+                : '<p class="olympo-vacio">'.e(implode(' ', $resumen['avisos'])).'</p>');
+        }
+
+        $filas = '';
+
+        foreach ($resumen['renglones'] as $renglon) {
+            $filas .= sprintf(
+                '<li><span class="meses">%s — debe %s%s</span><span class="monto">%s</span></li>',
+                e($renglon['codigo']),
+                e($renglon['saldo']->formateado()),
+                $renglon['descuento']->esCero() ? '' : e(sprintf(' · descuento %s', $renglon['descuento']->formateado())),
+                e($renglon['entrega']->formateado()),
+            );
+        }
+
+        $html = '<ul class="olympo-escalera">'.$filas.'</ul>';
+
+        if (! $resumen['total'] instanceof Monto) {
+            return new HtmlString(
+                $html
+                .'<p class="olympo-nota">'.e(implode(' ', $resumen['avisos'])).'</p>'
+                .'<p class="olympo-nota">Corregí ese descuento: hasta entonces no hay monto que cobrar, porque el pago se rechaza entero.</p>'
+            );
+        }
+
+        return new HtmlString(
+            $html
+            .sprintf(
+                '<div class="olympo-total"><span>El cliente entrega</span><span>%s</span></div>',
+                e($resumen['total']->formateado()),
+            )
+        );
+    }
+
+    /**
+     * La cuenta del pronto pago, sin una sola línea de HTML.
+     *
+     * ═══ 🔴🔴 LA REGLA: SI UN LOTE ESTA MAL, NO HAY TOTAL ═══
+     *
+     * 23-ago-2026, encontrado mirando la pantalla. El renglón cuyo descuento
+     * se pasa del saldo se saltea, así que el total sumaba SOLO los lotes
+     * buenos: con dos lotes marcados y el primero pasado de rosca, el modal
+     * decía en negrita «El cliente entrega L 307,000.00» —el saldo del OTRO
+     * lote— y abajo, en letra chica, que el pago se iba a rechazar.
+     *
+     * Los dos renglones eran ciertos por separado y juntos mentían. El Service
+     * rechaza el movimiento **ENTERO**: esa plata no la iba a cobrar nadie. Y
+     * ese es el único renglón del modal que se dice EN VOZ ALTA con el cliente
+     * enfrente — quien atiende lee el negrita, no la nota de abajo.
+     *
+     * Por eso `total` es `null` cuando hay un aviso, y no un número parcial:
+     * **si la operación es todo-o-nada aguas abajo, el resumen también.**
+     *
+     * ═══ POR QUE ESTO ES PUBLICO Y ESTATICO ═══
+     *
+     * Porque es la única forma de PROBARLO. El resumen en vivo se dibuja en un
+     * modal de Filament, y `assertSee()` **no llega a ver un modal** — el
+     * intento con `mountAction()` dejó tres tests en rojo. Sacada la cuenta
+     * del HTML, se prueba con una llamada y sin navegador. Ver
+     * [[el-resumen-en-vivo-del-modal]].
+     *
+     * @param list<array{codigo: string, saldo: Monto, descuento: Monto}> $lotes
+     *
+     * @return array{renglones: list<array{codigo: string, saldo: Monto, descuento: Monto, entrega: Monto}>, avisos: list<string>, total: Monto|null}
+     */
+    public static function resumenDeProntoPago(array $lotes): array
+    {
+        $renglones = [];
+        $avisos = [];
+        $total = Monto::cero();
+
+        foreach ($lotes as $lote) {
+            // Antes de restar: `Monto::restar()` no admite negativos, y ese es
+            // justamente el caso que hay que avisar en vez de reventar.
+            if ($lote['descuento']->mayorQue($lote['saldo'])) {
+                $avisos[] = sprintf(
+                    'El descuento de %s se pasa de lo que ese lote debe (%s): el pago se va a rechazar.',
+                    $lote['codigo'],
+                    $lote['saldo']->formateado(),
+                );
+
+                continue;
+            }
+
+            $entrega = $lote['saldo']->restar($lote['descuento']);
+            $total = $total->sumar($entrega);
+
+            $renglones[] = [
+                'codigo'    => $lote['codigo'],
+                'saldo'     => $lote['saldo'],
+                'descuento' => $lote['descuento'],
+                'entrega'   => $entrega,
+            ];
+        }
+
+        return [
+            'renglones' => $renglones,
+            'avisos'    => $avisos,
+            'total'     => $avisos === [] ? $total : null,
+        ];
     }
 
     /**
@@ -1810,6 +2163,33 @@ final readonly class CobrarUnPago
                 $cuotas === 1 ? 'cuota' : 'cuotas',
                 $lotes,
                 $lotes === 1 ? 'lote' : 'lotes',
+            ))
+            ->success()
+            ->persistent()
+            ->actions([ImprimirRecibo::enNotificacion($recibo)])
+            ->send();
+    }
+
+    /**
+     * El aviso del pronto pago: cuánto entró y cuánto se perdonó.
+     *
+     * Los DOS números, siempre. El papel dice uno solo —lo que entró— y quien
+     * atiende necesita confirmar en voz alta el otro antes de que el cliente
+     * se vaya: es lo único que se acordó de palabra.
+     */
+    private function avisarDelProntoPago(Recibo $recibo): void
+    {
+        $descuento = $recibo->capitalCondonado();
+        $lotes = count($recibo->codigosDeLotes());
+
+        Notification::make()
+            ->title("Recibo {$recibo->folio()}")
+            ->body(sprintf(
+                '%d %s. Entraron %s%s.',
+                $lotes,
+                $lotes === 1 ? 'lote saldado' : 'lotes saldados',
+                $recibo->montoTotal()->formateado(),
+                $descuento->esCero() ? '' : sprintf(', con %s de descuento', $descuento->formateado()),
             ))
             ->success()
             ->persistent()

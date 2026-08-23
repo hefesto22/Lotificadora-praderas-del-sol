@@ -51,15 +51,34 @@ class RecibosTable
                  * arriba en la primera columna le cambiaria el punto de
                  * referencia a todo el mundo.
                  */
+                /*
+                 * 🔴 «ANULADO» vive ACA desde el 23-ago-2026, y antes era una
+                 * columna «Estado» propia.
+                 *
+                 * Un recibo anulado NO se esconde de la lista: su número sigue
+                 * en la serie y el papel sigue en la mano de alguien. Buscar el
+                 * 000123 y no encontrarlo sería peor que verlo tachado. Eso no
+                 * cambió — cambió DONDE se dice.
+                 *
+                 * La columna estaba VACIA en casi todas las filas: hoy hay 215
+                 * recibos y cero anulados, así que era un encabezado y una
+                 * franja de ancho diciendo nada 215 veces para decir algo una.
+                 * Acá ocupa cero cuando no aplica, y cuando aplica se lee
+                 * mejor: el folio en rojo con la palabra pegada abajo, que es
+                 * como se mira un talonario.
+                 *
+                 * El motivo va en la misma línea porque es lo único que
+                 * contesta la pregunta que sigue —«¿y por qué?»— sin abrir la
+                 * ficha.
+                 */
                 TextColumn::make('numero')
                     ->label('Recibo')
                     ->weight('bold')
                     ->searchable()
                     ->sortable()
                     ->formatStateUsing(static fn (Recibo $record): string => $record->folio())
-                    ->description(static fn (Recibo $record): ?string => $record->esFactura()
-                        ? 'Factura '.$record->numeroDelPapel()
-                        : null),
+                    ->color(static fn (Recibo $record): ?string => $record->estaAnulado() ? 'danger' : null)
+                    ->description(static fn (Recibo $record): ?string => self::debajoDelFolio($record)),
 
                 /*
                  * Buscable aparte y no adentro de la columna de arriba: quien
@@ -72,23 +91,6 @@ class RecibosTable
                     ->searchable()
                     ->toggleable(isToggledHiddenByDefault: true)
                     ->placeholder('—'),
-
-                /*
-                 * Un recibo anulado NO se esconde de la lista: su número sigue
-                 * en la serie y el papel sigue en la mano de alguien. Buscar
-                 * el 000123 y no encontrarlo sería peor que verlo tachado.
-                 */
-                TextColumn::make('anulado_el')
-                    ->label('Estado')
-                    ->badge()
-                    ->color('danger')
-                    ->state(static fn (Recibo $record): ?string => $record->estaAnulado() ? 'ANULADO' : null)
-                    ->tooltip(static function (Recibo $record): ?string {
-                        $motivo = $record->getAttribute('motivo_anulacion');
-
-                        return is_string($motivo) ? $motivo : null;
-                    })
-                    ->placeholder(''),
 
                 TextColumn::make('fecha')
                     ->label('Fecha')
@@ -112,7 +114,21 @@ class RecibosTable
                         : null)
                     // Sin acentos: ver BuscarNombre.
                     ->searchable(query: BuscarNombre::delCliente())
-                    ->wrap()
+                    /*
+                     * 🔴 SIN `wrap()` desde el 23-ago-2026. Con él, «ELVA MARINA
+                     * ORTIS SANTAMARIA» se partía en CUATRO renglones y esa fila
+                     * sola medía lo que tres: en la pantalla entraban ocho
+                     * recibos. Los nombres de esta cartera son de cuatro
+                     * palabras casi siempre, así que no era el caso raro.
+                     *
+                     * `limit()` y no un ancho fijo: el nombre completo sigue
+                     * estando —el tooltip lo muestra entero— y la lista vuelve a
+                     * ser una lista.
+                     */
+                    ->limit(26)
+                    ->tooltip(static fn (Recibo $record): ?string => mb_strlen($record->nombreDelPapel()) > 26
+                        ? $record->nombreDelPapel()
+                        : null)
                     ->placeholder('—'),
 
                 TextColumn::make('venta.numero_contrato')
@@ -309,5 +325,29 @@ class RecibosTable
         }
 
         return $opciones;
+    }
+
+    /**
+     * La segunda línea del folio: la anulación primero, la factura después.
+     *
+     * Las dos pueden estar juntas —un recibo anulado que había salido con
+     * CAI— y en ese orden: lo que cambia si el papel vale o no vale se lee
+     * antes que su numeración.
+     */
+    private static function debajoDelFolio(Recibo $record): ?string
+    {
+        $renglones = [];
+
+        if ($record->estaAnulado()) {
+            $motivo = $record->getAttribute('motivo_anulacion');
+
+            $renglones[] = 'ANULADO'.(is_string($motivo) && $motivo !== '' ? ' — '.$motivo : '');
+        }
+
+        if ($record->esFactura()) {
+            $renglones[] = 'Factura '.$record->numeroDelPapel();
+        }
+
+        return $renglones === [] ? null : implode(' · ', $renglones);
     }
 }

@@ -11,6 +11,8 @@ use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\RegistroDeVentas;
 use App\Filament\Resources\Ventas\Pages\ViewVenta;
 use App\Filament\Resources\Ventas\RelationManagers\ReprogramacionesRelationManager;
+use App\Filament\Support\CobrarUnPago;
+use App\Filament\Support\ModoDeCobro;
 use App\Models\Bloque;
 use App\Models\Cliente;
 use App\Models\Cuota;
@@ -73,6 +75,10 @@ beforeEach(function (): void {
         $id = $this->renglon->getKey();
 
         return array_merge([
+            // Desde el 14-ago-2026 el abono entra por el MISMO modal que el
+            // cobro: el boton propio se quito porque el primer control del
+            // modal ya pregunta que es este pago.
+            'modo'            => ModoDeCobro::Abono->value,
             "abonar_{$id}"    => true,
             "abono_{$id}"     => '75000.00',
             "modalidad_{$id}" => ModalidadDeReprogramacion::AcortarPlazo->value,
@@ -85,7 +91,7 @@ beforeEach(function (): void {
 
 test('el abono entra por la pantalla y reescribe el plan', function (): void {
     ($this->expediente)()
-        ->callAction('abonar_a_capital', ($this->datos)())
+        ->callAction('cobrar', ($this->datos)())
         ->assertHasNoActionErrors();
 
     // 300,000 − 75,000 = 225,000, que en cuotas de 25,000 son 9 exactas.
@@ -102,7 +108,7 @@ test('el abono entra por la pantalla y reescribe el plan', function (): void {
 */
 test('la modalidad que elige el cliente llega hasta el plan', function (): void {
     ($this->expediente)()
-        ->callAction('abonar_a_capital', ($this->datos)([
+        ->callAction('cobrar', ($this->datos)([
             'abono_'.$this->renglon->getKey()     => '60000.00',
             'modalidad_'.$this->renglon->getKey() => ModalidadDeReprogramacion::BajarCuota->value,
         ]))
@@ -128,7 +134,7 @@ test('la modalidad que elige el cliente llega hasta el plan', function (): void 
 */
 test('sin motivo no pasa del formulario', function (): void {
     ($this->expediente)()
-        ->callAction('abonar_a_capital', ($this->datos)(['motivo' => '']))
+        ->callAction('cobrar', ($this->datos)(['motivo' => '']))
         ->assertHasActionErrors(['motivo']);
 
     expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0)
@@ -142,7 +148,7 @@ test('sin motivo no pasa del formulario', function (): void {
 */
 test('un abono que supera el saldo no rompe la pantalla', function (): void {
     ($this->expediente)()
-        ->callAction('abonar_a_capital', ($this->datos)(['abono_'.$this->renglon->getKey() => '999999.00']))
+        ->callAction('cobrar', ($this->datos)(['abono_'.$this->renglon->getKey() => '999999.00']))
         ->assertHasNoActionErrors();
 
     expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0)
@@ -161,7 +167,7 @@ test('si no alcanza para lo vencido se registra como pago normal', function (): 
         ->update(['fecha_vencimiento' => today()->subMonths(2)->toDateString()]);
 
     ($this->expediente)()
-        ->callAction('abonar_a_capital', ($this->datos)(['abono_'.$this->renglon->getKey() => '50000.00']))
+        ->callAction('cobrar', ($this->datos)(['abono_'.$this->renglon->getKey() => '50000.00']))
         ->assertHasNoActionErrors();
 
     expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(1)
@@ -169,15 +175,29 @@ test('si no alcanza para lo vencido se registra como pago normal', function (): 
         ->and(Cuota::query()->where('compromiso_id', $this->renglon->getKey())->count())->toBe(12);
 });
 
-describe('Quién ve el botón', function (): void {
-    test('la administradora lo ve', function (): void {
-        ($this->expediente)()->assertActionVisible('abonar_a_capital');
+/*
+| ═══ QUIEN PUEDE ABONAR — 14-ago-2026 ═══
+|
+| Estos tests miraban si el BOTON «Abonar a capital» estaba dibujado. Ese
+| boton ya no existe: el abono entra por el mismo modal que el cobro, donde el
+| primer control ofrece las tres opciones.
+|
+| 🔴 Y por eso ahora preguntan donde el permiso VIVE de verdad, que es lo que
+| habia que probar desde el principio: `CobrarUnPago::seLePermiteAbonar()`.
+| Un test que mira un boton pasa igual el dia que el boton se dibuja bien y el
+| permiso de adentro se rompe.
+*/
+describe('Quién puede abonar a capital', function (): void {
+    test('la administradora puede', function (): void {
+        ($this->expediente)()->assertActionVisible('cobrar');
+
+        expect(CobrarUnPago::seLePermiteAbonar())->toBeTrue();
     });
 
     /*
     | §9.E3 en la práctica, y la frontera que R21 dibuja: el receptor cobra
-    | —tiene `Create:Recibo` y ve el botón de pagar— pero NO reescribe un plan
-    | de cuotas. Los dos botones emiten un recibo; solo uno cambia el contrato.
+    | —tiene `Create:Recibo`— pero NO reescribe un plan de cuotas. Abre el
+    | mismo modal y ve una sola opción.
     */
     test('el receptor cobra pero no abona a capital', function (): void {
         $receptor = rol('receptor_de_prueba');
@@ -190,22 +210,22 @@ describe('Quién ve el botón', function (): void {
 
         $this->actingAs($user);
 
-        ($this->expediente)()
-            ->assertActionVisible('cobrar')
-            ->assertActionHidden('abonar_a_capital');
+        ($this->expediente)()->assertActionVisible('cobrar');
+
+        expect(CobrarUnPago::seLePermiteAbonar())->toBeFalse();
     });
 
     /*
     | Un expediente cerrado no recibe dinero. El Service lo rechaza igual, pero
     | ofrecer el botón sería invitar a un movimiento que no se puede hacer.
     */
-    test('un expediente rescindido no lo muestra', function (): void {
+    test('un expediente rescindido no ofrece cobrar', function (): void {
         $this->venta->update([
             'estado'     => EstadoVenta::Rescindida,
             'cerrada_el' => today(),
         ]);
 
-        ($this->expediente)()->assertActionHidden('abonar_a_capital');
+        ($this->expediente)()->assertActionHidden('cobrar');
     });
 });
 

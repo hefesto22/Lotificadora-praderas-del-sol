@@ -11,6 +11,7 @@ use App\Filament\Resources\Users\Pages\ViewUser;
 use App\Filament\Resources\Users\Schemas\UserForm;
 use App\Filament\Resources\Users\Schemas\UserInfolist;
 use App\Filament\Resources\Users\Tables\UsersTable;
+use App\Filament\Support\Menu;
 use App\Models\User;
 use BackedEnum;
 use BezhanSalleh\FilamentShield\Support\Utils;
@@ -29,7 +30,7 @@ class UserResource extends Resource
     protected static ?string $model = User::class;
 
     #[Override]
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUserCircle;
 
     #[Override]
     protected static ?string $recordTitleAttribute = 'name';
@@ -46,7 +47,7 @@ class UserResource extends Resource
     #[Override]
     public static function getNavigationGroup(): ?string
     {
-        return 'Administración';
+        return Menu::ADMINISTRACION;
     }
 
     #[Override]

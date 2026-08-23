@@ -96,10 +96,50 @@ class RoleSeeder extends Seeder
 
         $this->administradora();
         $this->receptor();
+        $this->soloDelSuperAdmin();
 
         resolve(PermissionRegistrar::class)->forgetCachedPermissions();
 
         $this->command?->info('✓ Roles listos: '.implode(', ', Roles::operativos()));
+    }
+
+    /**
+     * 🔴 Permisos que EXISTEN y no son de nadie todavía — 23-ago-2026.
+     *
+     * Pedido de Mauricio: «esos botones de importar y acomodar deben tener su
+     * permiso personalizado en shield para otorgarlos a quien yo quiera; por
+     * el momento solo super admin debe poder verlos ya que solo yo cargaré
+     * proyectos».
+     *
+     * ═══ POR QUE HACE FALTA CREARLOS SI NO SE ASIGNAN ═══
+     *
+     * `Permission::findOrCreate()` es lo único que hace nacer la fila. Un
+     * permiso que ningún rol reclama **no existe en la base**, y entonces no
+     * aparece en la pantalla de Roles: no habría dónde otorgarlo el día que
+     * él quiera dárselo a alguien. Por eso se nombran acá aunque la lista de
+     * la administradora y la del receptor no los toquen.
+     *
+     * super_admin los recibe igual: `shield:super-admin` —y
+     * `olympo:sembrar-permisos`— le sincronizan TODOS los que haya en la base.
+     *
+     * ⚠️ NO van en `RECURSOS`: ese cruce le da al receptor `ViewAny` y `View`
+     * de todo lo que lista, y acá el punto es exactamente el contrario.
+     *
+     * 🔴 Y como todo permiso nombrado: `composer ci` solo lo siembra en la
+     * base de TESTS. En la máquina de Mauricio hay que correr
+     * `php artisan olympo:sembrar-permisos` o los botones no van a
+     * desaparecer — ni a poder darse. Ver [[un-permiso-nuevo-no-aparece-solo]].
+     */
+    private function soloDelSuperAdmin(): void
+    {
+        /*
+         * Importar un DXF reescribe la geometría del desarrollo entero y
+         * acomodar lo redibuja de cero. Ninguna de las dos toca plata ni
+         * estados —los lotes vendidos siguen vendidos—, pero las dos cambian
+         * el mapa que el vendedor le muestra al cliente, y eso se hace una vez
+         * por proyecto y con el plano del topógrafo al lado.
+         */
+        $this->permisos(['ImportarPlano', 'AcomodarPlano'], ['Proyecto']);
     }
 
     private function administradora(): void
@@ -118,6 +158,23 @@ class RoleSeeder extends Seeder
          */
         $permisos = [...$permisos, ...$this->permisos(['Reprogramar'], ['Venta'])];
         $permisos = [...$permisos, ...$this->permisos(['ViewAny', 'View'], ['Reprogramacion'])];
+
+        /*
+         * Pasarle el expediente a otra persona (cesión de derechos, 22-ago-2026).
+         * Se nombra solo por lo mismo que `Reprogramar`: `Update:Venta` es
+         * corregir un dato, y esto cambia de quién es el contrato. El receptor
+         * cobra y no decide a nombre de quién queda un expediente firmado.
+         */
+        $permisos = [...$permisos, ...$this->permisos(['CambiarTitular'], ['Venta'])];
+
+        /*
+         * Saldar un lote perdonando parte del saldo: el pronto pago
+         * (23-ago-2026). Aparte de `Reprogramar` a propósito: reprogramar
+         * reparte la misma deuda distinto y no le cuesta nada a la
+         * lotificadora; esto perdona plata, sin tope. El receptor cobra lo que
+         * el contrato dice — no decide cuánto se deja de cobrar.
+         */
+        $permisos = [...$permisos, ...$this->permisos(['ProntoPago'], ['Venta'])];
 
         /*
          * R14: prorrogar un apartado y marcar la devolucion de su seña. Los
@@ -167,6 +224,16 @@ class RoleSeeder extends Seeder
          */
         $permisos = [...$permisos, ...$this->permisos(['ViewAny', 'View', 'Create', 'Update', 'Delete'], ['Gasto'])];
 
+        /*
+         * La pantalla «Por cobrar hoy» y el marcar que ya se llamó
+         * (23-ago-2026). Se nombra sola porque NO es un Resource: es una
+         * página, y `shield:generate` solo mira Resources.
+         *
+         * La tiene también el receptor —ver `receptor()`—: es la única
+         * pantalla que los dos comparten como trabajo, no como consulta.
+         */
+        $permisos = [...$permisos, ...$this->permisos(['Cobranza'], ['Venta'])];
+
         $this->rol(Roles::ADMINISTRADORA)->syncPermissions($permisos);
     }
 
@@ -193,6 +260,14 @@ class RoleSeeder extends Seeder
          * del mes pasado, y quien atiende necesita poder explicarlo.
          */
         $permisos = [...$permisos, ...$this->permisos(['ViewAny', 'View'], ['Reprogramacion'])];
+
+        /*
+         * Llamar a cobrar es su trabajo tanto como recibir el dinero: el
+         * receptor es quien tiene el teléfono y quien atiende al cliente que
+         * llega. `Cobranza:Venta` abre la lista del día y deja registrar la
+         * llamada — no crea ni cambia nada del contrato.
+         */
+        $permisos = [...$permisos, ...$this->permisos(['Cobranza'], ['Venta'])];
 
         $this->rol(Roles::RECEPTOR)->syncPermissions($permisos);
     }

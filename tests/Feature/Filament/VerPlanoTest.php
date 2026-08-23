@@ -8,8 +8,11 @@ use App\Filament\Resources\Proyectos\ProyectoResource;
 use App\Models\Bloque;
 use App\Models\Lote;
 use App\Models\Proyecto;
+use App\Support\Roles;
+use Database\Seeders\RoleSeeder;
 use Illuminate\Http\UploadedFile;
 use Livewire\Livewire;
+use Spatie\Permission\Models\Permission;
 
 beforeEach(function (): void {
     actingAsAdmin();
@@ -158,4 +161,80 @@ test('sin vara propia, importar cae en la vara del sistema', function (): void {
 
     expect(Lote::query()->where('bloque_id', $this->bloque->getKey())->value('area_varas'))
         ->toBe('100.0000');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Quién puede cargar el plano — 23-ago-2026
+|--------------------------------------------------------------------------
+| Pedido de Mauricio: «esos botones de importar y acomodar deben tener su
+| permiso personalizado en shield para otorgarlos a quien yo quiera; por el
+| momento solo super admin debe poder verlos ya que solo yo cargaré
+| proyectos».
+|
+| 🔴 Contra la matriz REAL del `RoleSeeder`, no contra un rol armado a mano:
+| un rol inventado en el test no tiene el permiso nuevo POR CONSTRUCCION, así
+| que pasaría siempre. Ver [[escribir-tests-de-este-repo]].
+*/
+describe('Quién puede cargar el plano', function (): void {
+    test('el super-admin los ve; la administradora y el receptor no', function (): void {
+        $this->seed(RoleSeeder::class);
+
+        foreach ([Roles::ADMINISTRADORA, Roles::RECEPTOR] as $rol) {
+            $usuario = crearUsuarioConRol($rol);
+
+            expect($usuario->can('ImportarPlano:Proyecto'))->toBeFalse()
+                ->and($usuario->can('AcomodarPlano:Proyecto'))->toBeFalse();
+        }
+    });
+
+    /*
+    | Que los permisos EXISTAN en la base es la mitad del pedido: sin la fila
+    | no aparecen en la pantalla de Roles y no habría dónde otorgarlos el día
+    | que él quiera dárselos a alguien.
+    */
+    test('los permisos existen aunque hoy no sean de nadie', function (): void {
+        $this->seed(RoleSeeder::class);
+
+        expect(Permission::query()->where('name', 'ImportarPlano:Proyecto')->exists())->toBeTrue()
+            ->and(Permission::query()->where('name', 'AcomodarPlano:Proyecto')->exists())->toBeTrue();
+    });
+
+    test('con permiso, los dos botones se dibujan', function (): void {
+        Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->assertActionVisible('importarDxf')
+            ->assertActionVisible('acomodar');
+    });
+
+    test('sin permiso no se dibujan', function (): void {
+        $this->seed(RoleSeeder::class);
+        $this->actingAs(crearUsuarioConRol(Roles::ADMINISTRADORA));
+
+        Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->assertActionHidden('importarDxf')
+            ->assertActionHidden('acomodar');
+    });
+
+    /*
+    | ⚠️ 🔴 LA GUARDA DEL SERVIDOR NO SE PRUEBA CON `callAction()`, y el
+    | intento costó una vuelta de `ci`.
+    |
+    | `TestsActions::callAction()` **arranca con `assertActionVisible()`**
+    | (`vendor/filament/actions/src/Testing/TestsActions.php:84`). O sea que
+    | «llamar la acción a mano salteando el botón» es justo lo que ese helper
+    | NO puede hacer: si el botón está escondido —que es todo el caso— la
+    | aserción de visibilidad falla antes de llegar a `->action()`.
+    |
+    | Lo que SÍ queda probado, y alcanza:
+    |
+    |  · que sin permiso el botón no se dibuja        → los dos tests de arriba
+    |  · que la matriz real del RoleSeeder no se lo da → «el super-admin los ve»
+    |  · que la guarda NO rompe el camino feliz        → «la accion de acomodar
+    |    dibuja los lotes que ya existen», que corre con `actingAsAdmin()`: si
+    |    `exigirPermisoDelPlano()` estuviera mal, ESE test se cae.
+    |
+    | Lo único sin test automático es el rechazo del `abort_unless`, y no se
+    | inventa un molde nuevo para cubrirlo: eso ya salió mal hoy dos veces
+    | —ver [[el-resumen-en-vivo-del-modal]] y [[escribir-tests-de-este-repo]]—.
+    */
 });

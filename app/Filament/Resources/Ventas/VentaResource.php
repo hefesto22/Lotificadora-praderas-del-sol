@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Ventas;
 
+use App\Domain\Enums\EstadoVenta;
 use App\Filament\Resources\Ventas\Pages\CreateVenta;
 use App\Filament\Resources\Ventas\Pages\ListVentas;
 use App\Filament\Resources\Ventas\Pages\ViewVenta;
+use App\Filament\Resources\Ventas\RelationManagers\ActualizacionesRelationManager;
 use App\Filament\Resources\Ventas\RelationManagers\CuotasRelationManager;
 use App\Filament\Resources\Ventas\RelationManagers\DocumentosRelationManager;
 use App\Filament\Resources\Ventas\RelationManagers\RecibosRelationManager;
@@ -14,6 +16,8 @@ use App\Filament\Resources\Ventas\RelationManagers\ReprogramacionesRelationManag
 use App\Filament\Resources\Ventas\Schemas\VentaForm;
 use App\Filament\Resources\Ventas\Schemas\VentaInfolist;
 use App\Filament\Resources\Ventas\Tables\VentasTable;
+use App\Filament\Support\Menu;
+use App\Models\Cuota;
 use App\Models\Venta;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -65,7 +69,60 @@ class VentaResource extends Resource
     #[Override]
     public static function getNavigationGroup(): ?string
     {
-        return 'Lotificación';
+        return Menu::DIA_A_DIA;
+    }
+
+    /**
+     * Cuántos expedientes tienen una cuota vencida hoy.
+     *
+     * ═══ POR QUE ESTE NUMERO Y NO OTRO ═══
+     *
+     * Mauricio, 22-ago-2026: el menú «no dice qué es lo importante». De todo
+     * lo que se puede contar, esto es lo único que **le pide algo a alguien**
+     * hoy: son los clientes a los que hay que llamar. Cuántas ventas hay o
+     * cuánto se vendió es información; esto es trabajo.
+     *
+     * Cuenta EXPEDIENTES, no cuotas: quien atiende llama a una persona, no a
+     * una cuota. Un contrato con cinco cuotas atrasadas es una llamada.
+     *
+     * ⚠️ Los tres filtros son los mismos que usa el Escritorio en
+     * `ComoVaElNegocio::vencidoAHoy()`, y tienen que seguir siéndolo — dos
+     * pantallas que cuentan lo mismo con criterios distintos es peor que no
+     * tener ninguna de las dos:
+     *
+     *  - `deLotesVivos()` — la cuota que sobrevive a una rescisión (R22) no
+     *    se va a pagar nunca; sin esto se queda clavada en «vencido».
+     *  - `vencidas()` — pendiente Y con fecha pasada, con `today()` de PHP y
+     *    no de Postgres (§7.5.1: el servidor puede estar en UTC).
+     *  - solo ventas VIGENTES — una liquidada o anulada no debe nada.
+     *
+     * `reorder()` antes del agregado: un `orderBy` heredado sobrevive al
+     * COUNT y Postgres lo rechaza con 42803.
+     */
+    #[Override]
+    public static function getNavigationBadge(): ?string
+    {
+        $expedientes = Cuota::query()
+            ->reorder()
+            ->vencidas()
+            ->deLotesVivos()
+            ->whereIn('venta_id', Venta::query()->reorder()->select('id')->where('estado', EstadoVenta::Vigente))
+            ->distinct()
+            ->count('venta_id');
+
+        return $expedientes === 0 ? null : (string) $expedientes;
+    }
+
+    #[Override]
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'danger';
+    }
+
+    #[Override]
+    public static function getNavigationBadgeTooltip(): ?string
+    {
+        return 'Expedientes con al menos una cuota vencida';
     }
 
     /**
@@ -126,6 +183,13 @@ class VentaResource extends Resource
             RecibosRelationManager::class,
             ReprogramacionesRelationManager::class,
             DocumentosRelationManager::class,
+            /*
+             * Última a propósito: es la que menos se abre y la única que no
+             * ve todo el mundo. `canViewForRecord()` la esconde para quien
+             * no sea super_admin, así que a Rosa Elena la fila de pestañas
+             * le queda igual que antes.
+             */
+            ActualizacionesRelationManager::class,
         ];
     }
 

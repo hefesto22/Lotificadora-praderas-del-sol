@@ -9,6 +9,7 @@ use App\Domain\Pagos\RegistroDePagos;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\RegistroDeVentas;
 use App\Filament\Resources\Ventas\Pages\ViewVenta;
+use App\Filament\Support\CobrarUnPago;
 use App\Filament\Support\ModoDeCobro;
 use App\Models\Bloque;
 use App\Models\Cliente;
@@ -302,7 +303,9 @@ test('el receptor no reprograma aunque mande el modo a mano', function (): void 
 | igual con un toggle roto que nunca ofrece «Ambas» a nadie.
 */
 test('quien puede reprogramar sí ve el camino completo', function (): void {
-    ($this->expediente)()
-        ->assertActionVisible('cobrar')
-        ->assertActionVisible('abonar_a_capital');
+    ($this->expediente)()->assertActionVisible('cobrar');
+
+    // El camino completo ya no es un segundo boton: son las tres opciones de
+    // adentro del modal, y quien las habilita es este permiso.
+    expect(CobrarUnPago::seLePermiteAbonar())->toBeTrue();
 });

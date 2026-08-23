@@ -73,6 +73,7 @@ use Override;
     'monto_capital',
     'monto_interes',
     'monto_pagado',
+    'capital_condonado',
     'mora_pagada',
     'mora_condonada',
 ])]
@@ -86,10 +87,11 @@ class Cuota extends Model
      */
     #[Override]
     protected $attributes = [
-        'monto_pagado'   => '0.00',
-        'monto_interes'  => '0.00',
-        'mora_pagada'    => '0.00',
-        'mora_condonada' => '0.00',
+        'monto_pagado'      => '0.00',
+        'capital_condonado' => '0.00',
+        'monto_interes'     => '0.00',
+        'mora_pagada'       => '0.00',
+        'mora_condonada'    => '0.00',
     ];
 
     /**
@@ -189,6 +191,38 @@ class Cuota extends Model
     public function saldo(): Monto
     {
         return $this->montoTotal()->restar($this->montoPagado());
+    }
+
+    /**
+     * Cuánto de lo «pagado» de esta cuota fue perdonado — 23-ago-2026.
+     *
+     * ═══ 🔴 ESTA ADENTRO DE `monto_pagado`, NO AL LADO ═══
+     *
+     * Y no es un descuido de nombre: catorce lugares del repo calculan lo que
+     * falta pagar con SQL crudo (`SUM(monto - monto_pagado)`,
+     * `monto_pagado < monto`) —el saldo del expediente, la columna «Saldo»,
+     * el contador de vencidos, el Escritorio, el plano—. Restar el perdón por
+     * fuera dejaría a esos catorce diciendo que un lote saldado todavía debe.
+     *
+     * Así que `monto_pagado` es **lo que resuelve la cuota** y esto dice qué
+     * parte de eso no fue dinero. Un CHECK de la base garantiza que nunca
+     * supere a lo pagado.
+     *
+     * ⚠️ Es lo contrario de `mora_condonada`, que va por FUERA — porque la
+     * mora también vive fuera de `monto` y ningún SQL la resta. Dos ejes
+     * distintos, no dos criterios.
+     */
+    public function capitalCondonado(): Monto
+    {
+        return $this->montoDe('capital_condonado');
+    }
+
+    /**
+     * Lo que de verdad entró por la puerta por esta cuota.
+     */
+    public function pagadoEnDinero(): Monto
+    {
+        return $this->montoPagado()->restar($this->capitalCondonado());
     }
 
     // ─── El reparto adentro de la cuota: interes primero ──────────────

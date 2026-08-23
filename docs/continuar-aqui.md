@@ -1,7 +1,118 @@
-# Continuar acá — 14-ago-2026
+# Continuar acá — 22-ago-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 22-ago — El expediente cambia de titular (R23)
+
+**SIN CORRER LA PUERTA TODAVÍA**, igual que lo de la manzana I.
+
+Mauricio: «se hizo la promesa de venta, pero después quieren cambiar la persona
+titular; el registro de los pagos queda y solo se cambia el nombre del cliente».
+Es una **cesión de derechos**, y hasta hoy no había por dónde: la venta se crea y
+se consulta, no se edita.
+
+**La regla, en una línea: mueve la marca; no reasigna un solo recibo.**
+
+### Qué entró
+
+1. **`R23` en `docs/dominio.md`**, con la tabla de qué se toca y qué no.
+2. **Migración** `venta_cliente.titular_hasta` (DATE) + CHECK
+   `NOT (titular AND titular_hasta IS NOT NULL)`: el titular de hoy no puede
+   tener fecha de salida. Complementa al índice parcial que ya existía.
+3. **`App\Models\Pivots\DuenoDelExpediente`** — un Pivot propio con casts, y no
+   es prolijidad: `withCasts()` sobre la relación **NO castea el pivot**, así que
+   sin esta clase `titular_hasta` sale string, todo `instanceof Carbon` da false
+   y **la fecha nunca se imprime, en silencio**.
+4. **`App\Domain\Ventas\CambioDeTitular`** — apaga la marca vieja, prende la
+   nueva (en ese orden: el índice parcial valida fila por fila), pasa los
+   `compromisos.cliente_id` **vigentes** al nuevo —si no, el plano se queda con
+   el nombre viejo para siempre— y asienta en la bitácora **dentro de la misma
+   transacción**, con `lockForUpdate` y re-check adentro (§8.3.2).
+5. **`CambiarTitular:Venta`**, permiso propio: solo la administradora.
+6. Botón **«Cambiar titular»** en el expediente, «Fue de …» en la ficha, y
+   `EstadoDeCuenta::acompanantes()` filtrado — sin eso el ex-titular salía
+   IMPRESO como copropietario en el papel que se le entrega al cliente.
+7. **20 tests** entre dominio y pantalla. El que más importa: «los recibos ya
+   emitidos NO cambian de dueño».
+
+### 🔴 Cuatro cosas que la revisión encontró, y valen para todo el repo
+
+1. **`withProperties()` guarda el asiento donde nadie lo pinta.** La bitácora lee
+   `attribute_changes`; el helper correcto es **`withChanges()`**. Con el otro,
+   Registros de actividad muestra «Sin datos anteriores / Sin datos nuevos».
+2. **`withCasts()` no castea un pivot.** Hace falta `->using()` con una clase.
+3. **Un rol de prueba armado a mano no verifica la matriz de permisos**: pasa
+   siempre. Va `$this->seed(RoleSeeder::class)` + `crearUsuarioConRol(Roles::…)`.
+4. **`Livewire::test()` dos veces son dos páginas distintas**: un test así nunca
+   ejerce el `refresh()` de la acción.
+
+### Qué falta
+
+- 🔴 `herd php artisan migrate` y **`herd composer ci`**.
+- 🔴 `herd php artisan db:seed --class=RoleSeeder`, para que Rosa Elena reciba el
+  permiso nuevo (usa `syncPermissions`: no arrastra nada viejo).
+- **Decidir si el documento de cesión se exige.** Hoy no; el expediente digital
+  ya guarda documentos y volverlo obligatorio es un cambio chico.
+
+## 🔴 22-ago — La manzana I estaba a medias, y nadie lo podía notar
+
+**SIN CORRER LA PUERTA TODAVÍA.** Lo de este día quedó escrito y verificado
+contra el DXF, pero `composer ci` no se ha corrido: la sesión no tenía PHP
+a mano. **Es lo primero que hay que hacer.**
+
+Mauricio comparó el mapa contra el PDF del topógrafo y vio que la manzana I
+terminaba en el I-7. En el plano tiene **quince** lotes. Faltaban los ocho
+de atrás —**I-8 a I-15**, 2,648.45 vr²— y el plano pasa de 301 a **309**
+lotes, de 85,310.81 a **87,959.26 vr²**.
+
+**La lección, que es de método:** ningún control lo podía atrapar. Todos
+comparan el dibujo de un lote contra **su propio rótulo**, y un lote que no
+se leyó no tiene rótulo que comparar. El control que faltaba es una resta:
+**los rótulos `vr2` del DXF contra los lotes cargados**. Vale para
+cualquier lectura de plano, no solo para esta.
+
+### Qué entró
+
+1. **`database/data/praderas-plano.json`** — los ocho lotes, reconstruidos
+   con el mismo método del resto (caras del grafo de linderos, área del
+   texto impreso, frente y fondo del rectángulo mínimo). El diff es
+   **puramente aditivo**: 220 líneas agregadas, cero modificadas. Error
+   máximo contra el área impresa **0.0093 %**, por debajo del percentil 90
+   de los 301 que ya estaban. Cero traslapes, y los ocho comparten vértice
+   con la fila del frente.
+
+2. **`olympo:completar-plano`** (`app/Console/Commands/CompletarPlano.php`)
+   — la puerta que faltaba. El seeder del plano **reemplaza**, y por eso se
+   detiene en cuanto hay un lote vendido: o sea que el momento en que
+   aparece un faltante es exactamente el momento en que ya no se puede
+   arreglar. Este comando **solo inserta**. No borra, no renumera, no
+   repinta; las diferencias las informa y las deja. Es idempotente y tiene
+   `--ensayo`. El precio lo hereda de los hermanos de manzana.
+
+3. **`tests/Feature/Dominio/CompletarPlanoTest.php`** — 10 tests. El que
+   importa es «NO toca un lote que ya existe, aunque el archivo le dé otra
+   área»: el archivo dice 999 vr² sobre un lote vendido y el lote no se
+   mueve.
+
+4. `PlanoRealPraderasSeederTest` sube a 309 y suma «la manzana I entra con
+   sus dos filas, no con una». `docs/plano-real.md` tiene la sección nueva
+   con la reconstrucción y los residuos.
+
+### Qué falta
+
+- 🔴 **Correr la puerta completa.** `herd composer ci` — el Test del
+  seeder toca 309 lotes y ninguna de estas líneas se ejecutó nunca.
+- 🔴 **Cargarlos en la base de Mauricio**, que ya tiene la cartera:
+  ```bash
+  php artisan olympo:completar-plano RPS database/data/praderas-plano.json --ensayo
+  php artisan olympo:completar-plano RPS database/data/praderas-plano.json
+  ```
+  El `--ensayo` primero: ese informe es la revisión.
+- **El calco no se tocó.** `rps-fondo.json` es el dibujo del topógrafo y ya
+  traía la manzana I entera; lo que faltaba eran los polígonos que se
+  clickean, no el fondo.
+- **Las manzanas `A-1` a `F-1`** del plano siguen sin cargarse, a propósito.
 
 ## ✅ Todo lo del 13 y 14 está commiteado y pusheado
 

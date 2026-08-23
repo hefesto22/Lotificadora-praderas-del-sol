@@ -44,6 +44,19 @@ final class Cuadros
         // desarrollo (13-ago-2026).
         $corta = ($unidad ?? UnidadDeArea::Varas)->abreviada();
 
+        /*
+         * 🔴 SI TODO ES DE CONTADO, TRES COLUMNAS SOBRAN — 23-ago-2026.
+         *
+         * «Plazo» dice «Contado» en cada fila, «Prima» repite el valor y
+         * «Cuota» es un guion. Son tres columnas que no distinguen una fila de
+         * otra, y encima empujan al cuadro a necesitar scroll horizontal en el
+         * modal del plano, que es el angosto.
+         *
+         * Con UNA sola fila financiada las tres vuelven: ahí sí dicen cosas
+         * distintas por lote, y esconderlas escondería el dato que decide.
+         */
+        $todoDeContado = array_all($renglones, static fn (array $renglon): bool => $renglon['plazo'] === 0);
+
         $filas = '';
 
         foreach ($renglones as $renglon) {
@@ -54,19 +67,23 @@ final class Cuadros
                 .'<td class="lote">%s</td>'
                 .'<td class="apagado">%s</td>'
                 .'<td>%s</td>'
-                .'<td><span class="olympo-pill%s">%s</span></td>'
-                .'<td>%s</td>'
-                .'<td class="apagado">%s</td>'
+                .'%s'
                 .'<td class="fuerte">%s</td>'
-                .'</tr>',
+                .'%s',
                 e($renglon['codigo']),
                 e(self::conMiles(new Monto($renglon['area'])->redondeado())),
                 e($renglon['precio']->formateado()),
-                $deContado ? ' contado' : '',
-                e($deContado ? 'Contado' : $renglon['plazo'].' meses'),
+                $todoDeContado ? '' : sprintf(
+                    '<td><span class="olympo-pill%s">%s</span></td>',
+                    $deContado ? ' contado' : '',
+                    e($deContado ? 'Contado' : $renglon['plazo'].' meses'),
+                ),
                 e($renglon['valor']->formateado()),
-                e($renglon['prima']->esCero() ? '—' : $renglon['prima']->formateado()),
-                e($renglon['cuota'] instanceof Monto ? $renglon['cuota']->formateado() : '—'),
+                $todoDeContado ? '</tr>' : sprintf(
+                    '<td class="apagado">%s</td><td class="fuerte">%s</td></tr>',
+                    e($renglon['prima']->esCero() ? '—' : $renglon['prima']->formateado()),
+                    e($renglon['cuota'] instanceof Monto ? $renglon['cuota']->formateado() : '—'),
+                ),
             );
         }
 
@@ -81,10 +98,14 @@ final class Cuadros
          *
          * Que se corra de lado es feo. Que un número mienta, no se puede.
          */
+        $encabezados = '<th>Lote</th><th>'.$corta.'</th><th>Precio '.$corta.'</th>'
+            .($todoDeContado ? '' : '<th>Plazo</th>')
+            .'<th>Valor</th>'
+            .($todoDeContado ? '' : '<th>Prima</th><th>Cuota</th>');
+
         return new HtmlString(
             '<div class="olympo-scroll"><table class="olympo-tabla"><thead><tr>'
-            .'<th>Lote</th><th>'.$corta.'</th><th>Precio '.$corta.'</th><th>Plazo</th>'
-            .'<th>Valor</th><th>Prima</th><th>Cuota</th>'
+            .$encabezados
             .'</tr></thead><tbody>'.$filas.'</tbody></table></div>'
         );
     }

@@ -471,4 +471,80 @@
         background-color: rgb(46 48 56);
         box-shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 0 0 1px rgba(255, 255, 255, .06);
     }
+
+    /*
+       ── 13-bis. El menú, más apretado ─────────────────────────────────
+
+       22-ago-2026. Mauricio: «se ve muy seco, no se sabe qué es lo
+       importante ni cómo se maneja».
+
+       ═══ MEDIDO ANTES DE TOCAR NADA ═══
+
+       Leído del DOM en su propia pantalla, no supuesto:
+
+         .fi-sidebar-item-btn   font-size 16px
+         su <svg>               24 × 24 px
+
+       Dieciséis píxeles es tamaño de PÁRRAFO, y el ícono era más alto que
+       la mayúscula del texto que acompaña. Once entradas así ocupan 678 px
+       de alto y **todas gritan al mismo volumen**: nada puede destacar,
+       porque destacar es ser distinto del resto.
+
+       Con 14 / 20 el menú entero baja a 610 px, entra sin scroll y —lo que
+       importa— deja lugar para que el contador rojo de Ventas y la pastilla
+       del activo sean lo único que levanta la voz. La densidad es la misma
+       que usan Linear y Stripe en su navegación.
+
+       ⚠️ La TIPOGRAFÍA no se toca, solo el tamaño: sigue siendo la Inter de
+       Filament (regla de Mauricio del 11-ago). Y el ancho del riel tampoco:
+       320 px es de Filament y el logo se dibuja contra él.
+    */
+    .fi-sidebar-item-btn {
+        font-size: .875rem;
+        padding-block: .4rem;
+        gap: .625rem;
+    }
+
+    .fi-sidebar-item-btn .fi-icon,
+    .fi-sidebar-item-btn svg {
+        width: 1.25rem;
+        height: 1.25rem;
+    }
+
+    /* El activo además pesa: la pastilla sola no alcanza a 14px. */
+    .fi-sidebar-item.fi-active .fi-sidebar-item-btn { font-weight: 600; }
+
+    /* Las versalitas del grupo, un punto más chicas y más separadas. */
+    .fi-sidebar-group-label {
+        font-size: .6875rem;
+        letter-spacing: .08em;
+    }
+
+    /*
+       ── 14. El contador tiene que verse ───────────────────────────────
+
+       Medido el 22-ago: el badge de Prospectos llegaba con
+       `background: oklch(0.987 0.022 95.277)` — un ámbar tan pálido que
+       sobre el riel `rgb(241 243 246)` del §13 **desaparecía**. El número
+       se leía gris, y un aviso que se lee gris no es un aviso.
+
+       No es culpa de Filament: ese ámbar está pensado para fondo blanco.
+       Al meter el riel gris del §13 nos quedamos con la deuda.
+
+       Se le sube el cuerpo al fondo y se le pone la línea de un pixel que
+       usa todo el resto del sistema. Los colores siguen siendo los de
+       Filament —`warning` y `danger` según lo que cuente cada recurso—, no
+       se inventa ninguno.
+    */
+    .fi-sidebar-item .fi-badge {
+        font-variant-numeric: tabular-nums;
+        box-shadow: inset 0 0 0 1px rgba(9, 9, 11, .06);
+    }
+
+    .fi-sidebar-item .fi-badge.fi-color-warning { background-color: rgb(254 243 199); }
+    .fi-sidebar-item .fi-badge.fi-color-danger { background-color: rgb(254 226 226); }
+
+    .dark .fi-sidebar-item .fi-badge { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); }
+    .dark .fi-sidebar-item .fi-badge.fi-color-warning { background-color: rgba(180, 83, 9, .25); }
+    .dark .fi-sidebar-item .fi-badge.fi-color-danger { background-color: rgba(153, 27, 27, .3); }
 </style>

@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Ventas\Pages;
 
 use App\Domain\Enums\EstadoCompromiso;
+use App\Domain\Enums\EstadoVenta;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\ValueObjects\Monto;
+use App\Domain\Ventas\CambioDeTitular;
 use App\Domain\Ventas\RegistroDeCompromisos;
 use App\Domain\Ventas\RegistroDeRescisiones;
 use App\Filament\Resources\Ventas\VentaResource;
@@ -15,6 +17,7 @@ use App\Filament\Schemas\Components\DNIField;
 use App\Filament\Schemas\Components\MayusculasField;
 use App\Filament\Schemas\Components\MontoField;
 use App\Filament\Support\CobrarUnPago;
+use App\Models\Cliente;
 use App\Models\Compromiso;
 use App\Models\Venta;
 use Filament\Actions\Action;
@@ -28,6 +31,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Database\Eloquent\Builder;
 use Override;
 
 /**
@@ -63,13 +67,154 @@ class ViewVenta extends ViewRecord
     #[Override]
     protected function getHeaderActions(): array
     {
+        /*
+         * 🔴 SIN «Abonar a capital» — 14-ago-2026.
+         *
+         * Era un segundo boton para el mismo modal: adentro de «Registrar un
+         * pago» el primer control ya pregunta «¿que es este pago?» con las
+         * tres opciones —cuota, abono a capital, ambas—. Dos puertas a la
+         * misma pantalla obligan a decidir antes de entrar algo que se decide
+         * adentro, y quien atiende duda si son dos cosas distintas.
+         *
+         * ⚠️ NO afloja el permiso de R21: `CobrarUnPago::modos()` solo ofrece
+         * «Abono» y «Ambas» a quien puede reprogramar. El receptor abre el
+         * mismo modal y ve una sola opcion.
+         */
         return [
             $this->estadoDeCuentaAction(),
             CobrarUnPago::accion(),
-            CobrarUnPago::abonoDirecto(),
             $this->titularesDeReciboAction(),
+            $this->cambiarTitularAction(),
             $this->rescindirAction(),
         ];
+    }
+
+    /**
+     * El expediente pasa a otra persona: la cesion de derechos.
+     *
+     * ═══ POR QUE NO ES UN CAMPO EDITABLE ═══
+     *
+     * Porque no es corregir un dato mal tecleado: es que el contrato cambia
+     * de dueño. Un Select suelto en un formulario de edicion no deja
+     * constancia de nada y se puede tocar sin querer. Como accion con su
+     * confirmacion, deja asiento en la bitacora con el usuario y la fecha —
+     * que es exactamente lo que Mauricio pidio el 22-ago-2026.
+     *
+     * ⚠️ Se lista TODO cliente activo, incluidos los copropietarios de este
+     * mismo expediente: el caso mas comun no es que entre un extraño, es que
+     * la titularidad pase del marido a la esposa que ya firmaba al lado.
+     *
+     * ⚠️ El texto del modal dice lo de los recibos porque es lo primero que
+     * alguien va a suponer al reves. Los pagos NO se reasignan.
+     */
+    private function cambiarTitularAction(): Action
+    {
+        return Action::make('cambiar_titular')
+            ->label('Cambiar titular')
+            ->icon(Heroicon::OutlinedArrowsRightLeft)
+            ->color('gray')
+            // El Service lo rechaza igual, pero ofrecer el boton en un
+            // expediente rescindido o anulado invita a un tramite que no se
+            // puede hacer. Mismo criterio que `rescindirAction()`.
+            ->visible(fn (): bool => $this->elLoteSigueSiendoDeAlguien()
+                && auth()->user()?->can('cambiarTitular', Venta::class) === true)
+            ->modalHeading('Pasar este expediente a otra persona')
+            ->modalDescription(
+                'Los pagos no se mueven: los recibos ya emitidos siguen a nombre de quien pagó. '.
+                'De aquí en adelante el estado de cuenta y los recibos nuevos salen a nombre del '.
+                'titular nuevo, y quien sale queda listado como titular anterior con la fecha.'
+            )
+            ->modalSubmitActionLabel('Cambiar el titular')
+            ->modalWidth('xl')
+            ->schema([
+                Placeholder::make('titular_actual')
+                    ->label('Titular hoy')
+                    ->content(fn (): string => (string) ($this->venta()->titular()?->getAttribute('nombre') ?? '—')),
+
+                Select::make('cliente_id')
+                    ->label('Nuevo titular')
+                    ->options(fn (): array => $this->clientesParaTitular())
+                    ->searchable()
+                    ->required()
+                    ->native(false)
+                    ->helperText('Si todavía no está registrado, hay que darlo de alta en Clientes primero.'),
+
+                Textarea::make('motivo')
+                    ->label('Por qué cambia (opcional)')
+                    ->rows(2)
+                    ->maxLength(500)
+                    ->helperText('Queda en la bitácora junto con tu usuario y la fecha.'),
+            ])
+            ->action(function (array $data): void {
+                $nuevo = Cliente::query()->whereKey((int) ($data['cliente_id'] ?? 0))->first();
+
+                if (! $nuevo instanceof Cliente) {
+                    return;
+                }
+
+                try {
+                    $anterior = app(CambioDeTitular::class)->cambiar(
+                        venta: $this->venta(),
+                        nuevo: $nuevo,
+                        motivo: is_string($data['motivo'] ?? null) ? $data['motivo'] : null,
+                    );
+                } catch (GrupoOlympoException $error) {
+                    Notification::make()
+                        ->title('No se pudo cambiar el titular')
+                        ->body($error->getMessage())
+                        ->danger()
+                        ->persistent()
+                        ->send();
+
+                    return;
+                }
+
+                Notification::make()
+                    ->title('El expediente cambió de titular')
+                    ->body(sprintf(
+                        'De %s a %s. Los recibos ya emitidos no cambiaron.',
+                        (string) ($anterior?->getAttribute('nombre') ?? '—'),
+                        (string) $nuevo->getAttribute('nombre'),
+                    ))
+                    ->success()
+                    ->persistent()
+                    ->send();
+
+                // La ficha muestra los dueños arriba: sin esto sigue con el
+                // nombre viejo hasta que alguien recargue.
+                $this->getRecord()->refresh();
+            });
+    }
+
+    /**
+     * ¿Este expediente todavia tiene lotes de alguien?
+     *
+     * Rescindido o anulado no queda titularidad que ceder. Se lee del
+     * atributo casteado porque `Venta::estadoActual()` es privado.
+     */
+    private function elLoteSigueSiendoDeAlguien(): bool
+    {
+        $estado = $this->venta()->getAttribute('estado');
+
+        return $estado instanceof EstadoVenta && $estado->ocupaLosLotes();
+    }
+
+    /**
+     * A quien se le puede pasar el expediente: cualquier cliente activo
+     * menos el titular de hoy, que no tendria sentido elegir.
+     *
+     * @return array<int, string>
+     */
+    private function clientesParaTitular(): array
+    {
+        $actual = $this->venta()->titular()?->getKey();
+
+        return Cliente::query()
+            ->activos()
+            ->when($actual !== null, fn (Builder $q): Builder => $q->whereKeyNot($actual))
+            ->orderBy('nombre')
+            ->pluck('nombre', 'id')
+            ->all();
     }
 
     /**

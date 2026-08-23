@@ -126,6 +126,15 @@ function sembrarPermisosDeShield(): void
      */
     foreach ([
         'Reprogramar:Venta',
+        // Cesion de derechos: el expediente pasa a otro titular (22-ago-2026).
+        'CambiarTitular:Venta',
+        // Pronto pago: saldar un lote perdonando saldo (23-ago-2026).
+        'ProntoPago:Venta',
+        // La lista de llamadas de cobro del dia (23-ago-2026).
+        'Cobranza:Venta',
+        // Cargar el plano de un desarrollo: hoy solo Mauricio (23-ago-2026).
+        'ImportarPlano:Proyecto',
+        'AcomodarPlano:Proyecto',
         'ViewAny:Reprogramacion',
         'View:Reprogramacion',
         // R14: prorrogar y marcar la devolucion de la seña de un apartado.

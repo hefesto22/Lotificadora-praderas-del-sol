@@ -381,6 +381,27 @@ Al rescindir **se pregunta cuánto se le devolvió**, y la respuesta puede ser c
 solo: cuánto se devuelve lo decide la administración caso por caso, y lo que el sistema tiene
 que hacer es dejar constancia de cuánto entró, cuánto salió y quién lo autorizó.
 
+**R23 · El expediente puede cambiar de titular, y los pagos no se mueven.** *(Mauricio,
+22-ago-2026)* «Se hizo la promesa de venta, pero después quieren cambiar la persona titular; el
+registro de los pagos queda y solo se cambia el nombre del cliente, y que quede registro de que
+se cambió ese nombre y la fecha en el expediente».
+
+| Qué | Cómo quedó |
+|---|---|
+| Los recibos ya emitidos | **No se tocan.** Cada uno dice quién pagó ESE día. Reasignarlos diría que el dinero lo puso quien no lo puso, y descuadra la caja de aquel día contra los depósitos |
+| Las cuotas, el plan y el valor | **No se tocan.** Se cede el contrato tal como está: quien entra recibe la deuda que hay |
+| El estado de cuenta y los recibos nuevos | Salen a nombre del **titular de hoy**, solos: los dos lo leen en vivo |
+| El lote en el plano | **Pasa al titular nuevo** (`compromisos.cliente_id` de los lotes vigentes). Un lote rescindido no se toca: ese fue de quien lo tuvo |
+| Quien sale | **Queda listado como titular anterior, con la fecha.** No se le borra la fila: sus recibos lo siguen apuntando y el expediente no desaparece de su ficha |
+| Qué se exige | **Nada más que el registro automático** —quién y cuándo—. El motivo es opcional |
+| Quién puede | **Solo la administradora** (`CambiarTitular:Venta`). Quien cobra no decide a nombre de quién queda un contrato firmado |
+| Sobre qué expedientes | Vigente y liquidada. Uno **rescindido o anulado no cede nada**: el lote ya volvió al plano |
+
+⚠️ **En lo legal esto es una cesión de derechos** y normalmente se firma en papel, con la
+lotificadora incluida. El sistema **no exige el documento** —decisión del 22-ago— así que el
+respaldo se archiva por fuera. Si la contratante pide que el papel sea obligatorio, el
+expediente digital ya guarda documentos y es un cambio chico.
+
 ### Apartados
 
 **R14 · El apartado tiene números fijos.**

@@ -253,6 +253,20 @@ final readonly class RegistroDeVentas
             // 9. El papel de la prima, por lo que el cliente pone HOY.
             $this->cobrarLaPrima($venta, $titular, $prima, $senias, $formaPrima, $referenciaPrima, $fecha, $apartados);
 
+            /*
+             * 10. La venta que nace pagada se cierra el mismo dia.
+             *
+             * Al contado la prima ES el valor: `planificar()` no dejo ni una
+             * cuota y el expediente no debe nada. Sin esta linea se quedaba
+             * «Vigente» —con boton de cobrar, en el conteo de contratos
+             * activos y en la pestaña de vigentes— sobre un contrato saldado.
+             *
+             * No pregunta si fue de contado: le pregunta a la venta si le
+             * queda saldo, que es la unica forma de no cerrar un contrato
+             * mixto —un lote al contado y otro financiado— que si debe.
+             */
+            $venta->liquidarSiYaNoDebe($fecha);
+
             return $venta;
         });
     }

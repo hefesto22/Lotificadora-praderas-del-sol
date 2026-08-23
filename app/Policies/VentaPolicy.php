@@ -36,6 +36,52 @@ class VentaPolicy
         return $authUser->can('Reprogramar:Venta');
     }
 
+    /**
+     * Pasarle el expediente a otra persona: la cesión de derechos.
+     *
+     * ═══ POR QUE NO ALCANZA CON `Update:Venta` ═══
+     *
+     * Porque `Update:Venta` es el permiso de corregir un dato del
+     * expediente, y esto no corrige nada: **cambia de quién es el
+     * contrato**. Los pagos no se mueven, pero de aquí en adelante los
+     * recibos salen a otro nombre y el estado de cuenta se dirige a otra
+     * persona. Decidido con Mauricio el 22-ago-2026: la llave la tiene solo
+     * la administradora.
+     *
+     * §9.E3: se nombra uno por uno en `RoleSeeder`, nunca por patrón.
+     *
+     * Sin argumento de modelo, igual que `reprogramar()`: se consulta con
+     * `can('cambiarTitular', Venta::class)`.
+     */
+    public function cambiarTitular(AuthUser $authUser): bool
+    {
+        return $authUser->can('CambiarTitular:Venta');
+    }
+
+    /**
+     * Saldar un lote con un descuento: el pronto pago (23-ago-2026).
+     *
+     * ═══ POR QUE NO ALCANZA CON `Reprogramar:Venta` ═══
+     *
+     * Porque reprogramar no le cuesta plata a nadie: reescribe un plan con la
+     * misma deuda repartida distinto. Un pronto pago **perdona saldo** — es
+     * dinero que la lotificadora decide no cobrar, sin tope. Son dos llaves
+     * distintas y quien tiene una no tiene por qué tener la otra.
+     *
+     * Mauricio, 23-ago-2026, eligiendo entre tres caminos: «un permiso propio,
+     * para quien vos decidas». Nace para super_admin y administradora, y se
+     * mueve desde Roles sin tocar código.
+     *
+     * §9.E3: se nombra uno por uno en `RoleSeeder`, nunca por patrón.
+     *
+     * Sin argumento de modelo, igual que los dos de arriba: se consulta con
+     * `can('prontoPago', Venta::class)`.
+     */
+    public function prontoPago(AuthUser $authUser): bool
+    {
+        return $authUser->can('ProntoPago:Venta');
+    }
+
     public function viewAny(AuthUser $authUser): bool
     {
         return $authUser->can('ViewAny:Venta');

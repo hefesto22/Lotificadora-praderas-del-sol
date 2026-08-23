@@ -12,6 +12,7 @@ use App\Filament\Resources\Lotes\Pages\ViewLote;
 use App\Filament\Resources\Lotes\Schemas\LoteForm;
 use App\Filament\Resources\Lotes\Schemas\LoteInfolist;
 use App\Filament\Resources\Lotes\Tables\LotesTable;
+use App\Filament\Support\Menu;
 use App\Models\Lote;
 use BackedEnum;
 use Filament\Resources\Resource;
@@ -63,7 +64,7 @@ class LoteResource extends Resource
     #[Override]
     public static function getNavigationGroup(): ?string
     {
-        return 'Lotificación';
+        return Menu::DESARROLLO;
     }
 
     #[Override]

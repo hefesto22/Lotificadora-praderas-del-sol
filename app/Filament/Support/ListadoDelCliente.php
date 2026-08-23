@@ -6,6 +6,7 @@ namespace App\Filament\Support;
 
 use App\Filament\Resources\Apartados\ApartadoResource;
 use App\Filament\Resources\Recibos\ReciboResource;
+use App\Filament\Resources\Ventas\Pages\ListVentas;
 use App\Filament\Resources\Ventas\VentaResource;
 use App\Models\Cliente;
 
@@ -43,9 +44,34 @@ final class ListadoDelCliente
      */
     private const string FILTRO = 'cliente';
 
+    /**
+     * ⚠️ Va con pestaña y las otras dos no.
+     *
+     * Desde el 22-ago la pantalla de Ventas abre en «Vigente», y el
+     * contador de la ficha cuenta TODOS los estados. Sin esta línea, el
+     * cliente que ya liquidó un lote muestra «Ventas 3» y al hacer clic
+     * aparecen dos filas — que es exactamente el contador que miente del
+     * §9.E6, solo que del lado del listado.
+     */
     public static function ventas(Cliente $cliente): string
     {
-        return VentaResource::getUrl('index', self::filtradoPor($cliente));
+        return VentaResource::getUrl('index', [
+            ...self::filtradoPor($cliente),
+            /*
+             * 🔴 La llave es `tab`, NO `activeTab`.
+             *
+             * La propiedad de la página se llama `activeTab`, pero Filament
+             * la publica al query string como `#[Url(as: 'tab')]`. Con el
+             * nombre de la propiedad, Livewire descarta el parámetro EN
+             * SILENCIO —sin error, sin aviso— y la pantalla abre en la
+             * pestaña por defecto, que es justo lo que hay que evitar acá.
+             *
+             * Escrito con `activeTab` la primera vez, el 22-ago. Lo agarró
+             * `QueTieneElClienteTest` y no la pantalla, que es el orden en
+             * el que conviene enterarse.
+             */
+            'tab' => ListVentas::TODAS,
+        ]);
     }
 
     public static function apartados(Cliente $cliente): string

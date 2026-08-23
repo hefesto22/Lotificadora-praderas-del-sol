@@ -46,6 +46,25 @@ final class VentaInvalidaException extends GrupoOlympoException
     }
 
     /**
+     * Cesion de derechos sobre un expediente que ya se cayo.
+     *
+     * Rescindido o anulado, el lote volvio al plano y no queda titularidad
+     * que pasarle a nadie. Ver `CambioDeTitular`.
+     */
+    public static function porExpedienteCerrado(string $estado): self
+    {
+        return new self(
+            "Este expediente figura como {$estado}: ya no hay titularidad que ceder. "
+            .'Si el cliente quiere el lote de nuevo, es una venta nueva.'
+        );
+    }
+
+    public static function porYaSerElTitular(string $nombre): self
+    {
+        return new self("{$nombre} ya es el titular de este expediente.");
+    }
+
+    /**
      * El re-check DENTRO de la transaccion (§8.3.2).
      *
      * Entre que se armo el formulario y se apreto Guardar pudo pasar de
@@ -74,6 +93,23 @@ final class VentaInvalidaException extends GrupoOlympoException
         return new self(
             "La prima de {$prima->formateado()} es mayor que el valor de los lotes "
             ."({$valor->formateado()}). Revisar el monto o los lotes elegidos."
+        );
+    }
+
+    /**
+     * 🔴 Sin lista de precios no se firma — regla de Mauricio, 23-ago-2026.
+     *
+     * La lanzan las dos pantallas de venta, no el dominio: la carga de la
+     * cartera vieja entra por `activar()` con el precio del cuaderno y tiene
+     * que seguir pasando. Ver `Proyecto::tieneConQueVender()`.
+     */
+    public static function porProyectoSinPlanDePago(string $proyecto): self
+    {
+        return new self(
+            "El desarrollo {$proyecto} todavia no tiene ningun plan de pago activo, asi que "
+            .'no hay precio por vara² ni plazo con que armar el contrato. Cargalos en el '
+            .'proyecto, pestaña «Planes de pago». Mientras tanto el lote SI se puede apartar: '
+            .'la seña reserva sin fijar precio, y cuenta como parte de la prima cuando se venda.'
         );
     }
 

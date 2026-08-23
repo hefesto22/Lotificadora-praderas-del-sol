@@ -418,6 +418,22 @@
         </p>
     @endif
 
+    {{-- El descuento por pronto pago, 23-ago-2026.
+
+         Va ACA ABAJO y no adentro del total, y no es una decisión de diseño:
+         el total es lo que el cliente entregó, y es contra ese número que se
+         cuadra la caja del día. Un descuento sumado ahí haría que el arqueo
+         busque un efectivo que nunca existió.
+
+         Pero tampoco se calla: el cliente acordó de palabra una rebaja y este
+         papel es lo único que la deja escrita. --}}
+    @if ($recibo->tuvoDescuento())
+        <p class="nota">
+            Se le descontó <strong>{{ $recibo->capitalCondonado()->formateado() }}</strong> por pronto pago,
+            que no se cobró en este recibo. Con este pago el lote queda saldado.
+        </p>
+    @endif
+
     @if ($saldo)
         <p class="nota">
             Saldo del lote al {{ now()->format('d/m/Y') }}: <strong>{{ $saldo->formateado() }}</strong>.

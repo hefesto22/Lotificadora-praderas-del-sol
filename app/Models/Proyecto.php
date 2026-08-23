@@ -690,6 +690,40 @@ class Proyecto extends Model
     }
 
     /**
+     * 🔴 ¿Hay con qué VENDER? — regla de Mauricio, 23-ago-2026.
+     *
+     * «Que no se pueda vender si no hay planes; en apartar sí.»
+     *
+     * ═══ POR QUE APARTAR SI Y VENDER NO ═══
+     *
+     * Porque no fijan lo mismo. Apartar reserva el lote y cobra una seña que
+     * se devuelve: no compromete ni precio ni plazo, así que se puede hacer
+     * mientras la lista de precios todavía se está armando — que es justo
+     * cuando un cliente aparece y hay que retenerlo. Vender, en cambio, firma
+     * un precio por vara² y un plazo para los próximos cuatro años.
+     *
+     * Hasta hoy el modal aceptaba que se tecleara todo a mano cuando no había
+     * planes. Es exactamente la puerta por donde entra un contrato con un
+     * precio que no está en ninguna lista, y que después nadie puede explicar.
+     *
+     * ═══ ⚠️ POR QUE ESTO VIVE ACA Y NO EN `RegistroDeVentas` ═══
+     *
+     * Porque el dominio TIENE que seguir aceptando la carga de la cartera
+     * vieja: esos contratos vienen del cuaderno, con su precio y su plazo ya
+     * pactados en papel años atrás, y no hay ni va a haber un `PlanDePago` que
+     * los respalde. Meter la guarda en `activar()` rompería el seeder de la
+     * cartera histórica sin ganar nada.
+     *
+     * La regla es de las DOS puertas de pantalla —el plano y «Nueva venta»—,
+     * y por eso la pregunta vive en un solo lugar: si mañana hay una tercera,
+     * que pregunte acá y no reescriba la condición.
+     */
+    public function tieneConQueVender(): bool
+    {
+        return $this->planesDePago()->activos()->exists();
+    }
+
+    /**
      * Lo que este desarrollo ha costado (11-ago-2026).
      *
      * Cuelga del proyecto y no del lote porque asi se gasta: la

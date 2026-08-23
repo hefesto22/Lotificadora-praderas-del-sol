@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers\Filament;
 
+use App\Filament\Support\Menu;
 use App\Http\Middleware\SuspensionPorMora;
 use App\Models\BrandingSetting;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
@@ -11,6 +12,7 @@ use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
+use Filament\Navigation\NavigationGroup;
 use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
@@ -144,16 +146,38 @@ class AdminPanelProvider extends PanelProvider
              * trabajo del día.
              *
              * El orden es por frecuencia de uso, de arriba hacia abajo:
-             * quien atiende vive en Lotificación, entra a Administración una
+             * quien atiende vive en el día a día, entra a Administración una
              * vez por semana y a Sistema una vez por proyecto.
              *
              * Un grupo que no esté en esta lista igual aparece — al final.
+             *
+             * ═══ 22-AGO-2026: ICONO, Y LOS DOS DE ABAJO NACEN PLEGADOS ═══
+             *
+             * Mauricio: el menú «se ve muy seco, no se sabe qué es lo
+             * importante ni cómo se maneja». Once entradas planas, todas del
+             * mismo peso, no contestan «¿por dónde empiezo?».
+             *
+             * Plegar Administración y Sistema lo contesta **sin esconder
+             * nada**: al entrar se ve el trabajo del día y abajo dos rótulos
+             * cerrados. Quien los necesita los abre una vez y el navegador se
+             * acuerda de la próxima. Es más honesto que apagarlos con CSS —
+             * ahí seguirían ocupando el mismo lugar, solo que más pálidos.
+             *
+             * 🔴 SIN `->icon()` EN EL GRUPO, Y ES A PROPOSITO. Se probó el
+             * 22-ago y se descartó midiendo: en cuanto un NavigationGroup
+             * tiene ícono, Filament deja de dibujar el ícono de CADA ítem de
+             * adentro y lo reemplaza por `.fi-sidebar-item-grouped-border`,
+             * una guía que se ve como un punto gris. Se ganaban cuatro
+             * símbolos y se perdían once — al revés de lo que se buscaba.
+             *
+             * Los nombres salen de `Menu`, que es la lista única (ver ahí por
+             * qué un typo en un solo recurso lo mandaba a un grupo fantasma).
              */
-            ->navigationGroups([
-                'Lotificación',
-                'Administración',
-                'Sistema',
-            ])
+            ->navigationGroups(array_map(
+                static fn (string $nombre): NavigationGroup => NavigationGroup::make($nombre)
+                    ->collapsed(in_array($nombre, Menu::deFondo(), true)),
+                Menu::grupos(),
+            ))
             ->plugins([
                 /*
                  * ⚠️ 🔴 SIN ESTO, EL CLIENTE LEE EL NOMBRE DEL PAQUETE
@@ -171,7 +195,7 @@ class AdminPanelProvider extends PanelProvider
                  * registros de actividad (3).
                  */
                 FilamentShieldPlugin::make()
-                    ->navigationGroup('Administración')
+                    ->navigationGroup(Menu::ADMINISTRACION)
                     ->navigationSort(2),
             ])
             ->databaseNotifications()

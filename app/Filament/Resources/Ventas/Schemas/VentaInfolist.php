@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Ventas\Schemas;
 
+use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\EstadoCompromiso;
 use App\Domain\Enums\EstadoVenta;
 use App\Domain\ValueObjects\Monto;
 use App\Filament\Support\Cuadros;
 use App\Models\Compromiso;
+use App\Models\Recibo;
 use App\Models\Venta;
+use Carbon\CarbonInterface;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
@@ -60,9 +63,46 @@ class VentaInfolist
                         TextEntry::make('clientes')
                             ->label('Titular y copropietarios')
                             ->getStateUsing(static fn (Venta $record): string => $record->clientes
+                                ->filter(static fn ($cliente): bool => $cliente->getAttribute('pivot')
+                                    ?->getAttribute('titular_hasta') === null)
+                                /*
+                                 * El titular primero. La relacion ordena por
+                                 * `orden` —la posicion en el contrato— y quien
+                                 * entra por una cesion se sienta al final de
+                                 * esa lista: sin esto, un rotulo que promete
+                                 * «Titular y copropietarios» saca al titular
+                                 * ultimo. sortByDesc es estable, asi que los
+                                 * copropietarios conservan su orden.
+                                 */
+                                ->sortByDesc(static fn ($cliente): bool => $cliente->getAttribute('pivot')
+                                    ?->getAttribute('titular') === true)
                                 ->map(static fn ($cliente): string => $cliente->getAttribute('nombre')
                                     .($cliente->getAttribute('pivot')?->getAttribute('titular') === true ? ' (titular)' : ''))
                                 ->implode(' · ')),
+
+                        /*
+                         * La cesión de derechos, cuando la hubo (22-ago-2026).
+                         *
+                         * Va acá y no solo en la bitácora porque la pregunta
+                         * —«¿este expediente no era de fulano?»— se hace en
+                         * ventanilla, con el cliente enfrente, y nadie va a ir
+                         * a Registros de actividad a filtrar por subject_id.
+                         *
+                         * `hidden()` y no un guion: en el 99% de los
+                         * expedientes esto no pasó nunca, y una fila vacía en
+                         * todas las fichas para el caso raro es ruido.
+                         */
+                        TextEntry::make('titulares_anteriores')
+                            ->label('Fue de')
+                            ->getStateUsing(static fn (Venta $record): string => $record->titularesAnteriores()
+                                ->map(static function ($cliente): string {
+                                    $hasta = $cliente->getAttribute('pivot')?->getAttribute('titular_hasta');
+
+                                    return $cliente->getAttribute('nombre')
+                                        .($hasta instanceof CarbonInterface ? ' (hasta el '.$hasta->format('d/m/Y').')' : '');
+                                })
+                                ->implode(' · '))
+                            ->hidden(static fn (Venta $record): bool => $record->titularesAnteriores()->isEmpty()),
                     ]),
 
                 /*
@@ -136,21 +176,73 @@ class VentaInfolist
                             ->weight('bold')
                             ->getStateUsing(static fn (Venta $record): string => $record->saldoPendiente()->formateado()),
 
+                        /*
+                         * ═══ 🔴 UNA VENTA DE CONTADO NO TIENE NADA DE ESTO ═══
+                         *
+                         * Lo agarró Mauricio el 14-ago-2026 mirando la ficha
+                         * del contrato REB-2026-0004: decía «Día de pago: cada
+                         * 5 de mes» y «Primer mes» en una venta que se pagó
+                         * entera el día que se firmó. Cuatro cuadros
+                         * contestando preguntas que nadie hizo, y uno de ellos
+                         * —el día de pago— contradiciendo al de al lado, que
+                         * decía «Contado».
+                         *
+                         * Es el mismo criterio que en el modal de venta: sin
+                         * cuotas no hay plazo, ni día de pago, ni escalera. En
+                         * su lugar va lo único que importa saber de un contado:
+                         * que ya se cobró, cuándo, y que el papel está emitido.
+                         */
+                        TextEntry::make('pagado_al_firmar')
+                            ->label('Cómo se pagó')
+                            ->visible(static fn (Venta $record): bool => $record->esDeContado())
+                            ->columnSpan(2)
+                            ->weight('bold')
+                            ->getStateUsing(static fn (Venta $record): string => sprintf(
+                                'De contado: %s el %s',
+                                $record->montoValorTotal()->formateado(),
+                                $record->getAttribute('fecha_contrato')?->format('d/m/Y') ?? 'el día del contrato',
+                            ))
+                            /*
+                             * 🔴 Y QUE PAPEL SALIO, con su numero.
+                             *
+                             * «¿Dónde está el botón para pagar lo de contado y
+                             * que se emita la factura?» — Mauricio, 14-ago-2026,
+                             * mirando esta misma ficha. No faltaba ningun boton:
+                             * la factura ya se habia emitido al firmar. Lo que
+                             * faltaba era decirlo ACA, con el numero, en vez de
+                             * mandarlo a buscar a una pestaña.
+                             *
+                             * Una consulta mas en la ficha de UN expediente es
+                             * barata; que alguien dude de si el papel existe,
+                             * no.
+                             */
+                            ->helperText(static function (Venta $record): string {
+                                $papel = self::papelDeLaPrima($record);
+
+                                return $papel === null
+                                    ? 'Se cobró completo al firmar (R5). Todavía no hay papel emitido.'
+                                    : sprintf('Se cobró completo al firmar (R5). Salió %s — está en la pestaña Recibos.', $papel);
+                            }),
+
                         TextEntry::make('cuota_mensual')
                             ->label('Primer mes')
-                            ->formatStateUsing(static fn (Venta $record): string => $record->montoCuotaMensual()?->formateado() ?? 'Venta de contado')
+                            ->visible(static fn (Venta $record): bool => ! $record->esDeContado())
+                            ->formatStateUsing(static fn (Venta $record): string => $record->montoCuotaMensual()?->formateado() ?? '—')
                             ->helperText('Lo más alto: es lo que paga mientras todos los lotes siguen vivos.'),
 
                         TextEntry::make('plazo_meses')
                             ->label('Hasta')
-                            ->formatStateUsing(static fn (int $state): string => $state === 0 ? 'Contado' : 'el mes '.$state),
+                            ->visible(static fn (Venta $record): bool => ! $record->esDeContado())
+                            ->formatStateUsing(static fn (int $state): string => 'el mes '.$state),
 
                         TextEntry::make('dia_pago')
                             ->label('Día de pago')
+                            ->visible(static fn (Venta $record): bool => ! $record->esDeContado())
                             ->formatStateUsing(static fn (int $state): string => 'Cada '.$state." de mes\n"),
 
                         TextEntry::make('cuotas_pendientes')
                             ->label('Cuotas por pagar')
+                            ->visible(static fn (Venta $record): bool => ! $record->esDeContado())
                             ->getStateUsing(static fn (Venta $record): string => $record->cuotas()->deLotesVivos()->pendientes()->count()
                                 .' de '.$record->cuotas()->deLotesVivos()->count()),
 
@@ -160,6 +252,7 @@ class VentaInfolist
                          */
                         TextEntry::make('escalera')
                             ->label('Lo que paga por mes')
+                            ->visible(static fn (Venta $record): bool => ! $record->esDeContado())
                             ->columnSpanFull()
                             ->getStateUsing(static fn (Venta $record): HtmlString => Cuadros::escalera($record->tramosDeCuotas())),
                     ]),
@@ -174,5 +267,30 @@ class VentaInfolist
                             ->prose(),
                     ]),
             ]);
+    }
+
+    /**
+     * Con qué papel se cobró la prima, si ya salió alguno.
+     *
+     * Null cuando no hay ninguno, y eso es un caso real y no un error: una
+     * venta cuya prima quedó cubierta entera por la seña de un apartado no
+     * emite recibo nuevo —esa plata ya tuvo el suyo— y una cartera vieja
+     * importada en papel puede no tenerlo.
+     */
+    private static function papelDeLaPrima(Venta $venta): ?string
+    {
+        $recibo = $venta->recibos()
+            ->where('concepto', ConceptoDeRecibo::Prima->value)
+            ->whereNull('anulado_el')
+            ->latest('id')
+            ->first();
+
+        if (! $recibo instanceof Recibo) {
+            return null;
+        }
+
+        return $recibo->esFactura()
+            ? 'la factura '.$recibo->numeroDelPapel()
+            : 'el recibo N.º '.$recibo->folio();
     }
 }
