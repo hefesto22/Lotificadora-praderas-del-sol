@@ -8,7 +8,9 @@ use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\ModalidadDeReprogramacion;
 use App\Domain\Enums\TipoCorrelativo;
+use App\Domain\Exceptions\ValueObjectInvalidoException;
 use App\Domain\Pagos\RegistroDePagos;
+use App\Domain\ValueObjects\DNI;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\PrecioPactado;
 use App\Domain\Ventas\RegistroDeVentas;
@@ -54,22 +56,28 @@ use RuntimeException;
  *
  * ═══ 🔴 EL NUMERO DE RECIBO: LA PARTE RARA Y POR QUE ═══
  *
- * Los recibos históricos llevan **el número del talonario de papel**, no el que
- * le tocaría al sistema. Lo decidió Mauricio el 11-ago-2026, y la razón es de
- * ventanilla: el cliente llega con su recibo en la mano y quien atiende tiene
- * que poder encontrarlo.
+ * **Los recibos históricos NO llevan el número del talonario de papel.** El
+ * seeder numera de corrido —1, 2, 3…— por la puerta de siempre, y al final
+ * `dejarLasSeriesDondeVan()` empuja la serie hasta `OLYMPO_PROXIMO_RECIBO`,
+ * que es el próximo número en blanco del talonario. Así el primer recibo que
+ * el sistema emita en producción no repite uno que ya está impreso y firmado.
  *
- * `ConsumoDeCorrelativos` no acepta que le digan qué número emitir —y hace
- * bien—, así que **el seeder acomoda la serie ANTES de cada cobro**: deja
- * `ultimo_numero` en N−1 y el Service consume N por la puerta de siempre. No se
- * toca el Service ni se escribe `recibos.numero` a mano.
+ * El número del papel sí queda escrito: va en las **observaciones** de cada
+ * recibo, que es donde se puede buscar cuando el cliente llega con el suyo en
+ * la mano. `ExpedientesHistoricos` lo trae en `recibo` y `recibo_prima` como
+ * transcripción, no como instrucción — el seeder no lo usa para numerar.
  *
- * Al terminar, la serie queda en el número más alto que usó el cuaderno, para
- * que el primer recibo nuevo siga desde ahí.
+ * ⚠️ **Ojo con esto al leer el archivo de datos:** que un `recibo` esté
+ * repetido ahí NO hace fallar la carga, porque ese número nunca llega a
+ * `recibos.numero`. La unicidad de la base no lo va a atajar.
  *
- * ⚠️ Consecuencia asumida: **la serie histórica tiene huecos**, porque el
- * cuaderno los tiene. R12 promete que entre el 000120 y el 000130 no falta
- * ninguno, y eso vale de acá en adelante — no para lo que se hizo en papel.
+ * Y son STRINGS con sus ceros —«00000053», «0049», «0075-1»— porque el
+ * cuaderno lleva dos talonarios y el 0049 corto no es el 00000049 largo.
+ *
+ * Esto reemplaza a lo que decía acá antes —que el seeder acomodaba la serie
+ * ANTES de cada cobro para emitir el número del papel—. Se intentó, y lo que
+ * quedó es esto; el comentario se quedó atrás y mandó a perseguir un problema
+ * que no existía.
  *
  * ═══ EL PRECIO SE DERIVA DEL VALOR, NO AL REVES ═══
  *
@@ -92,6 +100,10 @@ class CarteraHistoricaSeeder extends Seeder
         if (! $proyecto instanceof Proyecto) {
             $this->command?->error('No existe el proyecto '.ExpedientesHistoricos::PROYECTO.'. Importá el plano primero.');
 
+            return;
+        }
+
+        if (! $this->revisarTodoAntesDeCargar($proyecto)) {
             return;
         }
 
@@ -119,6 +131,240 @@ class CarteraHistoricaSeeder extends Seeder
 
         $this->command?->newLine();
         $this->command?->info("Cartera histórica: {$cargados} expedientes cargados, {$salteados} ya estaban.");
+    }
+
+    // ─── La revisión de antes de cargar ───────────────────────────────
+
+    /**
+     * Revisa los 110 expedientes ANTES de escribir una sola fila.
+     *
+     * ═══ POR QUE EXISTE ═══
+     *
+     * Sin esto el seeder muere en el PRIMER dato malo, y como cada corrida
+     * borra y recarga, arreglar cinco problemas cuesta cinco vueltas
+     * completas: cargar 34 expedientes, reventar, arreglar, borrar, repetir.
+     * El 23-ago-2026 fueron cuatro vueltas seguidas —el lote 0, la referencia
+     * de R11, el DNI de 14 dígitos— y cada una tapaba a la siguiente.
+     *
+     * Acá se revisa TODO y se listan TODOS los problemas juntos. Una vuelta.
+     *
+     * ⚠️ **Se revisa con los objetos de verdad, no con una copia de la regla.**
+     * `DNI::desdeEntrada()` es el mismo que va a correr después: si mañana le
+     * agregan una validación, esta revisión la hereda sola. Reescribir acá un
+     * `preg_match` de trece dígitos habría dejado pasar el año de nacimiento,
+     * que es exactamente lo que pasó.
+     *
+     * Devuelve false —y no lanza— para que la salida sea la lista de
+     * problemas y no un stack trace de un solo renglón.
+     */
+    private function revisarTodoAntesDeCargar(Proyecto $proyecto): bool
+    {
+        $problemas = $this->seriesQueQuedaronAtras();
+
+        foreach (ExpedientesHistoricos::todos() as $datos) {
+            $exp = $this->folio((int) $datos['expediente']);
+
+            foreach ($this->quejasDelExpediente($proyecto, $datos) as $queja) {
+                $problemas[] = "   · Exp. {$exp}: {$queja}";
+            }
+        }
+
+        if ($problemas === []) {
+            return true;
+        }
+
+        $this->command?->error(count($problemas).' cosas que hay que arreglar en ExpedientesHistoricos ANTES de cargar:');
+        $this->command?->newLine();
+
+        foreach ($problemas as $problema) {
+            $this->command?->line($problema);
+        }
+
+        $this->command?->newLine();
+        $this->command?->warn('No se cargó nada. La base quedó como estaba.');
+
+        return false;
+    }
+
+    /**
+     * Una serie que quedó por DETRAS de las filas que ya existen.
+     *
+     * Si el correlativo global de recibos dice 0 y en la tabla ya hay un
+     * recibo 207, la carga emite 1, 2, 3… y revienta al llegar a 207 —con
+     * ochenta y seis expedientes adentro, que es donde reventó el 23-ago-2026.
+     *
+     * La causa está arreglada en `olympo:limpiar-cartera`, que ya no pone las
+     * series globales en cero. Esto queda igual: es una consulta, corre antes
+     * de escribir nada, y atrapa a cualquier otro camino que deje una serie
+     * atrás — un `truncate` a mano, un restore parcial, lo que sea.
+     *
+     * @return list<string>
+     */
+    private function seriesQueQuedaronAtras(): array
+    {
+        $series = [
+            'recibo_interno' => 'recibos',
+            'devolucion'     => 'devoluciones',
+            'gasto'          => 'gastos',
+        ];
+
+        $problemas = [];
+
+        foreach ($series as $tipo => $tabla) {
+            $mayor = (int) DB::table($tabla)->max('numero');
+
+            $serie = DB::table('correlativos')
+                ->whereNull('proyecto_id')
+                ->where('tipo', $tipo)
+                ->value('ultimo_numero');
+
+            if ($serie !== null && (int) $serie < $mayor) {
+                $problemas[] = "   · La serie de «{$tipo}» está en {$serie} y en «{$tabla}» ya existe el "
+                    ."número {$mayor}: los que emita esta carga van a chocar. Corré "
+                    .'`olympo:limpiar-cartera` de nuevo, que ahora la acomoda sola.';
+            }
+        }
+
+        return $problemas;
+    }
+
+    /**
+     * Todo lo que le encuentro a un expediente, junto.
+     *
+     * @param array<string, mixed> $datos
+     *
+     * @return list<string>
+     */
+    private function quejasDelExpediente(Proyecto $proyecto, array $datos): array
+    {
+        $quejas = [];
+
+        /** @var array<string, string|null> $ficha */
+        $ficha = is_array($datos['cliente'] ?? null) ? $datos['cliente'] : [];
+
+        try {
+            DNI::desdeEntrada($ficha['dni'] ?? null);
+        } catch (ValueObjectInvalidoException $e) {
+            $quejas[] = $e->getMessage();
+        }
+
+        $telefono = $ficha['telefono'] ?? null;
+
+        if (is_string($telefono) && preg_match('/^[23789]\d{7}$/', $telefono) !== 1) {
+            $quejas[] = "el teléfono «{$telefono}» no es un número hondureño válido.";
+        }
+
+        // R11, en la prima y en cada pago.
+        foreach ($this->cobrosDelExpediente($datos) as $cobro) {
+            if ($cobro['forma'] !== 'efectivo' && trim((string) $cobro['referencia']) === '') {
+                $quejas[] = "{$cobro['donde']} es por {$cobro['forma']} y no trae referencia (R11).";
+            }
+        }
+
+        /** @var list<array<string, mixed>> $declarados */
+        $declarados = is_array($datos['lotes'] ?? null) ? $datos['lotes'] : [];
+
+        /** @var list<array<string, mixed>> $pagos */
+        $pagos = is_array($datos['pagos'] ?? null) ? $datos['pagos'] : [];
+
+        /** @var list<string> $alContado */
+        $alContado = [];
+
+        foreach ($declarados as $fila) {
+            $codigo = $fila['bloque'].'-'.$fila['numero'];
+
+            /*
+             * ⚠️ `lotes` NO tiene columna `bloque`: tiene `bloque_id`, y el
+             * nombre vive en `bloques.nombre`. Es la misma consulta que hace
+             * `lotes()` más abajo, y va copiada de ahí a propósito — escribirla
+             * «como debería ser» costó una corrida entera con «column "bloque"
+             * does not exist».
+             */
+            $existe = Lote::query()
+                ->where('proyecto_id', $proyecto->getKey())
+                ->where('numero', $fila['numero'])
+                ->whereIn('bloque_id', DB::table('bloques')
+                    ->where('proyecto_id', $proyecto->getKey())
+                    ->where('nombre', $fila['bloque'])
+                    ->pluck('id'))
+                ->exists();
+
+            if (! $existe) {
+                $quejas[] = "el lote {$codigo} no está en el plano.";
+            }
+        }
+
+        /*
+         * Plazo 0 es AL CONTADO —lo dijo Mauricio el 23-ago-2026— y el sistema
+         * lo soporta: `PlanDeCuotas` devuelve un plan vacío. Pero **solo si no
+         * queda nada que financiar**: con saldo, cae en `porPlazoFijo()` y
+         * revienta con «el plazo de 0 meses no es válido».
+         *
+         * Mordió con el lote I-3 del exp. 0049, que el cuaderno pone al
+         * contado pero cuyo dinero entró después, por recibo.
+         */
+        foreach ($declarados as $fila) {
+            if ((int) ($fila['plazo'] ?? -1) !== 0) {
+                continue;
+            }
+
+            $suValor = new Monto((string) $fila['valor']);
+            $suPrima = new Monto((string) ($fila['prima'] ?? '0'));
+
+            if ($suPrima->menorQue($suValor)) {
+                $quejas[] = "el lote {$fila['bloque']}-{$fila['numero']} dice contado (plazo 0) pero su "
+                    ."prima L {$suPrima->valor} no cubre su valor L {$suValor->valor}: sin cuotas no hay "
+                    .'dónde cobrar la diferencia.';
+            }
+
+            $alContado[] = $fila['bloque'].'-'.$fila['numero'];
+        }
+
+        /*
+         * Un pago sin destino se reparte entre TODOS los lotes del contrato, y
+         * un lote de contado no tiene ni una cuota: el dominio lo rebota con
+         * «el lote RPS-G-005 no debe nada». Con lotes al contado, el destino
+         * hay que escribirlo. Mordió con el exp. 0092.
+         */
+        if ($alContado !== []) {
+            foreach ($pagos as $pago) {
+                if (($pago['lote'] ?? null) === null && ($pago['lotes'] ?? null) === null) {
+                    $quejas[] = "el pago del {$pago['fecha']} no dice a qué lote va, y el contrato tiene "
+                        .implode(' y ', $alContado).' al contado, que no deben nada: escribí los lotes.';
+                }
+            }
+        }
+
+        return $quejas;
+    }
+
+    /**
+     * La prima y los pagos, en una sola lista, para revisarlos igual.
+     *
+     * @param array<string, mixed> $datos
+     *
+     * @return list<array{donde: string, forma: string, referencia: string|null}>
+     */
+    private function cobrosDelExpediente(array $datos): array
+    {
+        $cobros = [[
+            'donde'      => 'la prima',
+            'forma'      => (string) ($datos['forma_prima'] ?? 'efectivo'),
+            'referencia' => is_string($datos['ref_prima'] ?? null) ? $datos['ref_prima'] : null,
+        ]];
+
+        /** @var list<array<string, mixed>> $pagos */
+        $pagos = is_array($datos['pagos'] ?? null) ? $datos['pagos'] : [];
+
+        foreach ($pagos as $pago) {
+            $cobros[] = [
+                'donde'      => 'el pago del '.($pago['fecha'] ?? 'sin fecha'),
+                'forma'      => (string) ($pago['forma'] ?? 'efectivo'),
+                'referencia' => is_string($pago['referencia'] ?? null) ? $pago['referencia'] : null,
+            ];
+        }
+
+        return $cobros;
     }
 
     // ─── Un expediente ────────────────────────────────────────────────
@@ -498,11 +744,11 @@ class CarteraHistoricaSeeder extends Seeder
             ->all();
 
         if ($compromisos === []) {
-            throw new RuntimeException("El recibo {$pago['recibo']} apunta a una venta sin lotes.");
+            throw new RuntimeException($this->elPago($pago).' apunta a una venta sin lotes.');
         }
 
         /*
-         * 🔴 VARIOS LOTES CON SU MONTO, EN UN SOLO RECIBO.
+         * 🔴 VARIOS LOTES —PERO NO TODOS— EN UN SOLO RECIBO.
          *
          * El exp. 0051 lo trajo: el recibo 00000328 son L 15,000.00 que
          * cubren la cuota de julio de los lotes 1, 2 y 11 del bloque J —cinco
@@ -510,29 +756,49 @@ class CarteraHistoricaSeeder extends Seeder
          *
          * Sin esto habría que elegir entre repartir los 15,000 entre los SEIS
          * lotes (y dejar seis saldos equivocados) o partir el recibo en tres
-         * (y inventar dos números de talonario que no existen). El cuaderno
-         * dice qué lote y cuánto: se carga tal cual.
+         * (y inventar dos números de talonario que no existen).
+         *
+         * ═══ LA CLAVE `lotes` ADMITE DOS FORMAS ═══
+         *
+         *   ['J-1', 'J-2', 'J-11']                → CUALES lotes. El monto se
+         *                                           reparte entre ESOS, igual
+         *                                           que se repartiría entre
+         *                                           todos si no se dijera nada.
+         *   ['J-1' => '5000.00', 'J-2' => '…']    → CUANTO a cada uno.
+         *
+         * La primera es la que sale del cuaderno y la que escribe
+         * `convertir_cartera.py`: la columna «¿A qué lote?» dice «1 y 14 N» y
+         * nada más. La segunda queda para el día que el papel desglose montos
+         * distintos por lote — y entonces manda sobre el reparto.
+         *
+         * 🔴 Una lista NO es un mapa: `foreach` sobre `['J-1','J-2']` entrega
+         * las claves 0 y 1. Cargarla por la puerta del mapa daba «El recibo
+         * 385 apunta al lote 0, que no está en la venta».
          */
-        $porLote = is_array($pago['lotes'] ?? null) ? $pago['lotes'] : null;
+        $porLote = is_array($pago['lotes'] ?? null) && $pago['lotes'] !== [] ? $pago['lotes'] : null;
 
+        // ── Forma 1: el cuaderno dice cuáles, y el reparto sale del valor.
+        if ($porLote !== null && array_is_list($porLote)) {
+            $elegidos = [];
+
+            foreach ($porLote as $codigo) {
+                $elegidos[] = $this->compromisoDe($pago, $lotes, $compromisos, (string) $codigo);
+            }
+
+            return count($elegidos) === 1
+                ? [['lote' => $elegidos[0], 'monto' => $monto]]
+                : $this->repartir($monto, $elegidos);
+        }
+
+        // ── Forma 2: el cuaderno dice cuánto a cada uno.
         if ($porLote !== null) {
             $renglones = [];
 
             foreach ($porLote as $codigo => $cuanto) {
-                $buscado = isset($lotes[$codigo]) ? (int) $lotes[$codigo]->getKey() : 0;
-                $renglon = null;
-
-                foreach ($compromisos as $compromiso) {
-                    if ((int) $compromiso->getAttribute('lote_id') === $buscado) {
-                        $renglon = $compromiso;
-                    }
-                }
-
-                if (! $renglon instanceof Compromiso) {
-                    throw new RuntimeException("El recibo {$pago['recibo']} apunta al lote {$codigo}, que no está en la venta.");
-                }
-
-                $renglones[] = ['lote' => $renglon, 'monto' => new Monto((string) $cuanto)];
+                $renglones[] = [
+                    'lote'  => $this->compromisoDe($pago, $lotes, $compromisos, (string) $codigo),
+                    'monto' => new Monto((string) $cuanto),
+                ];
             }
 
             return $renglones;
@@ -540,15 +806,7 @@ class CarteraHistoricaSeeder extends Seeder
 
         // Un lote declarado: todo va ahí.
         if ($clave !== null) {
-            $buscado = isset($lotes[$clave]) ? (int) $lotes[$clave]->getKey() : 0;
-
-            foreach ($compromisos as $compromiso) {
-                if ((int) $compromiso->getAttribute('lote_id') === $buscado) {
-                    return [['lote' => $compromiso, 'monto' => $monto]];
-                }
-            }
-
-            throw new RuntimeException("El recibo {$pago['recibo']} apunta al lote {$clave}, que no está en la venta.");
+            return [['lote' => $this->compromisoDe($pago, $lotes, $compromisos, $clave), 'monto' => $monto]];
         }
 
         if (count($compromisos) === 1) {
@@ -556,6 +814,26 @@ class CarteraHistoricaSeeder extends Seeder
         }
 
         return $this->repartir($monto, $compromisos);
+    }
+
+    /**
+     * El renglón de la venta que corresponde a un código «bloque-numero».
+     *
+     * @param array<string, mixed> $pago
+     * @param array<string, Lote> $lotes
+     * @param list<Compromiso> $compromisos
+     */
+    private function compromisoDe(array $pago, array $lotes, array $compromisos, string $codigo): Compromiso
+    {
+        $buscado = isset($lotes[$codigo]) ? (int) $lotes[$codigo]->getKey() : 0;
+
+        foreach ($compromisos as $compromiso) {
+            if ((int) $compromiso->getAttribute('lote_id') === $buscado) {
+                return $compromiso;
+            }
+        }
+
+        throw new RuntimeException($this->elPago($pago)." apunta al lote {$codigo}, que no está en la venta.");
     }
 
     /**
@@ -793,6 +1071,29 @@ class CarteraHistoricaSeeder extends Seeder
     private function folio(int $numero): string
     {
         return str_pad((string) $numero, 4, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Cómo se nombra un pago del cuaderno cuando hay que reclamarle algo.
+     *
+     * `recibo` es el número TAL COMO SE ESCRIBE —«00000053», «0049»,
+     * «0075-1»—, con sus ceros, porque los ceros distinguen los dos
+     * talonarios. Y puede faltar: el cuaderno tiene renglones sin numerar.
+     * Sin esto el mensaje quedaba «El recibo  apunta al lote J-2», que no dice
+     * cuál de los ciento y pico.
+     *
+     * @param array<string, mixed> $pago
+     */
+    private function elPago(array $pago): string
+    {
+        $numero = $pago['recibo'] ?? null;
+
+        if (is_string($numero) && trim($numero) !== '') {
+            return "El recibo {$numero}";
+        }
+
+        return 'El pago del '.($pago['fecha'] ?? 'sin fecha')
+            .' por L '.number_format((float) ($pago['monto'] ?? 0), 2);
     }
 
     /**

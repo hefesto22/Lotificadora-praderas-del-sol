@@ -212,12 +212,53 @@ final class LimpiarCartera extends Command
             ->update(['estado' => EstadoLote::Disponible->value, 'updated_at' => now()]);
 
         /*
-         * Los correlativos a cero: el del proyecto y los globales. Si no, el
-         * primer contrato de verdad sale con el número que dejaron las pruebas
-         * y esa serie ya no se puede explicar.
+         * El correlativo del PROYECTO vuelve a cero: los contratos son suyos y
+         * se fueron todos con esta limpieza.
          */
         DB::table('correlativos')->where('proyecto_id', $proyecto)->update(['ultimo_numero' => 0, 'updated_at' => now()]);
-        DB::table('correlativos')->whereNull('proyecto_id')->update(['ultimo_numero' => 0, 'updated_at' => now()]);
+
+        $this->acomodarLasSeriesGlobales();
+    }
+
+    /**
+     * Las series GLOBALES quedan donde manda lo que SOBREVIVIÓ, no en cero.
+     *
+     * ═══ 🔴 PONERLAS EN CERO ROMPE LA BASE ═══
+     *
+     * Estaban en cero, y la razón escrita era buena: que el primer documento
+     * de verdad no salga con el número que dejaron las pruebas. Pero recibos,
+     * devoluciones y gastos son **de toda la lotificadora, no de un proyecto**
+     * (R12: una sola numeración). Limpiar RPS no se lleva los recibos de los
+     * demás proyectos — y con la serie en cero, la carga siguiente vuelve a
+     * emitir 1, 2, 3… hasta chocar contra uno que ya existe:
+     *
+     *     duplicate key value violates unique constraint "recibos_numero_unique"
+     *     Key (numero)=(207) already exists.
+     *
+     * Pasó el 23-ago-2026, con ochenta y seis expedientes ya cargados.
+     *
+     * La regla que faltaba, y que vale para cualquier correlativo:
+     * **una serie nunca puede quedar por detrás de las filas que existen.**
+     * Se la deja en el máximo que quedó vivo — o en cero si no quedó ninguno,
+     * que es la instalación nueva y lo que el comentario viejo quería lograr.
+     */
+    private function acomodarLasSeriesGlobales(): void
+    {
+        $series = [
+            'recibo_interno' => 'recibos',
+            'devolucion'     => 'devoluciones',
+            'gasto'          => 'gastos',
+        ];
+
+        foreach ($series as $tipo => $tabla) {
+            DB::table('correlativos')
+                ->whereNull('proyecto_id')
+                ->where('tipo', $tipo)
+                ->update([
+                    'ultimo_numero' => (int) DB::table($tabla)->max('numero'),
+                    'updated_at'    => now(),
+                ]);
+        }
     }
 
     /**
