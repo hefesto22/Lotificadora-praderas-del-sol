@@ -535,8 +535,8 @@
         .llegar svg { flex: none; }
 
         /* Los dos botones del pie de la ficha, lado a lado cuando entran. */
+        /* Un solo boton desde el 23-ago: ocupa la fila entera. */
         .acciones { display: grid; }
-        @media (min-width: 30rem) { .acciones { grid-template-columns: 1fr 1fr; gap: .5rem; } }
     </style>
 </head>
 <body>
@@ -788,8 +788,13 @@
             </button>
         </form>
 
+        {{-- Un solo camino de salida, y uno solo de accion.
+
+             «Copiar el enlace» salio el 23-ago: competia con el boton verde
+             justo arriba y no lleva a ninguna venta. El que quiere compartir
+             el lote comparte la direccion del navegador, que ya se actualiza
+             sola al abrir cualquier lote (ver `recordar()`). --}}
         <div class="acciones">
-            <button type="button" class="boton gris" id="copiar">Copiar el enlace de este lote</button>
             <button type="button" class="boton gris" id="cerrar-pie">Seguir viendo el plano</button>
         </div>
     </div>
@@ -1797,53 +1802,10 @@
         return null;
     }
 
-    /*
-     * El respaldo para copiar. `navigator.clipboard` solo existe en https o
-     * en localhost: mientras el plano se sirva por http en una red local,
-     * este es el unico camino que de verdad copia.
-     */
-    function copiarAMano(texto) {
-        var caja = document.createElement('textarea');
-        caja.value = texto;
-        caja.setAttribute('readonly', '');
-        caja.style.position = 'fixed';
-        caja.style.left = '-9999px';
-        document.body.appendChild(caja);
-        caja.select();
-
-        var listo = false;
-        try { listo = document.execCommand('copy'); } catch (e) { listo = false; }
-
-        document.body.removeChild(caja);
-        return listo;
-    }
-
     document.getElementById('cerrar').addEventListener('click', cerrar);
     document.getElementById('cerrar-pie').addEventListener('click', cerrar);
     telon.addEventListener('click', function (e) { if (e.target === telon) { cerrar(); } });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { cerrar(); } });
-
-    var copiar = document.getElementById('copiar');
-
-    copiar.addEventListener('click', function () {
-        var texto = location.href;
-        var original = copiar.textContent;
-
-        var avisar = function (listo) {
-            copiar.textContent = listo ? '¡Enlace copiado!' : 'Copialo de la barra de arriba';
-            setTimeout(function () { copiar.textContent = original; }, 2500);
-        };
-
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(texto).then(
-                function () { avisar(true); },
-                function () { avisar(copiarAMano(texto)); }
-            );
-            return;
-        }
-
-        avisar(copiarAMano(texto));
-    });
 
     // ─── El mapa ──────────────────────────────────────────────────────
 
