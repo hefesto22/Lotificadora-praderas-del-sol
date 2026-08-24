@@ -75,33 +75,78 @@ describe('Contratos', function (): void {
 
 describe('Recibos internos', function (): void {
     /*
-    | R12: una sola numeracion para toda la lotificadora, no una por
-    | receptor ni una por proyecto. Don Elder y don Edwin sacan numeros de
-    | la misma secuencia.
+    | Desde el 23-ago-2026 la serie corre POR PROYECTO: dos desarrollos ya no
+    | se intercalan los numeros. Adentro de uno sigue habiendo UNA sola
+    | secuencia —no una por receptor—: don Elder y don Edwin sacan del mismo
+    | mostrador.
     */
-    test('es una sola serie global, sin proyecto', function (): void {
-        $primero = DB::transaction(fn (): int => $this->correlativos->siguienteDeReciboInterno());
-        $segundo = DB::transaction(fn (): int => $this->correlativos->siguienteDeReciboInterno());
+    test('cada proyecto lleva su propia serie', function (): void {
+        $primero = DB::transaction(fn (): int => $this->correlativos->siguienteDeReciboInterno($this->proyecto));
+        $segundo = DB::transaction(fn (): int => $this->correlativos->siguienteDeReciboInterno($this->proyecto));
 
         expect([$primero, $segundo])->toBe([1, 2]);
+
+        $otro = Proyecto::factory()->create(['codigo' => 'BAM']);
+        $suyo = DB::transaction(fn (): int => $this->correlativos->siguienteDeReciboInterno($otro));
+
+        // Arranca en 1 aunque el otro desarrollo ya lleve dos: son dos series.
+        expect($suyo)->toBe(1);
+    });
+
+    test('la serie de la cartera vieja es global y aparte', function (): void {
+        DB::transaction(fn (): int => $this->correlativos->siguienteDeReciboInterno($this->proyecto));
+
+        $historico = DB::transaction(fn (): int => $this->correlativos->siguienteDeReciboHistorico());
+
+        expect($historico)->toBe(1);
 
         // `value()` y no `first()->proyecto_id`: el query builder devuelve
         // un `object` pelado y PHPStan no le conoce propiedades.
         $conProyecto = DB::table('correlativos')
-            ->where('tipo', 'recibo_interno')
+            ->where('tipo', 'recibo_historico')
             ->whereNotNull('proyecto_id')
             ->count();
 
         expect($conProyecto)->toBe(0);
     });
 
+    /*
+    | El campo «desde que numero empieza a imprimir» de la pestana
+    | Facturacion. Es un PISO, no una asignacion: la serie nunca retrocede.
+    */
+    test('el proyecto puede decir desde que numero arranca', function (): void {
+        $this->proyecto->update(['proximo_recibo' => 500]);
+
+        $primero = DB::transaction(fn (): int => $this->correlativos->siguienteDeReciboInterno($this->proyecto->fresh()));
+
+        expect($primero)->toBe(500);
+    });
+
+    test('bajarle el arranque NO hace retroceder la serie', function (): void {
+        $this->proyecto->update(['proximo_recibo' => 500]);
+        DB::transaction(fn (): int => $this->correlativos->siguienteDeReciboInterno($this->proyecto->fresh()));
+
+        $this->proyecto->update(['proximo_recibo' => 10]);
+        $siguiente = DB::transaction(fn (): int => $this->correlativos->siguienteDeReciboInterno($this->proyecto->fresh()));
+
+        expect($siguiente)->toBe(501);
+    });
+
     test('no comparte serie con los contratos', function (): void {
         DB::transaction(fn (): int => $this->correlativos->siguienteDeContrato($this->proyecto));
         DB::transaction(fn (): int => $this->correlativos->siguienteDeContrato($this->proyecto));
 
-        $recibo = DB::transaction(fn (): int => $this->correlativos->siguienteDeReciboInterno());
+        $recibo = DB::transaction(fn (): int => $this->correlativos->siguienteDeReciboInterno($this->proyecto));
 
         expect($recibo)->toBe(1);
+    });
+
+    test('el numero de un recibo viene con su serie', function (): void {
+        $delProyecto = DB::transaction(fn (): array => $this->correlativos->paraUnReciboNuevo($this->proyecto));
+        $viejo = DB::transaction(fn (): array => $this->correlativos->paraUnReciboNuevo($this->proyecto, true));
+
+        expect($delProyecto)->toBe(['numero' => 1, 'serie' => 'RPS'])
+            ->and($viejo)->toBe(['numero' => 1, 'serie' => null]);
     });
 });
 

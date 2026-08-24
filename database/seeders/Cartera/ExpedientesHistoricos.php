@@ -32,11 +32,16 @@ namespace Database\Seeders\Cartera;
  * lo que el cuaderno dice, y perderlos sería perder el único rastro de qué
  * papel documenta cada cobro.
  *
- * El sistema numera sus recibos de corrido y después se le dice desde qué
- * número seguir — es `OLYMPO_PROXIMO_RECIBO` en el `.env` del servidor, el
- * próximo número en blanco del talonario de papel. Es la decisión de Mauricio
- * del 11-ago-2026, y es la que hace que los números repetidos entre los dos
- * talonarios, los ilegibles y el «0075-1» del exp. 0045 dejen de importar.
+ * El sistema numera sus recibos de corrido, y desde el 23-ago-2026 estos salen
+ * de una **serie aparte**: la de antes del sistema, con `recibos.serie` en
+ * null. Se ven sin prefijo —`000001`— y no le estorban a nadie, porque lo que
+ * el sistema imprime de ahora en adelante lleva el código del desarrollo
+ * adelante: `RPS-00000001`, y desde qué número arranca se dice en la pestaña
+ * Facturación del proyecto.
+ *
+ * Son dos numeraciones que no se tocan, y eso es lo que hace que los números
+ * repetidos entre los dos talonarios, los ilegibles y el «0075-1» del exp.
+ * 0045 dejen de importar.
  *
  * 🔴 **LOS CEROS SON PARTE DEL NUMERO. `recibo` es un STRING, no un int.**
  *

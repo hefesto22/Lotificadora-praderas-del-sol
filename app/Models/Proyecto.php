@@ -34,6 +34,7 @@ use Spatie\Activitylog\Support\LogOptions;
 #[Fillable([
     'nombre',
     'codigo',
+    'proximo_recibo',
     'logo_path',
     'facturacion_id',
     'unidad_area',
@@ -244,6 +245,7 @@ class Proyecto extends Model
             'lotes_a_donar'     => 'integer',
             'reserva_lotes'     => 'boolean',
             'lotes_a_reservar'  => 'integer',
+            'proximo_recibo'    => 'integer',
             'plano_publico'     => 'boolean',
             'servicios'         => 'array',
         ];

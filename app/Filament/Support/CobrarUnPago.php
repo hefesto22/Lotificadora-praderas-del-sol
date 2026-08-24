@@ -632,7 +632,7 @@ final readonly class CobrarUnPago
              * antes el que va a construir y bajar la cuota del otro.
              */
             Section::make('¿A qué lotes abona?')
-                ->description('El monto de cada lote lo escribís vos: el sistema no reparte nada solo (R21).')
+                ->description('El monto de cada lote lo escribís vos: el sistema no reparte nada solo (R21). Un lote con cuotas vencidas no se puede abonar: primero se pone al día.')
                 ->visible(fn (Get $get): bool => $this->modoDeLaPantalla($get) === ModoDeCobro::Abono)
                 ->schema($this->renglonesDeAbono()),
 
@@ -857,6 +857,7 @@ final readonly class CobrarUnPago
                         (string) $lote->lote?->getAttribute('codigo'),
                         $this->saldoDe($lote)->formateado(),
                     ))
+                    ->helperText($this->lasVencidasDe($lote))
                     ->live()
                     ->columnSpan(7),
 
@@ -884,6 +885,17 @@ final readonly class CobrarUnPago
      * visible por modo. Repetirlos haría que marcar un lote para cobrar lo
      * dejara marcado para abonar.
      *
+     * ═══ 🔴 EL LOTE ATRASADO NO TIENE CASILLA (24-ago-2026) ═══
+     *
+     * «Que no pueda hacer abono a capital si tiene cuotas pendientes okey»
+     * —Mauricio—. En vez de dejar marcar y que el Service lo rechace con el
+     * cliente enfrente, el renglón se cambia por el motivo: cuáles cuotas
+     * están vencidas, cuánto suman, y por dónde entra esa plata.
+     *
+     * No es una casilla deshabilitada: una casilla gris invita a clickearla y
+     * no explica nada. La regla de verdad vive en el Service —un campo se
+     * falsifica, un botón se rehabilita— y esto es solo el aviso temprano.
+     *
      * @return list<Component>
      */
     private function renglonesDeAbono(): array
@@ -902,6 +914,15 @@ final readonly class CobrarUnPago
 
         foreach ($lotes as $lote) {
             $id = (int) $lote->getKey();
+            $atrasado = $this->porQueNoPuedeAbonar($lote);
+
+            if ($atrasado instanceof HtmlString) {
+                $renglones[] = Placeholder::make("sin_abono_{$id}")
+                    ->hiddenLabel()
+                    ->content($atrasado);
+
+                continue;
+            }
 
             $renglones[] = Grid::make(12)->schema([
                 Checkbox::make("abonar_{$id}")
@@ -946,6 +967,12 @@ final readonly class CobrarUnPago
      * casilla está marcada. Está para que un formulario a medias no elija en
      * silencio el camino contrario al que el cliente pidió.
      *
+     * ⚠️ El lote atrasado se saltea acá TAMBIEN (24-ago-2026), aunque ya no
+     * tenga casilla: este método recorre `lotesQueDeben()` —todos— y lee el
+     * estado por nombre de campo, así que un `abonar_12` que quedó en el
+     * formulario de antes entraría igual. Lo que se manda al Service es lo que
+     * la pantalla mostró, ni un renglón más.
+     *
      * @param array<string, mixed> $data
      *
      * @return list<array{lote: Compromiso, monto: Monto, modalidad: ModalidadDeReprogramacion}>
@@ -958,6 +985,10 @@ final readonly class CobrarUnPago
             $id = (int) $lote->getKey();
 
             if (($data["abonar_{$id}"] ?? false) !== true) {
+                continue;
+            }
+
+            if ($this->porQueNoPuedeAbonar($lote) instanceof HtmlString) {
                 continue;
             }
 
@@ -1610,6 +1641,24 @@ final readonly class CobrarUnPago
             return '<p class="olympo-nota">Este lote no debe nada.</p>';
         }
 
+        /*
+         * ⚠️ Con una cuota vencida el Service rechaza el abono (24-ago-2026), y
+         * este lote no debería tener casilla siquiera — `renglonesDeAbono()` la
+         * cambia por el motivo. Se pregunta igual porque la casilla puede venir
+         * marcada de un estado anterior del formulario, y una previsualización
+         * que dibuja un plan nuevo para algo que se va a rechazar es peor que no
+         * dibujar nada.
+         *
+         * Es además lo que reemplazó a la nota de `esPagoNormal`: ese caso ya no
+         * llega acá —sin nada vencido, `ponerAlDia` vale cero y cualquier monto
+         * lo supera— y su texto prometía un pago normal que hoy no se registra.
+         */
+        $atrasado = $this->porQueNoPuedeAbonar($lote);
+
+        if ($atrasado instanceof HtmlString) {
+            return (string) $atrasado;
+        }
+
         $efecto = EfectoDelAbono::calcular(
             $pendientes,
             $abono,
@@ -1621,12 +1670,6 @@ final readonly class CobrarUnPago
             return '<p class="olympo-nota">El abono supera lo que debe el lote ('
                 .e($efecto->saldoDelLote->formateado()).'). Se va a rechazar, y con él los otros lotes: '
                 .'un recibo se emite entero o no se emite.</p>';
-        }
-
-        if ($efecto->esPagoNormal) {
-            return '<p class="olympo-nota">No alcanza para poner al día lo vencido ('
-                .e($efecto->ponerAlDia->formateado()).'), así que en este lote <strong>no hay '
-                .'reprogramación</strong>: se registra como un pago normal y su plan queda como está.</p>';
         }
 
         if ($efecto->superaElTope) {
@@ -2038,6 +2081,142 @@ final readonly class CobrarUnPago
     }
 
     /**
+     * Las cuotas VENCIDAS del lote, listadas una por una.
+     *
+     * ═══ POR QUE SE LISTAN Y NO SE CUENTAN ═══
+     *
+     * Lo pidió Mauricio el 23-ago-2026: «en caso de que tenga cuotas
+     * atrasadas que se listen todas las que tenga atrasadas». La lista de
+     * cobranza ya dice «6 cuotas vencidas», pero quien atiende con el cliente
+     * enfrente necesita el detalle —de qué meses son y cuánto es cada una—
+     * para contestar «¿y de qué me estás cobrando?» sin salirse del modal.
+     *
+     * Van en el orden del FIFO, que es el mismo en el que se van a pagar: si
+     * el cliente trae para una sola, esa plata va a la PRIMERA de la lista.
+     * Por eso la primera se marca, en vez de dejarlo librado a que se deduzca.
+     *
+     * Devuelve null cuando no hay ninguna vencida — el lote debe, pero
+     * todavía no le toca— y así el campo no dibuja ayuda vacía.
+     */
+    private function lasVencidasDe(Compromiso $lote): ?HtmlString
+    {
+        ['cuotas' => $vencidas, 'total' => $total] = $this->loVencidoDe($lote);
+
+        if ($vencidas === []) {
+            return null;
+        }
+
+        return new HtmlString(sprintf(
+            '<span class="olympo-vencidas">%s, %s en total:</span>%s',
+            e($this->cuantasVencidas($vencidas)),
+            e($total->formateado()),
+            $this->detalleDeLasVencidas($vencidas, marcarLaPrimera: true),
+        ));
+    }
+
+    /**
+     * Por qué este lote NO puede recibir un abono, o null si sí puede.
+     *
+     * Es el mismo dato que `lasVencidasDe()` con otras palabras: allá es una
+     * ayuda para cobrar, acá es el motivo de que no haya casilla. Se escribe en
+     * el lenguaje de la salida —«cobralas con Cuota», «usá Ambas»— porque quien
+     * lo lee tiene al cliente enfrente y necesita el próximo paso, no el
+     * nombre de la regla.
+     */
+    private function porQueNoPuedeAbonar(Compromiso $lote): ?HtmlString
+    {
+        ['cuotas' => $vencidas, 'total' => $total] = $this->loVencidoDe($lote);
+
+        if ($vencidas === []) {
+            return null;
+        }
+
+        return new HtmlString(sprintf(
+            '<p class="olympo-lote">%s — debe %s</p>'
+            .'<p class="olympo-nota"><strong>No puede recibir abono a capital:</strong> tiene %s por %s y '
+            .'primero se pone al día. Cobralas con <strong>«Cuota»</strong>, o con <strong>«Ambas»</strong> '
+            .'si además viene a bajar capital — ahí las dos cosas salen en un solo recibo.</p>%s',
+            e((string) $lote->lote?->getAttribute('codigo')),
+            e($this->saldoDe($lote)->formateado()),
+            e($this->cuantasVencidas($vencidas)),
+            e($total->formateado()),
+            $this->detalleDeLasVencidas($vencidas, marcarLaPrimera: false),
+        ));
+    }
+
+    /**
+     * @param list<Cuota> $vencidas
+     */
+    private function cuantasVencidas(array $vencidas): string
+    {
+        return count($vencidas) === 1 ? '1 cuota vencida' : count($vencidas).' cuotas vencidas';
+    }
+
+    /**
+     * La lista de las vencidas, una por línea.
+     *
+     * `$marcarLaPrimera` es la diferencia entre los dos usos: en el renglón del
+     * cobro la primera se señala porque ahí ES donde va a caer la plata, y en el
+     * aviso del abono no hay ninguna plata cayendo — marcarla estaría prometiendo
+     * algo que este modal no va a hacer.
+     *
+     * @param list<Cuota> $vencidas
+     */
+    private function detalleDeLasVencidas(array $vencidas, bool $marcarLaPrimera): string
+    {
+        $filas = '';
+
+        foreach ($vencidas as $indice => $cuota) {
+            $vence = $cuota->getAttribute('fecha_vencimiento');
+
+            $filas .= sprintf(
+                '<li>Cuota %d · venció el %s · %s%s</li>',
+                (int) $cuota->getAttribute('numero'),
+                e($vence instanceof CarbonInterface ? $vence->format('d/m/Y') : '—'),
+                e($cuota->saldo()->formateado()),
+                $marcarLaPrimera && $indice === 0 ? ' <strong>← la más vieja: acá se aplica primero</strong>' : '',
+            );
+        }
+
+        return '<ul class="olympo-vencidas-lista">'.$filas.'</ul>';
+    }
+
+    /**
+     * Lo vencido del lote: las cuotas atrasadas y cuánto suman.
+     *
+     * ═══ POR QUE ES `estaVencida()` Y NO UNA COMPARACION DE ACA ═══
+     *
+     * Esto lo preguntan TRES cosas de esta pantalla —la ayuda del cobro, el
+     * bloqueo del abono y la previsualización— y el dominio lo pregunta otra
+     * vez adentro de la transacción. Con una comparación propia acá, el modal
+     * podría listar «1 cuota vencida» y el Service dejar pasar el abono: dos
+     * respuestas a la pregunta de si el cliente está al día, y las dos
+     * impresas.
+     *
+     * `Cuota::estaVencida()` usa `today()` de PHP (§7.5.1) y deja fuera la que
+     * vence HOY: todavía no atrasa. Esa cuota se lista como pendiente en el
+     * plan, no como vencida acá.
+     *
+     * @return array{cuotas: list<Cuota>, total: Monto}
+     */
+    private function loVencidoDe(Compromiso $lote): array
+    {
+        $vencidas = [];
+        $total = Monto::cero();
+
+        foreach ($this->pendientesDe($lote) as $cuota) {
+            if (! $cuota->estaVencida()) {
+                continue;
+            }
+
+            $vencidas[] = $cuota;
+            $total = $total->sumar($cuota->saldo());
+        }
+
+        return ['cuotas' => $vencidas, 'total' => $total];
+    }
+
+    /**
      * Las cuotas del lote que todavía deben algo, en el mismo orden que el
      * FIFO del Service.
      *
@@ -2213,6 +2392,12 @@ final readonly class CobrarUnPago
          * Ninguna: a ningún lote le alcanzó para bajar capital. El dinero se
          * registró igual —ya estaba sobre el mostrador— y quien atiende tiene
          * que enterarse de que el plan quedó como estaba.
+         *
+         * ⚠️ Desde el 24-ago-2026 esto no debería pasar nunca: sin cuotas
+         * vencidas cualquier monto baja capital, y con cuotas vencidas el
+         * Service rechaza el abono. Se conserva porque un recibo sin
+         * notificación es un cliente que se va sin su papel — y eso es peor que
+         * un aviso que sobra.
          */
         if ($constancias->isEmpty()) {
             Notification::make()

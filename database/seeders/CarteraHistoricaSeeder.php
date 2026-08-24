@@ -57,10 +57,16 @@ use RuntimeException;
  * ═══ 🔴 EL NUMERO DE RECIBO: LA PARTE RARA Y POR QUE ═══
  *
  * **Los recibos históricos NO llevan el número del talonario de papel.** El
- * seeder numera de corrido —1, 2, 3…— por la puerta de siempre, y al final
- * `dejarLasSeriesDondeVan()` empuja la serie hasta `OLYMPO_PROXIMO_RECIBO`,
- * que es el próximo número en blanco del talonario. Así el primer recibo que
- * el sistema emita en producción no repite uno que ya está impreso y firmado.
+ * seeder numera de corrido —1, 2, 3…— por la puerta de siempre, y salen de la
+ * **serie vieja**: `recibos.serie` en null, que es la que existía antes de que
+ * cada desarrollo tuviera la suya. Se ven sin prefijo —`000001`— y una recarga
+ * los reproduce exactamente iguales.
+ *
+ * Lo que el sistema imprime de ahora en adelante sale de la serie del
+ * PROYECTO, con su código adelante: `RPS-00000001`. Son dos numeraciones
+ * distintas y no se pueden pisar, así que ya no hace falta empujar ninguna
+ * serie para que no choquen — que es lo que hacía `OLYMPO_PROXIMO_RECIBO`
+ * hasta el 23-ago-2026.
  *
  * El número del papel sí queda escrito: va en las **observaciones** de cada
  * recibo, que es donde se puede buscar cuando el cliente llega con el suyo en
@@ -203,15 +209,17 @@ class CarteraHistoricaSeeder extends Seeder
     private function seriesQueQuedaronAtras(): array
     {
         $series = [
-            'recibo_interno' => 'recibos',
-            'devolucion'     => 'devoluciones',
-            'gasto'          => 'gastos',
+            'devolucion' => DB::table('devoluciones'),
+            'gasto'      => DB::table('gastos'),
+
+            // La serie VIEJA, que es de la que sale esta carga: `serie` null.
+            'recibo_historico' => DB::table('recibos')->whereNull('serie'),
         ];
 
         $problemas = [];
 
-        foreach ($series as $tipo => $tabla) {
-            $mayor = (int) DB::table($tabla)->max('numero');
+        foreach ($series as $tipo => $consulta) {
+            $mayor = (int) $consulta->max('numero');
 
             $serie = DB::table('correlativos')
                 ->whereNull('proyecto_id')
@@ -219,8 +227,8 @@ class CarteraHistoricaSeeder extends Seeder
                 ->value('ultimo_numero');
 
             if ($serie !== null && (int) $serie < $mayor) {
-                $problemas[] = "   · La serie de «{$tipo}» está en {$serie} y en «{$tabla}» ya existe el "
-                    ."número {$mayor}: los que emita esta carga van a chocar. Corré "
+                $problemas[] = "   · La serie de «{$tipo}» está en {$serie} y ya existe el número "
+                    ."{$mayor}: los que emita esta carga van a chocar. Corré "
                     .'`olympo:limpiar-cartera` de nuevo, que ahora la acomoda sola.';
             }
         }
@@ -372,9 +380,10 @@ class CarteraHistoricaSeeder extends Seeder
     /**
      * Carga una venta con todo su historial.
      *
-     * ⚠️ El correlativo de recibos NO se toca acá: el sistema numera de
-     * corrido y la serie se deja donde va al final, una sola vez. Ver
-     * `config('lotificadora.cartera.proximo_recibo')`.
+     * ⚠️ El correlativo de recibos NO se toca acá: estos recibos salen de la
+     * serie vieja —`deLaCarteraVieja: true`— y esa serie no le estorba a la
+     * del proyecto. Desde qué número imprime cada desarrollo se dice en su
+     * pestaña Facturación.
      *
      * @param array<string, mixed> $datos
      */
@@ -404,6 +413,7 @@ class CarteraHistoricaSeeder extends Seeder
             formaPrima: $this->forma((string) ($datos['forma_prima'] ?? 'efectivo')),
             referenciaPrima: is_string($datos['ref_prima'] ?? null) ? $datos['ref_prima'] : null,
             vendedor: $vendedor,
+            deLaCarteraVieja: true,
         );
 
         /** @var list<array<string, mixed>> $pagos */
@@ -450,6 +460,7 @@ class CarteraHistoricaSeeder extends Seeder
                 referencia: $referencia,
                 fecha: $fecha,
                 observaciones: $nota,
+                deLaCarteraVieja: true,
             );
 
             return;
@@ -463,6 +474,7 @@ class CarteraHistoricaSeeder extends Seeder
             referencia: $referencia,
             fecha: $fecha,
             observaciones: $nota,
+            deLaCarteraVieja: true,
         );
     }
 
@@ -1004,47 +1016,36 @@ class CarteraHistoricaSeeder extends Seeder
         }
 
         /*
-         * 🔴 EL CORRELATIVO DE RECIBOS SE FIJA ACA, UNA SOLA VEZ, Y ES LO QUE
-         * EVITA REPETIRLE UN NUMERO A LA CONTRATANTE.
+         * 🔴 EL CORRELATIVO DE RECIBOS YA NO SE TOCA ACA, Y ESO ES EL CAMBIO.
          *
-         * La carga histórica numeró de corrido —1, 2, 3…— porque los recibos
-         * viejos no llevan el número del talonario. Si la serie quedara ahí, el
-         * primer recibo que el sistema emita en producción llevaría un número
-         * que ella YA entregó en papel, y habría dos documentos distintos con
-         * el mismo número.
+         * Hasta el 23-ago-2026 esta carga empujaba la serie de recibos hasta
+         * `OLYMPO_PROXIMO_RECIBO`, porque el sistema y el talonario de papel
+         * compartian una sola numeracion y habia que evitar que el primer
+         * recibo nuevo repitiera uno ya entregado.
          *
-         * `OLYMPO_PROXIMO_RECIBO` es el próximo número en blanco de su talonario. La
-         * serie se deja en ese menos uno, así el primero que salga es
-         * exactamente ese.
+         * Ya no comparten nada. Estos 257 recibos salen de la serie VIEJA
+         * —`recibos.serie` en null, sin prefijo— y el sistema imprime en la
+         * serie de cada proyecto, con su codigo adelante: `RPS-00000001`. Son
+         * dos numeraciones distintas y no se pueden pisar.
          *
-         * En null no se toca nada: sirve para probar en local. Antes de
-         * producción hay que ponerlo — `olympo:verificar-produccion` no lo
-         * revisa todavía.
+         * Desde que numero empieza a imprimir cada desarrollo se dice en su
+         * pestana Facturacion, no aca ni en el `.env`: «pueden haber mas
+         * proyectos en el futuro y se confundiran».
          */
-        /*
-         * ⚠️ VIENE DE `config()` Y NO DE UNA CONSTANTE, Y NO ES ESTILO.
-         *
-         * Estuvo como `ExpedientesHistoricos::PROXIMO_RECIBO = null` y PHPStan
-         * tenía razón en rechazarlo: una constante de clase se resuelve en el
-         * análisis, así que `!== null` era siempre falso y todo este bloque era
-         * código muerto que nadie iba a ejecutar nunca. El aviso amarillo
-         * habría salido en producción igual que en local.
-         *
-         * Y de paso queda donde va: el número del talonario es una
-         * configuración del servidor, no un dato del cuaderno.
-         */
-        $proximo = config('lotificadora.cartera.proximo_recibo');
+        $this->command?->line('   · Los recibos de esta carga quedaron en la serie anterior al sistema.');
 
-        if (is_int($proximo) && $proximo > 0) {
-            $this->ponerLaSerieEn(TipoCorrelativo::ReciboInterno, $proximo - 1, null);
+        $codigo = (string) $proyecto->getAttribute('codigo');
+        $arranque = $proyecto->getAttribute('proximo_recibo');
 
-            $this->command?->line("   · El próximo recibo del sistema será el {$proximo}.");
+        if (is_int($arranque) && $arranque > 0) {
+            $this->command?->line("   · Lo que imprima {$codigo} de ahora en adelante arranca en "
+                .$codigo.'-'.str_pad((string) $arranque, 8, '0', STR_PAD_LEFT).'.');
 
             return;
         }
 
-        $this->command?->warn('   ⚠️  El correlativo de recibos quedó donde lo dejó la carga. '
-            .'Antes de producción hay que poner OLYMPO_PROXIMO_RECIBO en el .env.');
+        $this->command?->warn("   ⚠️  {$codigo} no tiene puesto desde qué número empieza a imprimir. "
+            .'Se pone en el proyecto, pestaña Facturación.');
     }
 
     // ─── Interno ──────────────────────────────────────────────────────

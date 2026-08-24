@@ -1023,9 +1023,11 @@ final readonly class RegistroDeCompromisos
         ?string $observaciones,
     ): void {
         $factura = $this->facturas->paraElProyecto($compromiso->proyecto);
+        $delTalonario = $this->correlativos->paraUnReciboNuevo($compromiso->proyecto);
 
         Recibo::query()->create([
-            'numero'        => $this->correlativos->siguienteDeReciboInterno(),
+            'numero'        => $delTalonario['numero'],
+            'serie'         => $delTalonario['serie'],
             'compromiso_id' => $compromiso->getKey(),
             'cliente_id'    => $cliente->getKey(),
             'concepto'      => ConceptoDeRecibo::Senia,

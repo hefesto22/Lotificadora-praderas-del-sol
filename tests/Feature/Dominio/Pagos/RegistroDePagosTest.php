@@ -159,15 +159,25 @@ describe('Un pago normal', function (): void {
 
 /*
 |--------------------------------------------------------------------------
-| R12 · Una sola numeración para toda la lotificadora
+| R12 · Una numeración por desarrollo, sin huecos
 |--------------------------------------------------------------------------
+|
+| Fue una sola serie para toda la lotificadora hasta el 23-ago-2026. Adentro
+| de un desarrollo la promesa no cambió —entre el 120 y el 130 no falta
+| ninguno— y el folio ahora lleva el código adelante para que dos proyectos
+| no se confundan.
 */
 test('cada recibo se lleva su propio número', function (): void {
     $uno = ($this->cobrar)('25000.00');
     $dos = ($this->cobrar)('25000.00');
 
+    // El prefijo sale del PROYECTO, no escrito a mano: un test atado al
+    // codigo de otro archivo se rompe el dia que ese dato cambia. Pasó en
+    // `EmisionDeFacturasTest`, cuyo proyecto de prueba es REB.
+    $codigo = preg_quote((string) $this->proyecto->getAttribute('codigo'), '/');
+
     expect((int) $dos->getAttribute('numero'))->toBe((int) $uno->getAttribute('numero') + 1)
-        ->and($uno->folio())->toMatch('/^\d{6}$/');
+        ->and($uno->folio())->toMatch("/^{$codigo}-\d{8}$/");
 });
 
 describe('Lo que rechaza', function (): void {

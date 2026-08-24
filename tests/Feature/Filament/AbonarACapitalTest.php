@@ -157,10 +157,15 @@ test('un abono que supera el saldo no rompe la pantalla', function (): void {
 });
 
 /*
-| El caso del 6-ago: no alcanza ni para lo vencido. Se registra igual —el
-| dinero ya está sobre el mostrador— pero no se reescribe ningún plan.
+| El caso del 6-ago, al revés desde el 24-ago-2026: «que no pueda hacer abono a
+| capital si tiene cuotas pendientes okey».
+|
+| 🔴 Y se prueba desde la PANTALLA porque acá el bloqueo es doble: el lote
+| atrasado no tiene casilla —`renglonesDeAbono()` la cambia por el motivo— y si
+| alguien la manda igual, el Service la rechaza. Lo que este test fija es lo
+| único que le importa a Mauricio: que no quede registrado nada.
 */
-test('si no alcanza para lo vencido se registra como pago normal', function (): void {
+test('con cuotas vencidas el abono no se registra', function (): void {
     Cuota::query()
         ->where('compromiso_id', $this->renglon->getKey())
         ->whereIn('numero', [1, 2, 3])
@@ -170,9 +175,10 @@ test('si no alcanza para lo vencido se registra como pago normal', function (): 
         ->callAction('cobrar', ($this->datos)(['abono_'.$this->renglon->getKey() => '50000.00']))
         ->assertHasNoActionErrors();
 
-    expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(1)
+    expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0)
         ->and(Reprogramacion::query()->count())->toBe(0)
-        ->and(Cuota::query()->where('compromiso_id', $this->renglon->getKey())->count())->toBe(12);
+        ->and(Cuota::query()->where('compromiso_id', $this->renglon->getKey())->count())->toBe(12)
+        ->and(Cuota::query()->where('compromiso_id', $this->renglon->getKey())->sum('monto_pagado'))->toBe('0.00');
 });
 
 /*

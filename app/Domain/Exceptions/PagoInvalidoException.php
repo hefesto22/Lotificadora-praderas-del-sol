@@ -190,6 +190,41 @@ final class PagoInvalidoException extends GrupoOlympoException
     // ─── Abono a capital (R21) ────────────────────────────────────────
 
     /**
+     * Un lote atrasado no recibe abono a capital.
+     *
+     * ═══ QUE PIDIO MAURICIO, TEXTUAL (24-AGO-2026) ═══
+     *
+     * «Que no pueda hacer abono a capital si tiene cuotas pendientes okey».
+     *
+     * ═══ 🔴 ESTO REEMPLAZA LO QUE SE DECIDIO EL 6-AGO ═══
+     *
+     * Hasta hoy el abono «primero ponia al dia»: se comia lo vencido en FIFO y
+     * solo el sobrante bajaba capital. Funcionaba, pero dejaba UN papel que
+     * contaba dos historias —cobro y abono— y, cuando no alcanzaba ni para lo
+     * vencido, un recibo que decia abono sin haber abonado nada.
+     *
+     * Ahora el camino esta separado: las cuotas vencidas se cobran por «Cuota»,
+     * y quien trae plata para las dos cosas usa «Ambas», que hace exactamente
+     * eso en un solo recibo y ya rechazaba este mismo caso
+     * (`porSobranteQueNoBajaCapital`). El abono a capital queda para lo que
+     * dice su nombre: un lote al dia al que le baja el saldo.
+     *
+     * ⚠️ El corte es `Cuota::estaVencida()`, que es la misma regla que usa la
+     * mora y la pantalla: vencida es la que YA PASO su fecha. La que vence hoy
+     * todavia no atrasa, y el abono se puede hacer.
+     */
+    public static function porCuotasVencidasAntesDelAbono(int $cuantas, Monto $vencido, string $codigo): self
+    {
+        $atrasadas = $cuantas === 1 ? 'una cuota vencida' : "{$cuantas} cuotas vencidas";
+
+        return new self(
+            "El lote {$codigo} tiene {$atrasadas} por {$vencido->formateado()}, así que no puede recibir un ".
+            'abono a capital: primero se pone al día. Cobrá esas cuotas por «Cuota», o usá «Ambas» y el '.
+            'sobrante baja el capital en el mismo recibo.'
+        );
+    }
+
+    /**
      * R21 pide que la reprogramación quede registrada CON SU MOTIVO. La base
      * lo exige con un CHECK; esto es para que el mensaje lo escriba alguien.
      */

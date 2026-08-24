@@ -12,6 +12,7 @@ use App\Filament\Schemas\Components\MayusculasField;
 use App\Filament\Schemas\Components\TelefonoHondurasField;
 use App\Models\Facturacion;
 use App\Models\Proyecto;
+use App\Models\Recibo;
 use App\Support\ImageOptimizer;
 use Carbon\CarbonInterface;
 use Closure;
@@ -406,6 +407,42 @@ class ProyectoForm
                                             ->email()
                                             ->maxLength(120)
                                             ->visible(static fn (Get $get): bool => $get('modo_de_facturacion') === 'recibo'),
+
+                                        TextInput::make('proximo_recibo')
+                                            ->label('Desde qué número empieza a imprimir')
+                                            ->numeric()
+                                            ->minValue(1)
+                                            ->step(1)
+                                            /*
+                                             * ═══ POR QUE ESTE CAMPO VIVE ACA ═══
+                                             *
+                                             * Cada desarrollo numera SUS recibos, con su
+                                             * código adelante: `RPS-00000001`. Estuvo un
+                                             * momento pensado como una variable del `.env`,
+                                             * y Mauricio lo movió acá el 23-ago-2026:
+                                             * «pueden haber más proyectos en el futuro y se
+                                             * confundirán».
+                                             *
+                                             * En blanco, el desarrollo empieza en 1.
+                                             */
+                                            ->helperText(static fn (?Proyecto $record): HtmlString => self::comoSeVeraElRecibo($record))
+                                            ->rule(static fn (?Proyecto $record): Closure => static function (string $atributo, mixed $valor, Closure $falla) use ($record): void {
+                                                /*
+                                                 * Un correlativo que RETROCEDE emite un
+                                                 * número que ya está impreso y entregado, y
+                                                 * el índice único lo rebota a mitad de un
+                                                 * cobro, con un cliente enfrente. Se atrapa
+                                                 * acá, donde el mensaje se puede leer.
+                                                 */
+                                                $usado = self::ultimoReciboImpreso($record);
+
+                                                if ($usado > 0 && (int) $valor <= $usado) {
+                                                    $falla("Este desarrollo ya imprimió hasta el {$usado}. "
+                                                        .'El arranque tiene que ser mayor, o se repetiría un recibo ya entregado.');
+                                                }
+                                            })
+                                            ->visible(static fn (Get $get): bool => $get('modo_de_facturacion') === 'recibo')
+                                            ->columnSpanFull(),
 
                                         Placeholder::make('de_donde_sale_el_membrete')
                                             ->label('El resto del membrete')
@@ -921,6 +958,52 @@ class ProyectoForm
         $limpio = rtrim(rtrim(new Monto((string) $parte)->redondeado(4), '0'), '.');
 
         return sprintf('%s · %s%%', trim($nombre), $limpio);
+    }
+
+    /**
+     * Cómo se va a ver el próximo recibo de este desarrollo.
+     *
+     * Se muestra armado —`RPS-00000001`— porque un campo que pide «desde qué
+     * número» y no enseña el resultado obliga a imaginárselo, y el prefijo
+     * sale de otro lado (el código, en la pestaña Identificación).
+     */
+    private static function comoSeVeraElRecibo(?Proyecto $record): HtmlString
+    {
+        $codigo = $record instanceof Proyecto ? $record->getAttribute('codigo') : null;
+        $prefijo = is_string($codigo) && trim($codigo) !== '' ? trim($codigo) : 'RPS';
+
+        $arranque = $record instanceof Proyecto ? $record->getAttribute('proximo_recibo') : null;
+        $numero = is_numeric($arranque) && (int) $arranque > 0 ? (int) $arranque : 1;
+
+        $folio = $prefijo.'-'.str_pad((string) $numero, 8, '0', STR_PAD_LEFT);
+        $usado = self::ultimoReciboImpreso($record);
+
+        $ya = $usado > 0
+            ? " Este desarrollo ya imprimió hasta el <strong>{$usado}</strong>."
+            : '';
+
+        return new HtmlString(
+            "El próximo recibo saldrá como <strong>{$folio}</strong>. Cada desarrollo numera lo suyo, ".
+            'así que dos proyectos no se pisan. En blanco, empieza en 1.'.$ya.
+            ' <strong>No toca</strong> los recibos de la cartera anterior al sistema, que se quedan como están.'
+        );
+    }
+
+    /**
+     * El número más alto que este desarrollo YA imprimió, en su propia serie.
+     *
+     * Cuenta solo los de su serie: los de la cartera vieja van con `serie` en
+     * null y no estorban acá — son de otra numeración.
+     */
+    private static function ultimoReciboImpreso(?Proyecto $record): int
+    {
+        $codigo = $record instanceof Proyecto ? $record->getAttribute('codigo') : null;
+
+        if (! is_string($codigo) || trim($codigo) === '') {
+            return 0;
+        }
+
+        return (int) Recibo::query()->where('serie', trim($codigo))->max('numero');
     }
 
     /**

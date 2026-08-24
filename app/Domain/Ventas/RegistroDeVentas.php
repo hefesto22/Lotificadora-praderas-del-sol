@@ -102,6 +102,7 @@ final readonly class RegistroDeVentas
         FormaDePago $formaPrima = FormaDePago::Efectivo,
         ?string $referenciaPrima = null,
         ?Vendedor $vendedor = null,
+        bool $deLaCarteraVieja = false,
     ): Venta {
         $this->verificarConjuntos($proyecto, $lotes, $clientes);
 
@@ -129,7 +130,8 @@ final readonly class RegistroDeVentas
             $vendedor,
             $pactados,
             $formaPrima,
-            $referenciaPrima
+            $referenciaPrima,
+            $deLaCarteraVieja
         ): Venta {
             // 1. Bloquear y re-mirar. Lo que decia la pantalla no vale.
             $frescos = $this->bloquearYVerificar($lotes, $titular);
@@ -251,7 +253,17 @@ final readonly class RegistroDeVentas
             }
 
             // 9. El papel de la prima, por lo que el cliente pone HOY.
-            $this->cobrarLaPrima($venta, $titular, $prima, $senias, $formaPrima, $referenciaPrima, $fecha, $apartados);
+            $this->cobrarLaPrima(
+                $venta,
+                $titular,
+                $prima,
+                $senias,
+                $formaPrima,
+                $referenciaPrima,
+                $fecha,
+                $apartados,
+                $deLaCarteraVieja,
+            );
 
             /*
              * 10. La venta que nace pagada se cierra el mismo dia.
@@ -308,6 +320,7 @@ final readonly class RegistroDeVentas
         ?string $referencia,
         CarbonImmutable $fecha,
         array $apartados,
+        bool $deLaCarteraVieja = false,
     ): void {
         $aCobrar = $prima->restar($senias);
         $limpia = trim($referencia ?? '');
@@ -323,9 +336,11 @@ final readonly class RegistroDeVentas
         }
 
         $factura = $this->facturas->paraElProyecto($venta->proyecto);
+        $delTalonario = $this->correlativos->paraUnReciboNuevo($venta->proyecto, $deLaCarteraVieja);
 
         Recibo::query()->create([
-            'numero'        => $this->correlativos->siguienteDeReciboInterno(),
+            'numero'        => $delTalonario['numero'],
+            'serie'         => $delTalonario['serie'],
             'venta_id'      => $venta->getKey(),
             'cliente_id'    => $titular->getKey(),
             'concepto'      => ConceptoDeRecibo::Prima,

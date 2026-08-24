@@ -217,7 +217,35 @@ final class LimpiarCartera extends Command
          */
         DB::table('correlativos')->where('proyecto_id', $proyecto)->update(['ultimo_numero' => 0, 'updated_at' => now()]);
 
+        $this->acomodarLaSerieDeRecibosDelProyecto($proyecto);
         $this->acomodarLasSeriesGlobales();
+    }
+
+    /**
+     * La serie de recibos del proyecto vuelve a donde le toca, no a cero.
+     *
+     * A cero solo si el desarrollo no dijo desde qué número imprime. Si lo
+     * dijo —`proyectos.proximo_recibo`, la pestaña Facturación— la limpieza
+     * respeta esa decisión: vaciar la cartera de prueba no es motivo para que
+     * el primer recibo de verdad salga con otro número del acordado.
+     *
+     * Y nunca por debajo de un recibo que haya sobrevivido a la limpieza.
+     */
+    private function acomodarLaSerieDeRecibosDelProyecto(int $proyecto): void
+    {
+        $codigo = DB::table('proyectos')->where('id', $proyecto)->value('codigo');
+        $arranque = DB::table('proyectos')->where('id', $proyecto)->value('proximo_recibo');
+
+        $vivos = is_string($codigo)
+            ? (int) DB::table('recibos')->where('serie', $codigo)->max('numero')
+            : 0;
+
+        $desde = is_numeric($arranque) ? max(0, (int) $arranque - 1) : 0;
+
+        DB::table('correlativos')
+            ->where('proyecto_id', $proyecto)
+            ->where('tipo', 'recibo_interno')
+            ->update(['ultimo_numero' => max($vivos, $desde), 'updated_at' => now()]);
     }
 
     /**
@@ -245,17 +273,23 @@ final class LimpiarCartera extends Command
     private function acomodarLasSeriesGlobales(): void
     {
         $series = [
-            'recibo_interno' => 'recibos',
-            'devolucion'     => 'devoluciones',
-            'gasto'          => 'gastos',
+            'devolucion' => DB::table('devoluciones'),
+            'gasto'      => DB::table('gastos'),
+
+            /*
+             * La serie VIEJA de recibos: los de la cartera anterior al
+             * sistema, que van con `serie` en null. Los del proyecto tienen su
+             * propia serie y se acomodan aparte.
+             */
+            'recibo_historico' => DB::table('recibos')->whereNull('serie'),
         ];
 
-        foreach ($series as $tipo => $tabla) {
+        foreach ($series as $tipo => $consulta) {
             DB::table('correlativos')
                 ->whereNull('proyecto_id')
                 ->where('tipo', $tipo)
                 ->update([
-                    'ultimo_numero' => (int) DB::table($tabla)->max('numero'),
+                    'ultimo_numero' => (int) $consulta->max('numero'),
                     'updated_at'    => now(),
                 ]);
         }

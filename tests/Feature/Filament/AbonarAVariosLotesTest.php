@@ -173,15 +173,20 @@ test('si un lote se pasa, no se abona ninguno', function (): void {
 });
 
 /*
-| Un lote al que no le alcanza ni para lo vencido NO tumba a los otros: ese se
-| registra como pago normal —el dinero ya está sobre el mostrador— y los demás
-| reprograman igual. Es el mismo comportamiento que con un solo lote, y la
-| notificación lo explica.
+| El lote ATRASADO no se abona, y el que está al día sí (24-ago-2026): «que no
+| pueda hacer abono a capital si tiene cuotas pendientes okey».
 |
-| Al segundo lote se le vencen tres cuotas de L 12,500.00 = L 37,500.00, y se
-| le abonan L 10,000.00: no alcanza.
+| Al segundo lote se le vencen tres cuotas de L 12,500.00, así que su renglón
+| deja de existir: `renglonesDeAbono()` lo cambia por el motivo, y lo que el
+| formulario mande para ese lote no llega al Service. El primero abona igual —no
+| tiene por qué esperar a que el cliente ponga al día al otro— y ese es el
+| alcance de la regla: es POR LOTE.
+|
+| ⚠️ Si alguien fuerza los dos por consola, el Service rechaza el recibo entero:
+| la fase 1 verifica todos los renglones antes de emitir. Eso vive en
+| `AbonoACapitalTest`, que es donde vive la regla.
 */
-test('el lote que no alcanza se registra como pago normal, y el otro reprograma', function (): void {
+test('el lote atrasado no se abona, y el que está al día sí', function (): void {
     Cuota::query()
         ->where('compromiso_id', $this->segundoLote->getKey())
         ->whereIn('numero', [1, 2, 3])
@@ -193,14 +198,13 @@ test('el lote que no alcanza se registra como pago normal, y el otro reprograma'
 
     $recibo = Recibo::query()->where('concepto', ConceptoDeRecibo::AbonoCapital)->sole();
 
-    expect($recibo->montoTotal())->toBeMonto('30000.00')
-        // Una sola constancia: la del primero. El segundo no reprogramó nada.
+    // Solo los 20,000 del primero: los 10,000 del segundo no se cobraron.
+    expect($recibo->montoTotal())->toBeMonto('20000.00')
         ->and(Reprogramacion::query()->count())->toBe(1)
         ->and(Reprogramacion::query()->sole()->getAttribute('compromiso_id'))->toBe($this->primerLote->getKey())
-        // Y el segundo conserva sus 24 cuotas, con la más vieja cobrada.
+        // El segundo quedó intacto: sus 24 cuotas y sin un céntimo aplicado.
         ->and(Cuota::query()->where('compromiso_id', $this->segundoLote->getKey())->count())->toBe(24)
-        ->and(Cuota::query()->where('compromiso_id', $this->segundoLote->getKey())->where('numero', 1)->value('monto_pagado'))
-        ->toBe('10000.00');
+        ->and(Cuota::query()->where('compromiso_id', $this->segundoLote->getKey())->sum('monto_pagado'))->toBe('0.00');
 });
 
 /*

@@ -18,8 +18,13 @@ use Illuminate\Support\Facades\DB;
  * lugares distintos leen el mismo maximo, los dos suman uno, y salen dos
  * recibos con el mismo numero. No es un caso teorico: es el escenario
  * normal de una lotificadora con don Elder en la oficina y don Edwin en el
- * campo, y el recibo interno tiene UNA SOLA serie para toda la
- * lotificadora (R12).
+ * campo, y los dos sacan del mismo mostrador.
+ *
+ * ⚠️ Desde el 23-ago-2026 la serie de recibos corre POR PROYECTO, no una
+ * sola para toda la lotificadora. Eso no cambia nada de lo de arriba: don
+ * Elder y don Edwin siguen cobrando del mismo desarrollo al mismo tiempo, y
+ * el bloqueo sigue siendo lo unico que los separa. Lo que cambia es que
+ * dos DESARROLLOS ya no se intercalan los numeros.
  *
  * El §8.3.6 lo resuelve con `SELECT … FOR UPDATE`: el primero que llega
  * bloquea la fila de la serie y el segundo espera. Cuando el primero
@@ -62,16 +67,64 @@ final readonly class ConsumoDeCorrelativos
     }
 
     /**
-     * Consume el siguiente numero de recibo interno.
+     * Consume el siguiente numero de recibo interno DEL PROYECTO.
      *
-     * Sin proyecto: R12, una sola serie para toda la lotificadora. No hay
-     * series por receptor.
+     * Por proyecto desde el 23-ago-2026: el numero se ve `RPS-00000001`, y
+     * cada desarrollo cuadra su caja mirando una serie sin huecos. Sigue sin
+     * haber series por receptor —don Elder y don Edwin sacan del mismo
+     * mostrador— y por eso el consumo sigue yendo con `SELECT … FOR UPDATE`.
      *
      * @throws CorrelativoInvalidoException
      */
-    public function siguienteDeReciboInterno(): int
+    public function siguienteDeReciboInterno(Proyecto $proyecto): int
     {
-        return $this->consumir(TipoCorrelativo::ReciboInterno, null);
+        return $this->consumir(TipoCorrelativo::ReciboInterno, $proyecto, $this->arranqueDe($proyecto));
+    }
+
+    /**
+     * Consume el siguiente numero de la serie VIEJA, la de antes del sistema.
+     *
+     * Global y congelada: la usa `CarteraHistoricaSeeder` y nadie mas. Los
+     * recibos que emite van con `recibos.serie` en null, se ven sin prefijo
+     * —`000001`— y una recarga los reproduce exactamente iguales.
+     *
+     * @throws CorrelativoInvalidoException
+     */
+    public function siguienteDeReciboHistorico(): int
+    {
+        return $this->consumir(TipoCorrelativo::ReciboHistorico, null);
+    }
+
+    /**
+     * El numero Y la serie con los que nace un recibo.
+     *
+     * Las dos cosas salen juntas porque son la misma decision: de que serie
+     * se numera es lo que despues imprime `Recibo::folio()`. Separarlas
+     * invita a que alguien consuma de una y etiquete la otra.
+     *
+     * `$deLaCarteraVieja` lo pasa **solo** `CarteraHistoricaSeeder`. Todo lo
+     * demas —la pantalla, un cobro, una prima— numera del proyecto.
+     *
+     * @return array{numero: int, serie: string|null}
+     *
+     * @throws CorrelativoInvalidoException
+     */
+    public function paraUnReciboNuevo(Proyecto $proyecto, bool $deLaCarteraVieja = false): array
+    {
+        if ($deLaCarteraVieja) {
+            return ['numero' => $this->siguienteDeReciboHistorico(), 'serie' => null];
+        }
+
+        $codigo = $proyecto->getAttribute('codigo');
+
+        if (! is_string($codigo) || trim($codigo) === '') {
+            throw CorrelativoInvalidoException::porProyectoSinCodigo((int) $proyecto->getKey());
+        }
+
+        return [
+            'numero' => $this->siguienteDeReciboInterno($proyecto),
+            'serie'  => trim($codigo),
+        ];
     }
 
     /**
@@ -150,7 +203,7 @@ final readonly class ConsumoDeCorrelativos
     /**
      * @throws CorrelativoInvalidoException
      */
-    private function consumir(TipoCorrelativo $tipo, ?Proyecto $proyecto): int
+    private function consumir(TipoCorrelativo $tipo, ?Proyecto $proyecto, int $piso = 0): int
     {
         // Ver el docblock de la clase: sin transaccion el lock es decorativo.
         if (DB::transactionLevel() === 0) {
@@ -183,7 +236,20 @@ final readonly class ConsumoDeCorrelativos
             throw CorrelativoInvalidoException::porSerieQueNoSePudoCrear($tipo);
         }
 
-        $siguiente = $fila['ultimo_numero'] + 1;
+        /*
+         * ═══ EL PISO, Y POR QUE NO ES UN `update` AL GUARDAR EL PROYECTO ═══
+         *
+         * `proyectos.proximo_recibo` dice desde que numero imprime este
+         * desarrollo. Se podria sincronizar el correlativo cada vez que se
+         * guarda el proyecto, pero eso es una verdad viviendo en dos lugares:
+         * el dia que alguien cambie el campo por otra puerta —un seeder, una
+         * importacion, la consola— la serie queda diciendo otra cosa.
+         *
+         * Asi el piso se lee en el momento de numerar, que es el unico
+         * momento en que importa. Y es un `max`, no una asignacion: una serie
+         * **nunca retrocede**, aunque le bajen el numero de arranque.
+         */
+        $siguiente = max($fila['ultimo_numero'] + 1, $piso);
 
         DB::table('correlativos')
             ->where('id', $fila['id'])
@@ -225,6 +291,16 @@ final readonly class ConsumoDeCorrelativos
             'id'            => (int) ($datos['id'] ?? 0),
             'ultimo_numero' => (int) ($datos['ultimo_numero'] ?? 0),
         ];
+    }
+
+    /**
+     * Desde que numero imprime este desarrollo, o 0 si no se dijo.
+     */
+    private function arranqueDe(Proyecto $proyecto): int
+    {
+        $arranque = $proyecto->getAttribute('proximo_recibo');
+
+        return is_numeric($arranque) && (int) $arranque > 0 ? (int) $arranque : 0;
     }
 
     private function separador(): string

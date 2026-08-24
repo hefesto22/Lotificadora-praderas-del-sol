@@ -44,6 +44,7 @@ use Spatie\Activitylog\Support\LogOptions;
  */
 #[Fillable([
     'numero',
+    'serie',
     'tipo_documento',
     'facturacion_id',
     'autorizacion_id',
@@ -433,10 +434,43 @@ class Recibo extends Model
 
     /**
      * El número, como se lee en el papel.
+     *
+     * ═══ DOS FORMAS, Y LA DIFERENCIA ES LA SERIE ═══
+     *
+     * Desde el 23-ago-2026 cada desarrollo numera lo suyo, y el código del
+     * proyecto va adelante: **`RPS-00000001`**. Ocho dígitos, que es el ancho
+     * del talonario de papel al que le va a tocar convivir.
+     *
+     * 🔴 **Sin serie, el folio se ve como se veía antes: `000001`.** No es un
+     * caso raro ni un dato incompleto: son los 257 recibos que documentan la
+     * cartera anterior al sistema, y Mauricio pidió que quedaran exactamente
+     * como se cargaron. Ponerles prefijo sería renumerar papeles que ya se
+     * entregaron.
      */
     public function folio(): string
     {
-        return str_pad((string) $this->getAttribute('numero'), 6, '0', STR_PAD_LEFT);
+        $numero = (string) $this->getAttribute('numero');
+        $serie = $this->getAttribute('serie');
+
+        if (! is_string($serie) || trim($serie) === '') {
+            return str_pad($numero, 6, '0', STR_PAD_LEFT);
+        }
+
+        return trim($serie).'-'.str_pad($numero, 8, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * ¿Este recibo es de la cartera anterior al sistema?
+     *
+     * Se pregunta por la SERIE y no por la fecha: hay cobros viejos que se
+     * registraron después y cobros nuevos con fecha vieja. La serie es lo que
+     * dice de qué numeración salió el papel.
+     */
+    public function esDeLaCarteraVieja(): bool
+    {
+        $serie = $this->getAttribute('serie');
+
+        return ! is_string($serie) || trim($serie) === '';
     }
 
     // ─── Factura con CAI ──────────────────────────────────────────────

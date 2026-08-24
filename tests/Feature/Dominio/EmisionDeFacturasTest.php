@@ -172,8 +172,22 @@ describe('Con CAI vigente, el papel es una factura', function (): void {
 
         $recibo = ($this->deConcepto)(ConceptoDeRecibo::Prima);
 
+        /*
+         * El folio lleva el codigo del desarrollo adelante desde el
+         * 23-ago-2026: cada proyecto numera lo suyo. El numero interno sigue
+         * siendo el 1, que es el que cuadra la caja.
+         *
+         * ⚠️ El prefijo se saca del PROYECTO y no se escribe fijo. Estuvo
+         * puesto como 'RPS-00000001' y este expediente de prueba es de un
+         * proyecto con codigo REB: un prefijo a mano deja el test atado a un
+         * dato de otro archivo, y lo que hay que probar es que la serie SALE
+         * del desarrollo.
+         */
+        $codigo = (string) $this->proyecto->getAttribute('codigo');
+
         expect($recibo?->getAttribute('numero'))->toBe(1)
-            ->and($recibo?->folio())->toBe('000001');
+            ->and($recibo?->getAttribute('serie'))->toBe($codigo)
+            ->and($recibo?->folio())->toBe($codigo.'-00000001');
     });
 
     test('la CAI, el rango y la fecha límite quedan copiados en el papel', function (): void {

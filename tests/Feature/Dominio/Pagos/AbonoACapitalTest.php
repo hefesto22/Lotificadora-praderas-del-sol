@@ -187,55 +187,73 @@ describe('Bajar la cuota', function (): void {
 
 /*
 |--------------------------------------------------------------------------
-| Los dos detalles que decidió Mauricio el 6-ago-2026
+| Los dos detalles que decidió Mauricio: el 24-ago y el 6-ago-2026
 |--------------------------------------------------------------------------
 */
 
-describe('Primero pone al día', function (): void {
+describe('El lote tiene que estar al día', function (): void {
     /*
-    | Si no, quedaría alguien «con capital abonado» y moroso al mismo tiempo:
-    | dos verdades sobre el mismo contrato.
+    | 🔴 ESTO REEMPLAZA LO QUE SE DECIDIO EL 6-AGO
+    |
+    | «Que no pueda hacer abono a capital si tiene cuotas pendientes okey»
+    | —Mauricio, 24-ago-2026—.
+    |
+    | Antes el abono ponía al día primero y el sobrante bajaba capital. Eso
+    | dejaba UN papel contando dos historias y, cuando no alcanzaba ni para lo
+    | vencido, un recibo que decía «abono» sin haber abonado nada. Ahora lo
+    | vencido entra por su camino: «Cuota», o «Ambas» —que hace las dos cosas en
+    | un solo recibo y ya rechazaba este mismo caso—.
     */
-    test('cubre lo vencido en FIFO y solo el sobrante baja el capital', function (): void {
-        ($this->atrasar)([1, 2]);
+    test('con una cuota vencida el abono se rechaza', function (): void {
+        ($this->atrasar)([1]);
 
-        $recibo = ($this->abonar)('100000.00');
-
-        $plan = ($this->plan)();
-
-        expect($recibo->aplicaciones()->count())->toBe(2)
-            // Las dos vencidas quedaron saldadas y siguen en su lugar.
-            ->and(array_key_exists(1, $plan))->toBeTrue()
-            ->and(array_key_exists(2, $plan))->toBeTrue()
-            // 300,000 − 50,000 vencidos = 250,000 a reprogramar; menos los
-            // 50,000 de capital quedan 200,000, o sea 8 cuotas de 25,000.
-            ->and($plan)->toHaveCount(10)
-            ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('200000.00');
-
-        $constancia = Reprogramacion::query()->firstOrFail();
-
-        expect($constancia->montoAbonado())->toBeMonto('50000.00')
-            ->and((int) $constancia->getAttribute('desde_numero'))->toBe(3)
-            ->and((int) $constancia->getAttribute('cuotas_antes'))->toBe(10)
-            ->and((int) $constancia->getAttribute('cuotas_despues'))->toBe(8);
+        expect(fn () => ($this->abonar)('100000.00'))
+            ->toThrow(PagoInvalidoException::class, 'no puede recibir un abono a capital');
     });
 
     /*
-    | «Si el abono no alcanza ni para lo vencido, es un pago normal y no hay
-    | reprogramación: no se reescribe un plan por algo que no bajó el capital.»
-    | El dinero se registra igual — ya está sobre el mostrador.
+    | Y no queda nada a medias: ni recibo, ni constancia, ni una cuota con un
+    | céntimo aplicado. La verificación corre en la fase 1, antes de emitir, así
+    | que el correlativo tampoco se movió.
     */
-    test('si no alcanza ni para lo vencido, es un pago normal', function (): void {
-        ($this->atrasar)([1, 2, 3]);
+    test('no se registra nada de lo que se iba a hacer', function (): void {
+        ($this->atrasar)([1, 2]);
 
-        $recibo = ($this->abonar)('50000.00');
+        expect(fn () => ($this->abonar)('100000.00'))->toThrow(PagoInvalidoException::class);
 
-        expect($recibo->getAttribute('concepto'))->toBe(ConceptoDeRecibo::Cuota)
-            ->and($recibo->aplicaciones()->count())->toBe(2)
+        expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0)
             ->and(Reprogramacion::query()->count())->toBe(0)
-            // El plan quedó intacto: doce cuotas de 25,000.
             ->and(($this->plan)())->toHaveCount(12)
-            ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('250000.00');
+            ->and(Cuota::query()->where('compromiso_id', $this->renglon->getKey())->sum('monto_pagado'))->toBe('0.00')
+            ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('300000.00');
+    });
+
+    /*
+    | El mensaje tiene que decir CUANTO está vencido y por dónde entra esa
+    | plata: quien lo lee tiene al cliente enfrente y necesita el próximo paso.
+    */
+    test('el mensaje dice cuánto está vencido y por dónde cobrarlo', function (): void {
+        ($this->atrasar)([1, 2]);
+
+        expect(fn () => ($this->abonar)('100000.00'))
+            ->toThrow(PagoInvalidoException::class, '2 cuotas vencidas por L. 50,000.00');
+    });
+
+    /*
+    | La que vence HOY todavía no atrasa. Es la misma línea que usa la mora
+    | —`Cuota::estaVencida()`— y correrla un día haría que el mismo abono se
+    | acepte a las once y se rechace a la una.
+    */
+    test('la cuota que vence hoy no bloquea el abono', function (): void {
+        Cuota::query()
+            ->where('compromiso_id', $this->renglon->getKey())
+            ->where('numero', 1)
+            ->update(['fecha_vencimiento' => today()->toDateString()]);
+
+        ($this->abonar)('75000.00');
+
+        expect(Reprogramacion::query()->count())->toBe(1)
+            ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('225000.00');
     });
 });
 
@@ -418,6 +436,12 @@ describe('Lo que rechaza', function (): void {
 | Después de un abono, el lote debe exactamente lo que debía menos lo que
 | entró. En los dos caminos, con y sin atraso, al céntimo. Si esto falla, el
 | estado de cuenta no cierra en cero el último mes.
+|
+| ⚠️ Con atraso el invariante viaja por «Ambas» desde el 24-ago-2026: el abono a
+| secas pide el lote al día. De los mismos L X entran L 50,000.00 a las dos
+| cuotas vencidas y el resto baja capital — **el total que el cliente entrega es
+| el mismo**, y por eso el esperado no cambia ni una línea. Ahí está el valor de
+| este test: la regla nueva cambió el CAMINO, no la aritmética.
 */
 
 test('el saldo baja exactamente lo que entró, en cualquier combinación', function (
@@ -427,9 +451,20 @@ test('el saldo baja exactamente lo que entró, en cualquier combinación', funct
 ): void {
     if ($conAtraso) {
         ($this->atrasar)([1, 2]);
-    }
 
-    ($this->abonar)($monto, ModalidadDeReprogramacion::from($modalidad));
+        $this->pagos->cobrarYAbonar(
+            venta: $this->venta,
+            cliente: $this->cliente,
+            cuotas: [['lote' => $this->renglon, 'monto' => new Monto('50000.00')]],
+            loteDelAbono: $this->renglon,
+            aCapital: new Monto($monto)->restar(new Monto('50000.00')),
+            modalidad: ModalidadDeReprogramacion::from($modalidad),
+            motivo: 'Abono a capital solicitado por el cliente',
+            forma: FormaDePago::Efectivo,
+        );
+    } else {
+        ($this->abonar)($monto, ModalidadDeReprogramacion::from($modalidad));
+    }
 
     $esperado = new Monto('300000.00')->restar(new Monto($monto));
 

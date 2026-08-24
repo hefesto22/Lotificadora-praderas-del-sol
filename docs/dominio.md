@@ -231,7 +231,8 @@ de papel.
 
 **El recibo de un abono imprime dos renglones** (R21): lo que puso al día y lo que bajó el
 capital. Sin eso el cliente no entiende por qué pagó L 100,000.00 y sus cuotas bajaron
-L 50,000.00.
+L 60,000.00. Desde el 24-ago-2026 ese papel sale por **«Ambas»**: un abono a secas pide el lote
+al día, así que tiene un solo renglón.
 
 Se deja la puerta abierta sin construir nada: el documento de cobro lleva una columna de
 **tipo de documento**, de modo que el día que aparezca un talonario con CAI se agregue el tipo
@@ -296,13 +297,29 @@ cuotas de golpe y le movería números que no pidió tocar.
 Recalcular **reescribe el plan de ese lote**: las cuotas ya pagadas no se tocan, las pendientes
 se reemplazan. Queda registrado que hubo una reprogramación, con su motivo.
 
-**Dos detalles que decidió Mauricio el 6-ago-2026, porque cambian el número:**
+**Dos detalles que decidió Mauricio, porque cambian el número:**
 
-- **Con cuotas vencidas, el abono primero pone al día.** Cubre lo vencido en FIFO y solo el
-  sobrante va a capital. Si no, quedaría alguien «con capital abonado» y moroso al mismo
-  tiempo — dos verdades sobre el mismo contrato. Si el abono no alcanza ni para lo vencido, es
-  un pago normal y no hay reprogramación: no se reescribe un plan por algo que no bajó el
-  capital.
+- 🔴 **El lote tiene que estar al día. Con una cuota vencida, no hay abono a capital.**
+  *(24-ago-2026: «que no pueda hacer abono a capital si tiene cuotas pendientes okey»)* Se
+  rechaza diciendo cuántas cuotas están vencidas, cuánto suman y por dónde entra esa plata:
+  **«Cuota»**, o **«Ambas»**, que cobra lo vencido y baja el capital con el sobrante en un solo
+  recibo. La regla es **por lote**: un lote al día se abona aunque otro del mismo contrato deba.
+  El corte es `Cuota::estaVencida()` —la misma línea que usa la mora—, así que la que vence
+  **hoy** todavía no bloquea nada.
+
+  **Reemplaza lo que se había decidido el 6-ago-2026**, que era: «con cuotas vencidas el abono
+  primero pone al día, cubre lo vencido en FIFO y solo el sobrante va a capital; si no alcanza
+  ni para lo vencido es un pago normal y no hay reprogramación». Aquello evitaba al moroso con
+  capital abonado —dos verdades sobre el mismo contrato— pero lo hacía dentro de UN papel que
+  contaba dos historias, y cuando no alcanzaba emitía un recibo que decía «abono» sin haber
+  abonado nada. Hoy esa plata entra por su camino y el papel dice lo que pasó.
+
+  La única puerta que sigue poniendo al día y bajando capital en el mismo recibo es **«Ambas»**
+  (`cobrarYAbonar()`), donde lo vencido se cobra **antes** y con su renglón. Ahí ya existía la
+  misma regla desde el 23-ago: si el sobrante no llega a bajar capital, se rechaza.
+
+  ⚠️ **La carga de la cartera vieja está exceptuada**: transcribe papel de 2019 con cuotas
+  atrasadas de 2019, y rechazarlo no lo desharía — solo dejaría el expediente incompleto.
 - **La cuota pagada a medias se respeta.** Si la 5 tiene L 12,500.00 de L 25,000.00, esa cuota
   queda tal cual y el plan nuevo empieza en la 6. Es lo que ya decía R21 —lo pagado no se
   toca— y además mantiene el recibo viejo apuntando a una cuota que sigue existiendo. La
@@ -317,10 +334,11 @@ se reemplazan. Queda registrado que hubo una reprogramación, con su motivo.
 | El motivo | **Obligatorio**, y lo hace cumplir un CHECK, igual que el descuento de R4 |
 | El recibo | **Uno solo**, de concepto `abono_capital`. Lleva sus aplicaciones por la parte que puso al día; lo que bajó el capital es `monto − suma de aplicaciones`. El cliente entregó un dinero y se lleva un papel |
 | Quién puede | Solo la administradora, con permiso propio `Reprogramar:Venta`. El receptor cobra (`Create:Recibo`) pero no reescribe un plan firmado |
-| Si no alcanza para lo vencido | Se registra igual **como pago normal** y una notificación explica que no hubo reprogramación. El dinero ya está sobre el mostrador |
+| Si el lote tiene cuotas vencidas | **No se registra nada** (24-ago-2026). La verificación corre con las cuotas bloqueadas y antes de emitir, así que el correlativo tampoco se mueve. En la pantalla ese lote no tiene casilla: en su lugar va el motivo, con las cuotas vencidas listadas. Hasta el 24-ago se registraba **como pago normal**, con una notificación que explicaba que no hubo reprogramación |
 
 **El tope del abono no es el saldo del lote.** Solo se puede abonar hasta *lo vencido + lo que
-se puede reprogramar*. Lo que le falta a una cuota pagada a medias queda afuera: respetarla
+se puede reprogramar* — y desde el 24-ago-2026 lo vencido siempre vale cero acá, porque con una
+cuota vencida no hay abono. Lo que le falta a una cuota pagada a medias queda afuera: respetarla
 significa no tocarla, ni siquiera para cobrarla de paso. Cancelar el lote entero se hace por
 «Registrar un pago», que cubre todo FIFO sin reescribir nada.
 

@@ -89,6 +89,18 @@
     .olympo-escalera .monto { font-weight: 700; font-variant-numeric: tabular-nums; color: rgb(9 9 11); }
     .dark .olympo-escalera .monto { color: #fff; }
 
+    /* Las cuotas VENCIDAS de cada lote, debajo de su casilla en el modal de
+       cobro. Van listadas una por una —no contadas— porque quien atiende
+       tiene que poder contestar «¿de qué meses me estás cobrando?» sin
+       salirse del modal. La primera va marcada: es a la que se aplica la
+       plata si el cliente trae para una sola. */
+    .olympo-vencidas { display: block; font-weight: 600; color: rgb(180 35 24); }
+    .dark .olympo-vencidas { color: rgb(252 165 165); }
+    .olympo-vencidas-lista { margin: .25rem 0 0; padding: 0; list-style: none; }
+    .olympo-vencidas-lista li { font-variant-numeric: tabular-nums; line-height: 1.5; }
+    .olympo-vencidas-lista li:first-child strong { color: rgb(180 35 24); font-weight: 600; }
+    .dark .olympo-vencidas-lista li:first-child strong { color: rgb(252 165 165); }
+
     /* El encabezado de cada lote adentro del desglose de un cobro, y el
        total de abajo. Sin el total, quien atiende tendría que sumar tres
        cuotas de cabeza con el cliente enfrente. */

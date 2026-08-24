@@ -181,6 +181,7 @@ final readonly class RegistroDePagos
         ?string $observaciones = null,
         bool $condonarMora = false,
         ?string $motivoCondonacion = null,
+        bool $deLaCarteraVieja = false,
     ): array {
         return $this->porCadaNombre(
             $renglones,
@@ -194,6 +195,7 @@ final readonly class RegistroDePagos
                 $observaciones,
                 $condonarMora,
                 $motivoCondonacion,
+                $deLaCarteraVieja,
             ),
         );
     }
@@ -219,6 +221,7 @@ final readonly class RegistroDePagos
         ?string $observaciones,
         bool $condonarMora,
         ?string $motivoCondonacion,
+        bool $deLaCarteraVieja = false,
     ): Recibo {
         if ($renglones === []) {
             throw PagoInvalidoException::porNoElegirNingunLote();
@@ -265,7 +268,8 @@ final readonly class RegistroDePagos
             $cuando,
             $observaciones,
             $condonarMora,
-            $porQueSePerdona
+            $porQueSePerdona,
+            $deLaCarteraVieja
         ): Recibo {
             $total = Monto::cero();
             $moraCobrada = Monto::cero();
@@ -320,6 +324,7 @@ final readonly class RegistroDePagos
                 $cuando,
                 $observaciones,
                 array_map(static fn (array $renglon): Compromiso => $renglon['lote'], $renglones),
+                $deLaCarteraVieja,
             );
 
             // 4. Mora → interés → capital, FIFO adentro de cada lote.
@@ -482,6 +487,11 @@ final readonly class RegistroDePagos
      * `EfectoDelAbono::interesesAhorrados()` y la pantalla lo muestra ANTES de
      * confirmar (§10.8).
      *
+     * ═══ 🔴 PIDE EL LOTE AL DIA (24-ago-2026) ═══
+     *
+     * Con una sola cuota vencida esto se rechaza. El porque completo esta en
+     * `PagoInvalidoException::porCuotasVencidasAntesDelAbono()`.
+     *
      * @param string $motivo obligatorio (R21); la base también lo exige
      *
      * @throws PagoInvalidoException
@@ -557,12 +567,18 @@ final readonly class RegistroDePagos
      * con uno: si el segundo se pasa del tope, el primero TAMPOCO se abona y no
      * queda medio recibo con un plan reescrito.
      *
-     * ═══ UN LOTE QUE NO ALCANZA NO TUMBA A LOS OTROS ═══
+     * ═══ 🔴 UN LOTE ATRASADO TUMBA EL RECIBO ENTERO (24-ago-2026) ═══
      *
-     * Si a un lote no le alcanza ni para lo vencido, ESE lote se registra como
-     * pago normal y no se reprograma —igual que con un solo lote— mientras los
-     * demas siguen su camino. No es un error: el dinero ya esta sobre el
-     * mostrador y la notificacion lo explica.
+     * «Que no pueda hacer abono a capital si tiene cuotas pendientes okey»
+     * —Mauricio—. Si CUALQUIERA de los lotes marcados tiene una cuota vencida,
+     * no se abona ninguno: un recibo se emite entero o no se emite, igual que
+     * cuando un lote se pasa del tope.
+     *
+     * Hasta hoy ese lote se registraba como pago normal y los demas seguian su
+     * camino. Se cambio a proposito: la mitad de un recibo que dice «abono» y
+     * no abono nada es justamente el papel que esta regla vino a evitar. Lo que
+     * hay que hacer con esa plata esta en el mensaje —«Cuota» o «Ambas»— y son
+     * dos clics con el cliente enfrente, no un tramite.
      *
      * @param list<array{lote: Compromiso, monto: Monto, modalidad: ModalidadDeReprogramacion}> $renglones
      * @param string $motivo obligatorio (R21); la base tambien lo exige
@@ -580,6 +596,7 @@ final readonly class RegistroDePagos
         ?string $referencia = null,
         ?CarbonImmutable $fecha = null,
         ?string $observaciones = null,
+        bool $deLaCarteraVieja = false,
     ): array {
         return $this->porCadaNombre(
             $renglones,
@@ -592,6 +609,7 @@ final readonly class RegistroDePagos
                 $referencia,
                 $fecha,
                 $observaciones,
+                $deLaCarteraVieja,
             ),
         );
     }
@@ -614,6 +632,7 @@ final readonly class RegistroDePagos
         ?string $referencia,
         ?CarbonImmutable $fecha,
         ?string $observaciones,
+        bool $deLaCarteraVieja = false,
     ): Recibo {
         if ($renglones === []) {
             throw PagoInvalidoException::porNoElegirNingunLote();
@@ -660,7 +679,8 @@ final readonly class RegistroDePagos
             $limpia,
             $cuando,
             $observaciones,
-            $total
+            $total,
+            $deLaCarteraVieja
         ): Recibo {
             /*
              * FASE 1 — releer bloqueando, calcular y rechazar. Sin escribir una
@@ -674,6 +694,33 @@ final readonly class RegistroDePagos
                 $monto = $renglon['monto'];
 
                 $pendientes = $this->pendientesBloqueadas($lote);
+
+                /*
+                 * ═══ 🔴 UN LOTE ATRASADO NO RECIBE ABONO (24-ago-2026) ═══
+                 *
+                 * «Que no pueda hacer abono a capital si tiene cuotas
+                 * pendientes okey» — Mauricio.
+                 *
+                 * Se verifica ACA, con las cuotas ya bloqueadas: leerlo antes de
+                 * la transaccion es leer un estado que otra caja puede cambiar
+                 * en el medio. Y antes de emitir, asi que el correlativo no se
+                 * mueve.
+                 *
+                 * ⚠️ La cartera vieja NO pasa por esto: transcribe papel que ya
+                 * existe —un abono de 2019 con cuotas atrasadas de 2019— y
+                 * rechazarlo no lo desharia, solo dejaria el expediente
+                 * incompleto. La regla es para el mostrador de hoy.
+                 */
+                $vencidas = $this->lasVencidas($pendientes);
+
+                if (! $deLaCarteraVieja && $vencidas->isNotEmpty()) {
+                    throw PagoInvalidoException::porCuotasVencidasAntesDelAbono(
+                        $vencidas->count(),
+                        $this->saldoDe($vencidas),
+                        $this->codigo($lote),
+                    );
+                }
+
                 $mora = MoraDelLote::calcular($pendientes, $this->condicionesDe($lote), $cuando);
 
                 $efecto = EfectoDelAbono::calcular(
@@ -765,6 +812,7 @@ final readonly class RegistroDePagos
                 $cuando,
                 $observaciones,
                 array_map(static fn (array $renglon): Compromiso => $renglon['lote'], $renglones),
+                $deLaCarteraVieja,
             );
 
             $moraCobrada = Monto::cero();
@@ -775,6 +823,14 @@ final readonly class RegistroDePagos
                 /*
                  * No alcanzo ni para lo vencido: ESTE lote es un pago normal y
                  * no se reescribe ningun plan. Los demas siguen su camino.
+                 *
+                 * ⚠️ Desde el 24-ago-2026 esto SOLO lo alcanza la cartera vieja:
+                 * con una cuota vencida la fase 1 ya rechazo el abono, y sin
+                 * nada vencido `ponerAlDia` vale cero y cualquier monto lo
+                 * supera. Se conserva porque el import lo sigue usando —papel de
+                 * 2019 con cuotas atrasadas de 2019— y porque un `else` que no
+                 * existe es la forma de que el dia que la regla se afloje esto
+                 * escriba silenciosamente un plan que nadie pidio.
                  */
                 if ($efecto->esPagoNormal) {
                     $reparto = $this->repartir($recibo, $planificado['pendientes'], $planificado['monto'], $planificado['mora']);
@@ -1589,6 +1645,23 @@ final readonly class RegistroDePagos
     }
 
     /**
+     * Las que ya pasaron su fecha y siguen debiendo algo.
+     *
+     * La regla la tiene la Cuota —`estaVencida()`— y no se copia acá: es la
+     * MISMA que usa la mora, la lista de cobranza y el modal. Dos definiciones
+     * de «vencida» serían dos respuestas a la pregunta de si el cliente está al
+     * día, y las dos saldrían impresas.
+     *
+     * @param Collection<int, Cuota> $pendientes
+     *
+     * @return Collection<int, Cuota>
+     */
+    private function lasVencidas(Collection $pendientes): Collection
+    {
+        return $pendientes->filter(static fn (Cuota $cuota): bool => $cuota->estaVencida())->values();
+    }
+
+    /**
      * @param Collection<int, Cuota> $pendientes
      */
     private function saldoDe(Collection $pendientes): Monto
@@ -1690,6 +1763,10 @@ final readonly class RegistroDePagos
      * `recibos_cuelgan_de_un_compromiso_chk` la deja pasar porque `venta_id`
      * está puesto — R13: todo pago cuelga de algo.
      *
+     * `$deLaCarteraVieja` lo pasa SOLO `CarteraHistoricaSeeder`, y hace que el
+     * papel salga de la serie vieja —sin prefijo— en vez de la del proyecto.
+     * Ver `ConsumoDeCorrelativos::paraUnReciboNuevo()`.
+     *
      * @param list<Compromiso> $lotesDelRecibo los lotes que cubre este papel,
      *                                         para saber a nombre de quien sale
      */
@@ -1704,12 +1781,15 @@ final readonly class RegistroDePagos
         CarbonImmutable $cuando,
         ?string $observaciones,
         array $lotesDelRecibo = [],
+        bool $deLaCarteraVieja = false,
     ): Recibo {
         $aNombreDe = $this->aNombreDeQuien($lotesDelRecibo);
         $factura = $this->facturas->paraElProyecto($venta->proyecto);
+        $delTalonario = $this->correlativos->paraUnReciboNuevo($venta->proyecto, $deLaCarteraVieja);
 
         return Recibo::query()->create([
-            'numero'        => $this->correlativos->siguienteDeReciboInterno(),
+            'numero'        => $delTalonario['numero'],
+            'serie'         => $delTalonario['serie'],
             'venta_id'      => $venta->getKey(),
             'compromiso_id' => $lote?->getKey(),
             'cliente_id'    => $cliente->getKey(),

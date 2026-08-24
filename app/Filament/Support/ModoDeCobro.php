@@ -50,11 +50,17 @@ enum ModoDeCobro: string
         };
     }
 
+    /**
+     * ⚠️ La segunda frase de «Abono» no es un adorno: desde el 24-ago-2026 el
+     * abono se RECHAZA si el lote tiene una cuota vencida, y quien atiende tiene
+     * que saberlo ANTES de teclear el monto, no después de que el modal le
+     * devuelva un error con el cliente enfrente.
+     */
     public function explicacion(): string
     {
         return match ($this) {
             self::Cuota      => 'Se aplica a las cuotas más viejas primero. El plan no se toca.',
-            self::Abono      => 'Baja el capital del lote y reescribe las cuotas que faltan.',
+            self::Abono      => 'Baja el capital del lote y reescribe las cuotas que faltan. Solo en lotes al día: si hay cuotas vencidas, se cobran primero o se usa «Ambas».',
             self::Ambas      => 'Primero termina de pagar las cuotas que están a medias; el sobrante baja el capital.',
             self::ProntoPago => 'Salda el lote entero: se escribe el descuento y el cliente entrega el resto.',
         };

@@ -128,9 +128,14 @@ describe('El original y las copias', function (): void {
 });
 
 /*
-| R21: un abono puede poner al día lo vencido Y bajar el capital con el
+| R21: un recibo puede poner al día lo vencido Y bajar el capital con el
 | sobrante. Los dos renglones tienen que verse, o el cliente no entiende por
-| qué pagó L 100,000.00 y sus cuotas solo bajaron L 50,000.00.
+| qué pagó L 100,000.00 y sus cuotas solo bajaron L 60,000.00.
+|
+| ⚠️ Desde el 24-ago-2026 ese papel sale por «Ambas» y no por el abono a secas:
+| «que no pueda hacer abono a capital si tiene cuotas pendientes okey». Con el
+| lote atrasado `abonarACapital()` lo rechaza, y lo que hace las dos cosas en un
+| solo recibo es `cobrarYAbonar()`.
 */
 test('el recibo de un abono imprime sus dos renglones', function (): void {
     Cuota::query()
@@ -138,19 +143,20 @@ test('el recibo de un abono imprime sus dos renglones', function (): void {
         ->whereIn('numero', [3, 4])
         ->update(['fecha_vencimiento' => today()->subMonths(2)->toDateString()]);
 
-    $abono = app(RegistroDePagos::class)->abonarACapital(
+    // Vencido: lo que faltaba de la 3 (15,000) y la 4 entera (25,000) = 40,000.
+    // Los otros 60,000 bajan el capital.
+    $recibos = app(RegistroDePagos::class)->cobrarYAbonar(
         venta: $this->venta,
-        lote: $this->renglon,
         cliente: $this->cliente,
-        monto: new Monto('100000.00'),
+        cuotas: [['lote' => $this->renglon, 'monto' => new Monto('40000.00')]],
+        loteDelAbono: $this->renglon,
+        aCapital: new Monto('60000.00'),
         modalidad: ModalidadDeReprogramacion::AcortarPlazo,
         motivo: 'El cliente quiere terminar antes',
         forma: FormaDePago::Efectivo,
     );
 
-    // Vencido: lo que faltaba de la 3 (15,000) y la 4 entera (25,000) = 40,000.
-    // Los otros 60,000 bajaron el capital.
-    $this->get(route('documentos.recibo', $abono))
+    $this->get(route('documentos.recibo', $recibos[0]))
         ->assertOk()
         ->assertSee('Abono a capital')
         ->assertSee('L. 60,000.00')

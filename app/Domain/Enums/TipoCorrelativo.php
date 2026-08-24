@@ -15,11 +15,21 @@ namespace App\Domain\Enums;
  *   numero de expediente —que es ese mismo secuencial pelado, R7—
  *   identifica a un cliente para siempre y no necesita cargar el anio.
  *
- * - RECIBO_INTERNO es GLOBAL, una sola serie para toda la lotificadora
- *   (R12). Don Elder y don Edwin consumen numeros de la misma secuencia
- *   desde lugares distintos, y por eso el consumo va con `SELECT … FOR
- *   UPDATE` dentro de la transaccion: es la unica forma de que dos cobros
- *   simultaneos no saquen el mismo numero.
+ * - RECIBO_INTERNO va POR PROYECTO desde el 23-ago-2026, y el numero se ve
+ *   `RPS-00000001` con el codigo del desarrollo adelante.
+ *
+ *   Estuvo GLOBAL hasta ese dia, por la R12. La razon original sigue siendo
+ *   cierta DENTRO de un desarrollo —don Elder en la oficina y don Edwin en el
+ *   campo cobrando a la vez no pueden sacar el mismo numero, y eso lo cuida
+ *   el `SELECT … FOR UPDATE`, que no cambia—. Lo que la R12 no previo fue el
+ *   segundo desarrollo: con una sola serie los recibos de dos proyectos se
+ *   intercalan y ninguna serie cuadra la caja de nadie.
+ *
+ * - RECIBO_HISTORICO es GLOBAL y nace el 23-ago-2026 con la carga de la
+ *   cartera vieja. Es la serie que ya existia, congelada: los 257 recibos que
+ *   documentan cobros anteriores al sistema siguen numerados como estan
+ *   —`recibos.serie` en null, sin prefijo— y una recarga los reproduce
+ *   iguales. **No la usa nadie mas que `CarteraHistoricaSeeder`.**
  *
  * - DEVOLUCION es GLOBAL y nace el 10-ago-2026 con el primer EGRESO del
  *   sistema. Va en serie PROPIA y no en la de recibos: R12 promete que
@@ -46,6 +56,7 @@ enum TipoCorrelativo: string
 {
     case Contrato = 'contrato';
     case ReciboInterno = 'recibo_interno';
+    case ReciboHistorico = 'recibo_historico';
     case Devolucion = 'devolucion';
     case Gasto = 'gasto';
 
@@ -64,7 +75,7 @@ enum TipoCorrelativo: string
      */
     public static function valoresPorProyecto(): array
     {
-        return [self::Contrato->value];
+        return [self::Contrato->value, self::ReciboInterno->value];
     }
 
     /**
@@ -74,16 +85,17 @@ enum TipoCorrelativo: string
      */
     public static function valoresGlobales(): array
     {
-        return [self::ReciboInterno->value, self::Devolucion->value, self::Gasto->value];
+        return [self::ReciboHistorico->value, self::Devolucion->value, self::Gasto->value];
     }
 
     public function etiqueta(): string
     {
         return match ($this) {
-            self::Contrato      => 'Contrato',
-            self::ReciboInterno => 'Recibo interno',
-            self::Devolucion    => 'Comprobante de devolución',
-            self::Gasto         => 'Comprobante de egreso',
+            self::Contrato        => 'Contrato',
+            self::ReciboInterno   => 'Recibo interno',
+            self::ReciboHistorico => 'Recibo de la cartera anterior',
+            self::Devolucion      => 'Comprobante de devolución',
+            self::Gasto           => 'Comprobante de egreso',
         };
     }
 
@@ -92,6 +104,6 @@ enum TipoCorrelativo: string
      */
     public function esPorProyecto(): bool
     {
-        return $this === self::Contrato;
+        return in_array($this, [self::Contrato, self::ReciboInterno], true);
     }
 }
