@@ -86,6 +86,10 @@ final class LimpiarCartera extends Command
         if (array_sum($conteos) === 0) {
             $this->info("La cartera de {$codigo} ya está en cero. No hay nada que borrar.");
 
+            // Pero `--planes` y `--clientes` se pidieron igual. Ver el docblock
+            // de `loQueSePidioAparte()`: esto costó una corrida en el servidor.
+            $this->loQueSePidioAparte($id);
+
             return self::SUCCESS;
         }
 
@@ -100,7 +104,9 @@ final class LimpiarCartera extends Command
         }
 
         $this->newLine();
-        $this->line('   El plano, los bloques, los lotes y los planes de pago NO se tocan.');
+        $this->line($this->option('planes') === true
+            ? '   El plano, los bloques y los lotes NO se tocan. Los planes de pago SI: se borran.'
+            : '   El plano, los bloques, los lotes y los planes de pago NO se tocan.');
         $this->line('   Los lotes vuelven a «disponible» y los correlativos a cero.');
         $this->newLine();
 
@@ -118,6 +124,32 @@ final class LimpiarCartera extends Command
         $this->newLine();
         $this->info("✓ La cartera de {$codigo} quedó en cero.");
 
+        $this->loQueSePidioAparte($id);
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * Lo que se pidió con `--clientes` y `--planes`.
+     *
+     * ═══ 🔴 POR QUE VIVE APARTE Y NO AL FINAL DEL CAMINO LARGO ═══
+     *
+     * **Porque no depende de que haya cartera que borrar.** Hasta el
+     * 24-ago-2026 estos dos bloques colgaban del final de `handle()`, después
+     * del corte temprano. Sobre un proyecto con la cartera YA en cero el
+     * comando decía «no hay nada que borrar», devolvía éxito… y los planes de
+     * pago quedaban intactos. Una opción que se pidió y se fue en silencio.
+     *
+     * Costó una corrida del seeder en el servidor de pruebas: el plan de lista
+     * de L 1,950.00 por vara² seguía ahí, y la carga de la cartera se plantó en
+     * el lote RPS-L-008 pidiendo motivo de descuento por un lote que se vendió
+     * a su propio precio.
+     *
+     * ⚠️ La lección general: **un corte temprano tiene que preguntarse qué más
+     * le pidieron**, no solo qué se ahorra.
+     */
+    private function loQueSePidioAparte(int $id): void
+    {
         if ($this->option('clientes') === true) {
             $huerfanos = $this->borrarClientesSinVentas();
             $this->info("✓ Se borraron {$huerfanos} clientes que quedaron sin ninguna venta.");
@@ -127,8 +159,6 @@ final class LimpiarCartera extends Command
             $planes = DB::table('planes_de_pago')->where('proyecto_id', $id)->delete();
             $this->info("✓ Se borraron {$planes} planes de pago. Cada lote queda con su propio precio.");
         }
-
-        return self::SUCCESS;
     }
 
     /**
