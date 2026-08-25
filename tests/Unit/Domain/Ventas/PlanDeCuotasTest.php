@@ -163,6 +163,37 @@ it('rechaza pedir cuotas cuando no queda saldo que financiar', function (): void
     );
 })->throws(PlanDeCuotasInvalidoException::class, 'venta de contado va con plazo 0');
 
+/*
+| ─── El lote sin precio ──────────────────────────────────────────────
+|
+| Lo vio Mauricio el 24-ago-2026 en el modal del plano, con los lotes en
+| L 0.00: las cinco filas de plazo decian «la prima cubre el valor completo».
+| Cierto —cero cubre cero— y completamente inutil, porque manda a revisar la
+| prima cuando lo que falta es el precio.
+*/
+
+it('rechaza el lote sin precio diciendo que le falta el precio', function (): void {
+    PlanDeCuotas::nuevo(
+        valorTotal: Monto::cero(),
+        prima: Monto::cero(),
+        plazoMeses: 12,
+        diaPago: 5,
+        fechaContrato: CarbonImmutable::parse('2026-08-03'),
+    );
+})->throws(PlanDeCuotasInvalidoException::class, 'todavia no tiene precio');
+
+// Y tampoco pasa como «venta de contado de L 0.00»: un lote sin precio no se
+// vende, ni siquiera al contado.
+it('rechaza el lote sin precio aunque el plazo sea cero', function (): void {
+    PlanDeCuotas::nuevo(
+        valorTotal: Monto::cero(),
+        prima: Monto::cero(),
+        plazoMeses: 0,
+        diaPago: 5,
+        fechaContrato: CarbonImmutable::parse('2026-08-03'),
+    );
+})->throws(PlanDeCuotasInvalidoException::class, 'todavia no tiene precio');
+
 // ─── Validaciones ────────────────────────────────────────────────────
 
 it('rechaza una prima mayor que el valor de la venta', function (): void {

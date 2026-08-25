@@ -121,6 +121,17 @@ final readonly class PlanDeCuotas implements Countable
             throw PlanDeCuotasInvalidoException::porPrimaMayorAlValor($prima, $valorTotal);
         }
 
+        /*
+         * 🔴 El lote sin precio se dice con todas las letras (24-ago-2026).
+         *
+         * Sin esto cae en el mensaje de contado de mas abajo —que es cierto
+         * y no sirve—. El porque completo esta en
+         * `PlanDeCuotasInvalidoException::porLoteSinPrecio()`.
+         */
+        if ($valorTotal->esCero()) {
+            throw PlanDeCuotasInvalidoException::porLoteSinPrecio();
+        }
+
         $saldo = $valorTotal->restar($prima);
 
         // Venta de contado: no hay nada que financiar. Se devuelve un plan

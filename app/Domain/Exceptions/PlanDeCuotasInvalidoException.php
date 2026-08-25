@@ -26,6 +26,31 @@ final class PlanDeCuotasInvalidoException extends GrupoOlympoException
     }
 
     /**
+     * El lote al que nunca se le puso precio (24-ago-2026).
+     *
+     * ═══ POR QUE NO ALCANZA CON EL MENSAJE DE CONTADO ═══
+     *
+     * Con el valor en cero la prima tambien vale cero, asi que
+     * tecnicamente «la prima cubre el valor completo» y aquel mensaje es
+     * CIERTO. Y no sirve para nada: manda a revisar la prima cuando lo que
+     * falta es el precio del lote.
+     *
+     * Lo vio Mauricio en el modal del plano: las cinco filas de plazo en
+     * L 0.00 y la misma explicacion de contado repetida en todas.
+     *
+     * Un mensaje verdadero que manda a buscar el problema donde no esta
+     * cuesta mas caro que uno que falta.
+     */
+    public static function porLoteSinPrecio(): self
+    {
+        return new self(
+            'Este lote todavia no tiene precio, asi que no hay nada que financiar. '.
+            'Ponéselo con «Fijar precio por vara²» en el proyecto, o carga el plan de '.
+            'pago del plazo que corresponda.'
+        );
+    }
+
+    /**
      * Prima completa = venta de contado, y una venta de contado no tiene
      * plan de cuotas. No es un error de calculo, es que no hay nada que
      * financiar.
