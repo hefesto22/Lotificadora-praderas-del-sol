@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\EstadoDeCuentaController;
+use App\Http\Controllers\EstadoMensualController;
 use App\Http\Controllers\ImprimirDevolucionController;
 use App\Http\Controllers\ImprimirReciboController;
 use App\Http\Controllers\PlanoImagenController;
@@ -49,6 +50,19 @@ Route::middleware(UsuarioActivoDelPanel::class, SuspensionPorMora::class)
     ->group(function (): void {
         Route::get('recibo/{recibo}', ImprimirReciboController::class)->name('recibo');
         Route::get('estado-de-cuenta/{venta}', EstadoDeCuentaController::class)->name('estado-de-cuenta');
+
+        /*
+         * El cierre del mes del PROYECTO: qué entró, qué salió, qué quedó y
+         * cuánto le toca a cada socio (24-ago-2026).
+         *
+         *     /documentos/estado-mensual/1?mes=2026-08
+         *
+         * Va acá y no en el panel por lo mismo que las otras tres: es una hoja
+         * para imprimir, con su membrete y sin el cromo de Filament alrededor.
+         * Y el permiso lo pone el controlador —ver gastos Y ver socios—, no
+         * esta ruta: el receptor entra al grupo igual, para su recibo.
+         */
+        Route::get('estado-mensual/{proyecto}', EstadoMensualController::class)->name('estado-mensual');
 
         /*
          * El papel de una SALIDA: la devolución de una seña (R14) y el acta
