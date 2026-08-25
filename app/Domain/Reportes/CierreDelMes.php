@@ -237,9 +237,15 @@ final readonly class CierreDelMes
 
     public function huboMovimiento(): bool
     {
-        return ! $this->cobradoDelMes->esCero()
-            || ! $this->gastadoDelMes->esCero()
-            || ! $this->devueltoDelMes->esCero();
+        if (! $this->cobradoDelMes->esCero()) {
+            return true;
+        }
+
+        if (! $this->gastadoDelMes->esCero()) {
+            return true;
+        }
+
+        return ! $this->devueltoDelMes->esCero();
     }
 
     /**
@@ -283,9 +289,9 @@ final readonly class CierreDelMes
         $anio = $this->primerDia->year;
         $id = (int) $this->proyecto->getKey();
 
-        $cobrado = self::cobradoPorMes($id, $anio);
-        $gastado = self::gastadoPorMes($id, $anio);
-        $devuelto = self::devueltoPorMes($id, $anio);
+        $cobrado = $this->cobradoPorMes($id, $anio);
+        $gastado = $this->gastadoPorMes($id, $anio);
+        $devuelto = $this->devueltoPorMes($id, $anio);
 
         $filas = [];
 
@@ -577,34 +583,34 @@ final readonly class CierreDelMes
     /**
      * @return array<string, Monto> clave `YYYY-MM`
      */
-    private static function cobradoPorMes(int $proyecto, int $anio): array
+    private function cobradoPorMes(int $proyecto, int $anio): array
     {
         $filas = Recibo::query()
             ->reorder()
             ->whereNull('anulado_el')
             ->whereIn('venta_id', self::ventasDelProyecto($proyecto))
-            ->whereBetween('fecha', self::elAnio($anio))
+            ->whereBetween('fecha', $this->elAnio($anio))
             ->groupByRaw("to_char(fecha, 'YYYY-MM')")
             ->selectRaw("to_char(fecha, 'YYYY-MM') AS mes, COALESCE(SUM(monto), 0) AS total")
             ->pluck('total', 'mes');
 
-        return self::aMontos($filas->all());
+        return $this->aMontos($filas->all());
     }
 
     /**
      * @return array<string, Monto> clave `YYYY-MM`
      */
-    private static function gastadoPorMes(int $proyecto, int $anio): array
+    private function gastadoPorMes(int $proyecto, int $anio): array
     {
         $filas = Gasto::query()
             ->reorder()
             ->where('proyecto_id', $proyecto)
-            ->whereBetween('fecha', self::elAnio($anio))
+            ->whereBetween('fecha', $this->elAnio($anio))
             ->groupByRaw("to_char(fecha, 'YYYY-MM')")
             ->selectRaw("to_char(fecha, 'YYYY-MM') AS mes, COALESCE(SUM(monto), 0) AS total")
             ->pluck('total', 'mes');
 
-        return self::aMontos($filas->all());
+        return $this->aMontos($filas->all());
     }
 
     /**
@@ -614,12 +620,12 @@ final readonly class CierreDelMes
      *
      * @return array<string, Monto> clave `YYYY-MM`
      */
-    private static function devueltoPorMes(int $proyecto, int $anio): array
+    private function devueltoPorMes(int $proyecto, int $anio): array
     {
         $porVenta = Devolucion::query()
             ->reorder()
             ->whereIn('venta_id', self::ventasDelProyecto($proyecto))
-            ->whereBetween('fecha', self::elAnio($anio))
+            ->whereBetween('fecha', $this->elAnio($anio))
             ->groupByRaw("to_char(fecha, 'YYYY-MM')")
             ->selectRaw("to_char(fecha, 'YYYY-MM') AS mes, COALESCE(SUM(monto_devuelto), 0) AS total")
             ->pluck('total', 'mes');
@@ -628,14 +634,14 @@ final readonly class CierreDelMes
             ->reorder()
             ->whereNull('venta_id')
             ->whereIn('compromiso_id', self::compromisosDelProyecto($proyecto))
-            ->whereBetween('fecha', self::elAnio($anio))
+            ->whereBetween('fecha', $this->elAnio($anio))
             ->groupByRaw("to_char(fecha, 'YYYY-MM')")
             ->selectRaw("to_char(fecha, 'YYYY-MM') AS mes, COALESCE(SUM(monto_devuelto), 0) AS total")
             ->pluck('total', 'mes');
 
-        $total = self::aMontos($porVenta->all());
+        $total = $this->aMontos($porVenta->all());
 
-        foreach (self::aMontos($porCompromiso->all()) as $mes => $monto) {
+        foreach ($this->aMontos($porCompromiso->all()) as $mes => $monto) {
             $total[$mes] = ($total[$mes] ?? Monto::cero())->sumar($monto);
         }
 
@@ -645,7 +651,7 @@ final readonly class CierreDelMes
     /**
      * @return array{string, string}
      */
-    private static function elAnio(int $anio): array
+    private function elAnio(int $anio): array
     {
         return [sprintf('%04d-01-01', $anio), sprintf('%04d-12-31', $anio)];
     }
@@ -655,7 +661,7 @@ final readonly class CierreDelMes
      *
      * @return array<string, Monto>
      */
-    private static function aMontos(array $filas): array
+    private function aMontos(array $filas): array
     {
         $montos = [];
 
