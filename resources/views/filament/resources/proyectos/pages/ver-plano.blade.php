@@ -309,6 +309,11 @@
         .plano-tabla td.cuota small {
             display: block; font-weight: 400; font-size: .6875rem;
             color: rgb(161 161 170); letter-spacing: 0; line-height: 1.35;
+            /* 🔴 El `td` va en `nowrap` para que los números no se partan, y
+               el mensaje HEREDA eso: uno largo estira la tabla hasta que el
+               modal se desborda a la derecha y tapa el área y el valor. Acá
+               se le devuelve el wrap y se le pone techo. */
+            white-space: normal; max-width: 15rem; margin-left: auto;
         }
         .plano-planes-nota { margin-top: .625rem; font-size: .75rem; line-height: 1.6; color: rgb(161 161 170); }
 
@@ -792,9 +797,22 @@
                     this.abierto = false;
                 },
 
+                /* ¿Hay con qué armar un contrato? (24-ago-2026)
+                   🔴 Un plan con precio CERO no es un plan: es el estado en
+                   el que queda un desarrollo al que todavía no le cargaron la
+                   lista de precios. Contarlo como plan hacía que el cuadro
+                   dibujara la tabla con las cinco filas en L 0.00 y el mismo
+                   error repetido en cada una — y ese mensaje largo, con los
+                   `td` en `nowrap`, estiraba la tabla hasta partir el modal.
+                   Con esto, un lote sin precio se ve igual que uno sin planes:
+                   el aviso de qué falta y el botón apagado. */
+                get hayPrecio() {
+                    return this.planes.some((p) => Number(p.precioVara) > 0);
+                },
+
                 /* ¿Hay un plazo elegido para el lote abierto? */
                 get hayPlan() {
-                    return this.planes.length > 0 && this.plazoElegido !== null;
+                    return this.hayPrecio && this.plazoElegido !== null;
                 },
 
                 vaciarCarrito() { this.carrito = [] },
@@ -1153,7 +1171,7 @@
                    respuesta de «26» puede pisar a la de «2600».
                 */
                 async recalcular() {
-                    if (! this.seleccionado || this.planes.length === 0) {
+                    if (! this.seleccionado || ! this.hayPrecio) {
                         this.filas = [];
                         return;
                     }
@@ -1769,7 +1787,7 @@ get hayInteres() {
                                         {{-- ── Vender ──────────────────────────── --}}
                                         <template x-if="modo === 'vender'">
                                             <div class="plano-panel">
-                                                <template x-if="planes.length === 0">
+                                                <template x-if="! hayPrecio">
                                                     <p class="plano-planes-nota">
                                                         Falta cargar el precio <span x-text="medidas.porUnidad"></span> de cada plazo. Se cargan en el
                                                         proyecto, pestaña «Planes de pago»; en cuanto haya uno, este
@@ -1781,7 +1799,7 @@ get hayInteres() {
                                                     </p>
                                                 </template>
 
-                                                <template x-if="planes.length > 0">
+                                                <template x-if="hayPrecio">
                                                     <div>
                                                         <label class="plano-prima">
                                                             Prima
@@ -1899,13 +1917,18 @@ get hayInteres() {
                                                          da FALSE: el boton quedaba habilitado justo en el unico
                                                          caso donde no hay ni precio por vara ni plazo con que
                                                          armar el contrato. Se vendia tecleando todo a mano.
-                                                         Apartar no se toca: reserva sin fijar precio. --}}
+                                                         Apartar no se toca: reserva sin fijar precio.
+
+                                                         ⚠️ 24-ago-2026: la condicion pasa a `hayPrecio`. Un
+                                                         plan con precio CERO contaba como plan y volvia a
+                                                         habilitar el boton en el mismo caso que esto vino a
+                                                         cerrar. --}}
                                                     <button
                                                         type="button"
                                                         class="plano-accion plano-accion-vender plano-accion-ancha"
-                                                        :disabled="planes.length === 0 || ! hayPlan"
+                                                        :disabled="! hayPrecio || ! hayPlan"
                                                         x-on:click="$wire.mountAction('venderLote', cotizacion); abierto = false"
-                                                        x-text="planes.length === 0
+                                                        x-text="! hayPrecio
                                                             ? 'Sin plan de pago no se puede vender'
                                                             : (! hayPlan
                                                                 ? 'Marcá primero un plazo'

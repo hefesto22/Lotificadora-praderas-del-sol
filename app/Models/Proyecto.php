@@ -722,7 +722,19 @@ class Proyecto extends Model
      */
     public function tieneConQueVender(): bool
     {
-        return $this->planesDePago()->activos()->exists();
+        /*
+         * 🔴 Y con PRECIO, no solo activo (24-ago-2026).
+         *
+         * Un plan en L 0.00 es el estado en el que queda un desarrollo al que
+         * todavia no le cargaron la lista: existe la fila, no existe el
+         * precio. Contarlo como «con que vender» dejaba la pantalla
+         * ofreciendo cinco plazos con todo en cero, y la venta se caia recien
+         * abajo, en `PlanDeCuotas` — con el cliente enfrente.
+         *
+         * `> 0` sobre la columna y no en PHP: son cinco filas o quinientas, y
+         * esto lo pregunta cada pantalla que dibuja el boton de vender.
+         */
+        return $this->planesDePago()->activos()->where('precio_vara', '>', 0)->exists();
     }
 
     /**

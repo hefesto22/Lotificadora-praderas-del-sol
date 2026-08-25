@@ -914,6 +914,25 @@ describe('Sin plan de pago no se vende', function (): void {
     });
 
     /*
+    | Y un plan en L 0.00 tampoco (24-ago-2026). Es el estado en el que queda
+    | un desarrollo al que todavía no le cargaron la lista: existe la fila, no
+    | existe el precio. Lo vio Mauricio en el plano de pruebas, con los cinco
+    | plazos ofreciéndose en cero.
+    */
+    test('un plan en cero no habilita la venta', function (): void {
+        ['proyecto' => $proyecto] = unDesarrolloSinPlanes();
+
+        PlanDePago::factory()->delProyecto($proyecto)->aPlazo(12, '0.00')->create();
+
+        expect($proyecto->tieneConQueVender())->toBeFalse();
+
+        PlanDePago::factory()->delProyecto($proyecto)->aPlazo(24, '1500.00')->create();
+
+        // Con uno solo que tenga precio, ya hay con qué armar un contrato.
+        expect($proyecto->refresh()->tieneConQueVender())->toBeTrue();
+    });
+
+    /*
     | 🔴 EL BORDE DE VERDAD: el botón se deshabilita en la pantalla, pero la
     | acción se monta desde JS con `$wire.mountAction(...)`, y eso se dispara
     | desde la consola del navegador en diez segundos. Acá se llama derecho,
