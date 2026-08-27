@@ -247,6 +247,26 @@ se queda donde está, sin cablearse a ningún formulario.
 recibe** (quedó sin marcar) y no se llenó ninguna otra forma. En transferencia y depósito el
 **número de referencia es obligatorio**; en efectivo no aplica.
 
+> **R11-bis · En el RECIBO la referencia dejó de trabar el cobro** (Mauricio, 27-ago-2026:
+> «eso de número de referencia que no sea obligatorio»). El campo sigue apareciendo y sigue
+> pidiéndose —es lo único que después cruza el recibo contra el banco—, pero ya no detiene la
+> emisión: en el mostrador el cliente está enfrente y ese número muchas veces todavía no lo
+> tiene nadie, y no registrar el cobro es peor que registrarlo sin la referencia. Se fue
+> también el CHECK de `recibos`.
+>
+> ⚠️ **Solo en el recibo.** La prima de una venta, la seña de un apartado, los gastos y las
+> entregas a socios la siguen exigiendo: ahí la plata SALE y el comprobante es la única
+> defensa. Pendiente de confirmar con la contratante.
+
+**R24 · El recibo dice quién recibió el dinero** (Mauricio, 27-ago-2026: «que la administradora
+y yo podamos seleccionar quién recibió el dinero, y también los receptores»). Es un dato
+distinto de quién lo tecleó: la administradora puede registrar un cobro que recibió un receptor
+en la caseta. Se elige en el modal entre **quienes pueden cobrar** (permiso `Create:Recibo`), y
+por defecto es quien está tecleando.
+
+> 🔴 **El corte de caja del día cuenta por quien RECIBIÓ**, no por quien tecleó: el arqueo
+> pregunta quién tiene el billete en la mano.
+
 **R12 · Una sola numeración de recibos para toda la lotificadora.** No hay series por receptor.
 Don Elder y don Edwin consumen números de la misma secuencia, y por eso el correlativo se
 consume con bloqueo de fila dentro de la transacción (§8.3.6): dos personas cobrando al mismo

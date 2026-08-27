@@ -22,6 +22,7 @@ use App\Models\Facturacion;
 use App\Models\Proyecto;
 use App\Models\Recibo;
 use App\Models\Reprogramacion;
+use App\Models\User;
 use App\Models\Venta;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -682,12 +683,56 @@ final readonly class CobrarUnPago
                 ->live()
                 ->native(false),
 
+            /*
+             * ═══ QUIEN RECIBIO EL DINERO — 27-ago-2026 ═══
+             *
+             * «Que la administradora y yo podamos seleccionar quién recibió el
+             * dinero, y también los receptores» — Mauricio. Hasta hoy el
+             * sistema solo sabía quién TECLEÓ, y lo daba por lo mismo: la
+             * administradora registra un pago que recibió don Elder en la
+             * caseta, y el efectivo lo tiene él.
+             *
+             * 🔴 De esto sale el arqueo del día: el corte de caja cuenta por
+             * quien recibió, no por quien tecleó.
+             *
+             * La lista no son «los receptores»: es **quien puede cobrar**, y
+             * eso lo dice el permiso. Una lotificadora que mañana arme sus
+             * roles distinto no tiene que tocar código (Ley L0).
+             */
+            Select::make('recibido_por')
+                ->label('¿Quién recibió el dinero?')
+                ->options(fn (): array => $this->quienesPuedenCobrar())
+                ->default(fn (): ?int => $this->porDefectoQuienTeclea())
+                /*
+                 * ⚠️ NO lleva `required()`, y no es un olvido.
+                 *
+                 * El campo llega preseleccionado con quien abrió el modal, así
+                 * que en la pantalla siempre viene lleno. Y si igual llegara
+                 * vacío, el dominio escribe `auth()->id()` — quien teclea—, que
+                 * es exactamente lo que el sistema hacía hasta ayer y nunca es
+                 * una mentira. Ver `RegistroDePagos::loRecibio()`.
+                 *
+                 * Ponerle `required()` fue el primer intento y costó 38 tests:
+                 * `callAction()` de Filament **no aplica los `default()`**, así
+                 * que todo test que cobra llegaba con el campo en blanco. Eso
+                 * no fue el descubrimiento de un problema en los tests: fue la
+                 * pantalla exigiendo un dato que el dominio ya sabe resolver.
+                 */
+                ->native(false)
+                ->helperText('Viene marcado con tu nombre; cambialo si el dinero lo recibió otra persona. De acá sale el corte de caja del día.'),
+
             TextInput::make('referencia')
                 ->label('Número de referencia')
                 ->maxLength(60)
                 ->visible(fn (Get $get): bool => $this->exigeReferencia($get))
-                ->required(fn (Get $get): bool => $this->exigeReferencia($get))
-                ->helperText('Es lo único que después permite cruzar este recibo contra el estado de cuenta del banco (R11).'),
+                /*
+                 * 🔴 Ya no es obligatorio (27-ago-2026). Llega una
+                 * transferencia, el cliente está enfrente y el número todavía
+                 * no lo tiene nadie: trabar el cobro ahí es peor que
+                 * registrarlo sin la referencia. La ayuda sigue diciendo para
+                 * qué sirve, y el CHECK de la base se fue con el freno.
+                 */
+                ->helperText('Es lo único que después permite cruzar este recibo contra el estado de cuenta del banco (R11). Si todavía no lo tenés, se puede dejar vacío.'),
 
             /*
              * §10.8: «el usuario debe ver el número de cuota antes de
@@ -1203,15 +1248,17 @@ final readonly class CobrarUnPago
      */
     private function soloLaCuota(array $data): array
     {
-        return app(RegistroDePagos::class)->cobrarVariosLotes(
-            venta: $this->venta,
-            cliente: $this->quienPaga(),
-            renglones: $this->renglonesTecleados($data),
-            forma: FormaDePago::from((string) $data['forma_pago']),
-            referencia: is_string($data['referencia'] ?? null) ? $data['referencia'] : null,
-            fecha: CarbonImmutable::parse((string) $data['fecha']),
-            observaciones: is_string($data['observaciones'] ?? null) ? $data['observaciones'] : null,
-        );
+        return app(RegistroDePagos::class)
+            ->loRecibio($this->quienRecibio($data))
+            ->cobrarVariosLotes(
+                venta: $this->venta,
+                cliente: $this->quienPaga(),
+                renglones: $this->renglonesTecleados($data),
+                forma: FormaDePago::from((string) $data['forma_pago']),
+                referencia: is_string($data['referencia'] ?? null) ? $data['referencia'] : null,
+                fecha: CarbonImmutable::parse((string) $data['fecha']),
+                observaciones: is_string($data['observaciones'] ?? null) ? $data['observaciones'] : null,
+            );
     }
 
     /**
@@ -1221,16 +1268,18 @@ final readonly class CobrarUnPago
      */
     private function soloElAbono(array $data): array
     {
-        return app(RegistroDePagos::class)->abonarAVariosLotes(
-            venta: $this->venta,
-            cliente: $this->quienPaga(),
-            renglones: $this->renglonesDeAbonoTecleados($data),
-            motivo: is_string($data['motivo'] ?? null) ? $data['motivo'] : '',
-            forma: FormaDePago::from((string) $data['forma_pago']),
-            referencia: is_string($data['referencia'] ?? null) ? $data['referencia'] : null,
-            fecha: CarbonImmutable::parse((string) $data['fecha']),
-            observaciones: is_string($data['observaciones'] ?? null) ? $data['observaciones'] : null,
-        );
+        return app(RegistroDePagos::class)
+            ->loRecibio($this->quienRecibio($data))
+            ->abonarAVariosLotes(
+                venta: $this->venta,
+                cliente: $this->quienPaga(),
+                renglones: $this->renglonesDeAbonoTecleados($data),
+                motivo: is_string($data['motivo'] ?? null) ? $data['motivo'] : '',
+                forma: FormaDePago::from((string) $data['forma_pago']),
+                referencia: is_string($data['referencia'] ?? null) ? $data['referencia'] : null,
+                fecha: CarbonImmutable::parse((string) $data['fecha']),
+                observaciones: is_string($data['observaciones'] ?? null) ? $data['observaciones'] : null,
+            );
     }
 
     /**
@@ -1240,16 +1289,18 @@ final readonly class CobrarUnPago
      */
     private function soloElProntoPago(array $data): array
     {
-        return app(RegistroDePagos::class)->prontoPago(
-            venta: $this->venta,
-            cliente: $this->quienPaga(),
-            renglones: $this->renglonesDeProntoPagoTecleados($data),
-            motivo: is_string($data['motivo'] ?? null) ? $data['motivo'] : '',
-            forma: FormaDePago::from((string) $data['forma_pago']),
-            referencia: is_string($data['referencia'] ?? null) ? $data['referencia'] : null,
-            fecha: CarbonImmutable::parse((string) $data['fecha']),
-            observaciones: is_string($data['observaciones'] ?? null) ? $data['observaciones'] : null,
-        );
+        return app(RegistroDePagos::class)
+            ->loRecibio($this->quienRecibio($data))
+            ->prontoPago(
+                venta: $this->venta,
+                cliente: $this->quienPaga(),
+                renglones: $this->renglonesDeProntoPagoTecleados($data),
+                motivo: is_string($data['motivo'] ?? null) ? $data['motivo'] : '',
+                forma: FormaDePago::from((string) $data['forma_pago']),
+                referencia: is_string($data['referencia'] ?? null) ? $data['referencia'] : null,
+                fecha: CarbonImmutable::parse((string) $data['fecha']),
+                observaciones: is_string($data['observaciones'] ?? null) ? $data['observaciones'] : null,
+            );
     }
 
     /**
@@ -1259,19 +1310,78 @@ final readonly class CobrarUnPago
      */
     private function laCuotaYElAbono(array $data): array
     {
-        return app(RegistroDePagos::class)->cobrarYAbonar(
-            venta: $this->venta,
-            cliente: $this->quienPaga(),
-            cuotas: $this->renglonesTecleados($data),
-            loteDelAbono: $this->loteElegido($data),
-            aCapital: $this->sobranteTecleado($data),
-            modalidad: ModalidadDeReprogramacion::from((string) $data['modalidad']),
-            motivo: is_string($data['motivo'] ?? null) ? $data['motivo'] : '',
-            forma: FormaDePago::from((string) $data['forma_pago']),
-            referencia: is_string($data['referencia'] ?? null) ? $data['referencia'] : null,
-            fecha: CarbonImmutable::parse((string) $data['fecha']),
-            observaciones: is_string($data['observaciones'] ?? null) ? $data['observaciones'] : null,
-        );
+        return app(RegistroDePagos::class)
+            ->loRecibio($this->quienRecibio($data))
+            ->cobrarYAbonar(
+                venta: $this->venta,
+                cliente: $this->quienPaga(),
+                cuotas: $this->renglonesTecleados($data),
+                loteDelAbono: $this->loteElegido($data),
+                aCapital: $this->sobranteTecleado($data),
+                modalidad: ModalidadDeReprogramacion::from((string) $data['modalidad']),
+                motivo: is_string($data['motivo'] ?? null) ? $data['motivo'] : '',
+                forma: FormaDePago::from((string) $data['forma_pago']),
+                referencia: is_string($data['referencia'] ?? null) ? $data['referencia'] : null,
+                fecha: CarbonImmutable::parse((string) $data['fecha']),
+                observaciones: is_string($data['observaciones'] ?? null) ? $data['observaciones'] : null,
+            );
+    }
+
+    /**
+     * Quiénes pueden figurar como que recibieron el dinero.
+     *
+     * Sale del PERMISO y no de una lista de nombres ni de un rol con nombre
+     * propio: `Create:Recibo` es exactamente «esta persona cobra». Así la
+     * administradora entra si cobra, y una lotificadora que arme sus roles de
+     * otra manera no tiene que tocar código (Ley L0).
+     *
+     * @return array<int, string>
+     */
+    private function quienesPuedenCobrar(): array
+    {
+        /** @var array<int, string> $gente */
+        $gente = User::query()
+            ->permission('Create:Recibo')
+            ->orderBy('name')
+            ->pluck('name', 'id')
+            ->all();
+
+        /*
+         * ⚠️ Quien está tecleando entra SIEMPRE, tenga o no el permiso por rol:
+         * está registrando un cobro en este preciso momento, así que decir que
+         * no puede haberlo recibido sería absurdo. Y de paso, esto es lo que
+         * evita que un permiso mal sembrado deje la lista vacía y con ella un
+         * campo obligatorio imposible de llenar.
+         */
+        $yo = auth()->user();
+
+        if ($yo instanceof User) {
+            $gente[(int) $yo->getKey()] = (string) $yo->getAttribute('name');
+        }
+
+        asort($gente);
+
+        return $gente;
+    }
+
+    /**
+     * Quien está tecleando, que es el caso de todos los días.
+     */
+    private function porDefectoQuienTeclea(): ?int
+    {
+        $yo = auth()->id();
+
+        return is_numeric($yo) ? (int) $yo : null;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function quienRecibio(array $data): ?int
+    {
+        $elegido = $data['recibido_por'] ?? null;
+
+        return is_numeric($elegido) ? (int) $elegido : null;
     }
 
     /**

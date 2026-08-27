@@ -61,6 +61,7 @@ use Spatie\Activitylog\Support\LogOptions;
     'a_nombre_de_dni',
     'concepto',
     'forma_pago',
+    'recibido_por',
     'referencia',
     'monto',
     'fecha',
@@ -146,6 +147,23 @@ class Recibo extends Model
     public function compromiso(): BelongsTo
     {
         return $this->belongsTo(Compromiso::class);
+    }
+
+    /**
+     * Quién recibió el dinero — no necesariamente quien lo tecleó.
+     *
+     * La administradora puede registrar un cobro que recibió un receptor en la
+     * caseta: el efectivo lo tiene él, y de acá sale el corte de caja del día.
+     * `created_by` sigue contestando otra pregunta —quién lo escribió— y las
+     * dos se guardan porque son dos cosas.
+     *
+     * Nulo solo si ese usuario se borró (`nullOnDelete`).
+     *
+     * @return BelongsTo<User, $this>
+     */
+    public function recibidoPor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'recibido_por');
     }
 
     /**

@@ -18,6 +18,7 @@ use App\Models\Cuota;
 use App\Models\Lote;
 use App\Models\Proyecto;
 use App\Models\Recibo;
+use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
@@ -192,16 +193,47 @@ describe('Lo que rechaza', function (): void {
     });
 
     /*
-    | R11: en transferencia y depósito la referencia es obligatoria. Sin ella
-    | no hay cómo cruzar el recibo contra el estado de cuenta del banco.
+    | 🔴 27-ago-2026 — R11 se afloja EN LOS RECIBOS.
+    |
+    | Hasta hoy una transferencia sin referencia se rechazaba. En el mostrador
+    | eso significa que llega el cliente, el número todavía no lo tiene nadie,
+    | y el cobro NO se registra — bastante peor que registrarlo sin ella.
+    |
+    | ⚠️ La regla sigue viva donde la plata SALE: la prima de una venta, la
+    | seña de un apartado, los gastos y las entregas a socios la siguen
+    | exigiendo, y sus tests siguen en verde. Este afloje es solo del recibo.
     */
-    test('una transferencia sin número de referencia', function (): void {
-        expect(fn () => ($this->cobrar)('25000.00', null, FormaDePago::Transferencia))
-            ->toThrow(PagoInvalidoException::class, 'referencia');
+    test('una transferencia sin número de referencia se registra igual', function (): void {
+        $recibo = ($this->cobrar)('25000.00', null, FormaDePago::Transferencia);
 
-        $recibo = ($this->cobrar)('25000.00', 'TRF-99812', FormaDePago::Transferencia);
+        expect($recibo->getAttribute('referencia'))->toBeNull();
 
-        expect($recibo->getAttribute('referencia'))->toBe('TRF-99812');
+        $conNumero = ($this->cobrar)('25000.00', 'TRF-99812', FormaDePago::Transferencia);
+
+        expect($conNumero->getAttribute('referencia'))->toBe('TRF-99812');
+    });
+
+    /*
+    | 🔴 «Que la administradora y yo podamos seleccionar quién recibió el
+    | dinero» — Mauricio, 27-ago-2026. De este dato sale el corte de caja.
+    */
+    test('el recibo guarda quién recibió el dinero, y por defecto es quien teclea', function (): void {
+        expect((int) ($this->cobrar)('25000.00')->getAttribute('recibido_por'))
+            ->toBe((int) auth()->id());
+
+        $enLaCaseta = User::factory()->create(['name' => 'Elder Martínez']);
+
+        $recibo = $this->pagos->loRecibio((int) $enLaCaseta->getKey())->cobrarCuotas(
+            venta: $this->venta,
+            lote: $this->renglon,
+            cliente: $this->cliente,
+            monto: new Monto('25000.00'),
+            forma: FormaDePago::Efectivo,
+        );
+
+        // Quién lo recibió y quién lo tecleó son dos preguntas distintas.
+        expect((int) $recibo->getAttribute('recibido_por'))->toBe((int) $enLaCaseta->getKey())
+            ->and((int) $recibo->getAttribute('created_by'))->toBe((int) auth()->id());
     });
 
     test('un lote que no es de este contrato', function (): void {

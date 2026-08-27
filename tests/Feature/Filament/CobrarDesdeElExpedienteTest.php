@@ -103,18 +103,57 @@ test('el pago entra por la pantalla y se reparte FIFO', function (): void {
 });
 
 /*
-| R11. La referencia es obligatoria en transferencia y depósito, y el campo
-| aparece solo. El Service también la exige —esto prueba que la pantalla no
-| deja llegar hasta allá con las manos vacías.
+| 🔴 27-ago-2026 — el campo sigue apareciendo solo, pero ya no traba.
+|
+| El número de referencia se pide igual —es lo único que después cruza el
+| recibo contra el banco— y el campo aparece solo al elegir transferencia. Lo
+| que cambió es que no detiene el cobro: en el mostrador, el cliente está
+| enfrente y ese número muchas veces todavía no lo tiene nadie.
 */
-test('una transferencia sin referencia no pasa del formulario', function (): void {
+test('una transferencia sin referencia se registra igual', function (): void {
     ($this->expediente)()
         ->callAction('cobrar', ($this->soloElPrimero)('25000.00', [
             'forma_pago' => FormaDePago::Transferencia->value,
         ]))
-        ->assertHasActionErrors(['referencia']);
+        ->assertHasNoActionErrors();
 
-    expect(Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->count())->toBe(0);
+    $recibo = Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->firstOrFail();
+
+    expect($recibo->getAttribute('referencia'))->toBeNull()
+        // Y quién lo recibió sale solo: quien está tecleando.
+        ->and((int) $recibo->getAttribute('recibido_por'))->toBe((int) auth()->id());
+});
+
+/*
+| 🔴 R24 — quién recibió el dinero, elegido en la pantalla.
+|
+| Este test cubre el cable que se cortó al escribir la función: el campo del
+| modal tiene que llegar hasta la fila del recibo. Y el de arriba cubre la otra
+| mitad —sin elegir nada, el recibo dice quien tecleó—, que es el modo de
+| fallar correcto y la razón de que el campo NO sea obligatorio.
+*/
+test('el dinero lo puede haber recibido otra persona, y el recibo lo dice', function (): void {
+    $enLaCaseta = User::factory()->create(['name' => 'Elder Martínez', 'is_active' => true]);
+
+    /*
+     * ⚠️ El permiso no es decorado: `Select` de Filament arma solo una regla
+     * `in` con sus opciones, y las opciones de este campo son «quien puede
+     * cobrar». Sin esto, el valor se rechaza por inválido — que es justo lo
+     * que tiene que pasar con alguien que no cobra.
+     */
+    $enLaCaseta->givePermissionTo('Create:Recibo');
+
+    ($this->expediente)()
+        ->callAction('cobrar', ($this->soloElPrimero)('25000.00', [
+            'recibido_por' => $enLaCaseta->getKey(),
+        ]))
+        ->assertHasNoActionErrors();
+
+    $recibo = Recibo::query()->where('concepto', '!=', ConceptoDeRecibo::Prima)->firstOrFail();
+
+    // Quién lo recibió y quién lo tecleó son dos preguntas, y las dos se guardan.
+    expect((int) $recibo->getAttribute('recibido_por'))->toBe((int) $enLaCaseta->getKey())
+        ->and((int) $recibo->getAttribute('created_by'))->toBe((int) auth()->id());
 });
 
 test('con referencia, la transferencia se registra', function (): void {

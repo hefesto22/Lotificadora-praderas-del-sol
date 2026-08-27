@@ -90,7 +90,40 @@ final readonly class RegistroDePagos
     public function __construct(
         private ConsumoDeCorrelativos $correlativos,
         private ConsumoDeFacturas $facturas,
+        private ?int $recibidoPor = null,
     ) {}
+
+    /**
+     * ═══ QUIEN RECIBIO EL DINERO, CUANDO NO ES QUIEN TECLEA ═══
+     *
+     * «Que la administradora y yo podamos seleccionar quien recibio el dinero,
+     * y tambien los receptores» — Mauricio, 27-ago-2026. La administradora
+     * registra un pago que recibio don Elder en la caseta: el billete lo tiene
+     * el, y el arqueo del dia es de quien lo tiene en la mano.
+     *
+     * Se lee asi en el llamador, que es donde tiene que leerse:
+     *
+     *     $pagos->loRecibio($id)->cobrarVariosLotes(...)
+     *
+     * ═══ POR QUE ASI Y NO UN PARAMETRO MAS ═══
+     *
+     * Meterlo como parametro obligaria a atravesar SEIS metodos publicos,
+     * cuatro privados y sus closures —el molde exacto del
+     * `Undefined variable` que ya mordio dos veces— para un dato que no
+     * participa de ningun calculo: solo se escribe en la fila.
+     *
+     * Y el modo de fallar es el correcto: **un camino que se olvide de
+     * llamarlo escribe `auth()->id()`**, que es exactamente lo que el sistema
+     * hacia hasta hoy. Un parametro olvidado tambien caeria ahi, pero costando
+     * veinte ediciones en el archivo del dinero.
+     *
+     * La clase es `readonly`: esto devuelve una instancia NUEVA y no muta
+     * nada, asi que dos cobros en la misma peticion no se pisan.
+     */
+    public function loRecibio(?int $usuario): self
+    {
+        return new self($this->correlativos, $this->facturas, $usuario);
+    }
 
     /**
      * Cobrar cuotas de un lote.
@@ -230,7 +263,7 @@ final readonly class RegistroDePagos
         $vistos = [];
 
         foreach ($renglones as $renglon) {
-            $this->verificar($venta, $renglon['lote'], $renglon['monto'], $forma, $referencia);
+            $this->verificar($venta, $renglon['lote'], $renglon['monto']);
 
             $id = (int) $renglon['lote']->getKey();
 
@@ -648,7 +681,7 @@ final readonly class RegistroDePagos
         $total = Monto::cero();
 
         foreach ($renglones as $renglon) {
-            $this->verificar($venta, $renglon['lote'], $renglon['monto'], $forma, $referencia);
+            $this->verificar($venta, $renglon['lote'], $renglon['monto']);
 
             $id = (int) $renglon['lote']->getKey();
 
@@ -1038,7 +1071,7 @@ final readonly class RegistroDePagos
                  * lo rechazaria por «monto no positivo», un mensaje que no dice
                  * nada de lo que en realidad pasa. Ese caso tiene el suyo, abajo.
                  */
-                $this->verificar($venta, $lote, $saldo, $forma, $limpia);
+                $this->verificar($venta, $lote, $saldo);
 
                 $mora = MoraDelLote::calcular($pendientes, $this->condicionesDe($lote), $cuando);
 
@@ -1372,7 +1405,7 @@ final readonly class RegistroDePagos
         ?CarbonImmutable $fecha,
         ?string $observaciones,
     ): Recibo {
-        $this->verificar($venta, $loteDelAbono, $aCapital, $forma, $referencia);
+        $this->verificar($venta, $loteDelAbono, $aCapital);
 
         $porQue = trim($motivo);
 
@@ -1384,7 +1417,7 @@ final readonly class RegistroDePagos
         $total = $aCapital;
 
         foreach ($cuotas as $renglon) {
-            $this->verificar($venta, $renglon['lote'], $renglon['monto'], $forma, $referencia);
+            $this->verificar($venta, $renglon['lote'], $renglon['monto']);
 
             $id = (int) $renglon['lote']->getKey();
 
@@ -1650,14 +1683,28 @@ final readonly class RegistroDePagos
     /**
      * Lo que se puede verificar sin tocar la base.
      *
+     * ═══ 🔴 LA REFERENCIA YA NO TRABA EL COBRO (27-ago-2026) ═══
+     *
+     * Hasta hoy este metodo recibia tambien la forma de pago y la referencia,
+     * y aplicaba la mitad de R11: sin numero de referencia, una transferencia
+     * no se podia registrar. En el mostrador eso significa que llega el
+     * cliente, el numero todavia no lo tiene nadie, y **el cobro no se
+     * registra** — bastante peor que registrarlo sin la referencia.
+     *
+     * Se fueron el freno, el CHECK de la base y los dos parametros: un
+     * parametro que nadie lee es una firma que miente. El campo sigue en la
+     * pantalla y se sigue guardando, con su ayuda diciendo para que sirve.
+     *
+     * ⚠️ Solo en los recibos. `gastos`, `devoluciones` y `entregas_a_socios`
+     * conservan su CHECK a proposito: ahi la plata SALE y el comprobante es la
+     * unica defensa.
+     *
      * @throws PagoInvalidoException
      */
     private function verificar(
         Venta $venta,
         Compromiso $lote,
         Monto $monto,
-        FormaDePago $forma,
-        ?string $referencia,
     ): void {
         if ($monto->esCero()) {
             throw PagoInvalidoException::porMontoNoPositivo();
@@ -1684,11 +1731,6 @@ final readonly class RegistroDePagos
             throw PagoInvalidoException::porLoteRescindido($this->codigo($lote));
         }
 
-        // R11. La base tiene el mismo CHECK; esto es para que el mensaje lo
-        // escriba alguien y no Postgres.
-        if ($forma->exigeReferencia() && trim($referencia ?? '') === '') {
-            throw PagoInvalidoException::porFaltarReferencia($forma->etiqueta());
-        }
     }
 
     /**
@@ -1906,10 +1948,15 @@ final readonly class RegistroDePagos
             'a_nombre_de_dni' => $aNombreDe['dni'],
             'concepto'        => $concepto,
             'forma_pago'      => $forma,
-            'referencia'      => $referencia === '' ? null : $referencia,
-            'monto'           => $monto->redondeado(),
-            'fecha'           => $cuando->toDateString(),
-            'observaciones'   => $observaciones,
+            /*
+             * Quien recibio, y por defecto quien teclea — que es lo que el
+             * sistema dio por sentado hasta el 27-ago-2026. Ver `loRecibio()`.
+             */
+            'recibido_por'  => $this->recibidoPor ?? auth()->id(),
+            'referencia'    => $referencia === '' ? null : $referencia,
+            'monto'         => $monto->redondeado(),
+            'fecha'         => $cuando->toDateString(),
+            'observaciones' => $observaciones,
             /*
              * ═══ LA FACTURA CON CAI, DESDE EL 14-AGO-2026 ═══
              *

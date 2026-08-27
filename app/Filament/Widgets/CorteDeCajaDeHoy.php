@@ -246,10 +246,22 @@ class CorteDeCajaDeHoy extends StatsOverviewWidget
             return $cuantos.' tuyos';
         }
 
+        /*
+         * ═══ 🔴 POR QUIEN RECIBIO, NO POR QUIEN TECLEO (27-ago-2026) ═══
+         *
+         * Hasta hoy esto agrupaba por `created_by` porque las dos preguntas
+         * tenían la misma respuesta. Desde que el modal deja elegir quién
+         * recibió el dinero ya no: la administradora puede registrar un pago
+         * que recibió un receptor en la caseta.
+         *
+         * El arqueo pregunta **quién tiene el billete en la mano**, así que la
+         * columna es `recibido_por`. La migración rellenó lo viejo con
+         * `created_by`, que ahí sí era el mismo.
+         */
         $porPersona = $this->deHoy()
-            ->selectRaw('created_by, COALESCE(SUM(monto), 0) AS cobrado')
-            ->groupBy('created_by')
-            ->pluck('cobrado', 'created_by');
+            ->selectRaw('recibido_por, COALESCE(SUM(monto), 0) AS cobrado')
+            ->groupBy('recibido_por')
+            ->pluck('cobrado', 'recibido_por');
 
         $nombres = User::query()
             ->whereIn('id', $porPersona->keys()->filter()->all())
@@ -328,8 +340,9 @@ class CorteDeCajaDeHoy extends StatsOverviewWidget
             ->whereNull('anulado_el')
             ->whereDate('fecha', today());
 
+        // Lo MÍO es lo que yo recibí, no lo que yo tecleé: ver `quienesCobraron()`.
         if ($this->soloLoMio()) {
-            $consulta->where('created_by', auth()->id());
+            $consulta->where('recibido_por', auth()->id());
         }
 
         return $consulta;
