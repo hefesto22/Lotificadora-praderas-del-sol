@@ -9,6 +9,7 @@ use App\Filament\Resources\Proyectos\ProyectoResource;
 use App\Models\Bloque;
 use App\Models\Lote;
 use App\Models\Proyecto;
+use App\Models\Socio;
 use Filament\Facades\Filament;
 use Livewire\Livewire;
 
@@ -194,5 +195,104 @@ describe('ProyectoResource — medidas del plano', function (): void {
             ->fillForm(['vara_en_metros' => '83.59'])
             ->call('save')
             ->assertHasFormErrors(['vara_en_metros']);
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| El reparto de los socios — 27-ago-2026
+|--------------------------------------------------------------------------
+| «Que me permita como 66.67 y 33.33, que sea obligatorio completar el 100%»
+| — Mauricio.
+|
+| Las dos mitades del pedido se prueban acá porque las dos viven en el
+| formulario y en ningún otro lado: la escala la garantiza la columna, pero que
+| las partes SUMEN 100 no lo puede mirar un CHECK —mira una fila y esto es la
+| suma de todas—, así que si esta regla se cae, se cae en silencio y el reparto
+| del mes empieza a repartir 90.
+*/
+describe('ProyectoResource — el reparto de los socios', function (): void {
+    test('sin el 100% repartido no se guarda', function (): void {
+        actingAsAdmin();
+
+        Livewire::test(CreateProyecto::class)
+            ->fillForm([
+                'nombre' => 'Residencial Prueba',
+                'codigo' => 'RPB',
+                'activo' => true,
+                'socios' => [
+                    ['nombre' => 'SOCIO UNO', 'porcentaje' => '60', 'activo' => true],
+                    ['nombre' => 'SOCIO DOS', 'porcentaje' => '30', 'activo' => true],
+                ],
+            ])
+            ->call('create')
+            ->assertHasFormErrors(['socios']);
+
+        expect(Proyecto::query()->where('codigo', 'RPB')->exists())->toBeFalse();
+    });
+
+    test('dos tercios y un tercio si se guardan', function (): void {
+        actingAsAdmin();
+
+        Livewire::test(CreateProyecto::class)
+            ->fillForm([
+                'nombre' => 'Residencial Prueba',
+                'codigo' => 'RPB',
+                'activo' => true,
+                'socios' => [
+                    ['nombre' => 'SOCIO UNO', 'porcentaje' => '66.67', 'activo' => true],
+                    ['nombre' => 'SOCIO DOS', 'porcentaje' => '33.33', 'activo' => true],
+                ],
+            ])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $proyecto = Proyecto::query()->where('codigo', 'RPB')->first();
+
+        expect($proyecto)->not->toBeNull();
+
+        $partes = $proyecto?->socios()->activos()->get()
+            ->map(static fn (Socio $socio): string => $socio->porcentaje()->redondeado(2))
+            ->all() ?? [];
+
+        expect($partes)->toBe(['66.67', '33.33'])
+            ->and($proyecto?->partesDeLosSocios()->redondeado(2))->toBe('100.00');
+    });
+
+    /*
+    | Un tercer decimal la base NO lo rechaza: numeric(5,2) lo redondea sola y
+    | sin avisar. El formulario es el único lugar donde el usuario se entera.
+    */
+    test('un tercer decimal lo frena el formulario', function (): void {
+        actingAsAdmin();
+
+        Livewire::test(CreateProyecto::class)
+            ->fillForm([
+                'nombre' => 'Residencial Prueba',
+                'codigo' => 'RPB',
+                'activo' => true,
+                'socios' => [
+                    ['nombre' => 'SOCIO UNO', 'porcentaje' => '33.333', 'activo' => true],
+                    ['nombre' => 'SOCIO DOS', 'porcentaje' => '66.667', 'activo' => true],
+                ],
+            ])
+            ->call('create')
+            ->assertHasFormErrors(['socios.0.porcentaje']);
+    });
+
+    /*
+    | Cero socios SÍ se guarda: no es un reparto mal hecho, es que no hay
+    | reparto. Exigirlo obligaría a conocer a los socios antes de poder crear el
+    | proyecto.
+    */
+    test('un proyecto sin socios se guarda igual', function (): void {
+        actingAsAdmin();
+
+        Livewire::test(CreateProyecto::class)
+            ->fillForm(['nombre' => 'Residencial Prueba', 'codigo' => 'RPB', 'activo' => true])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        expect(Proyecto::query()->where('codigo', 'RPB')->exists())->toBeTrue();
     });
 });

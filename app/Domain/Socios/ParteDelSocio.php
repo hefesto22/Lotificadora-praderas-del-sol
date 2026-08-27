@@ -29,10 +29,10 @@ final readonly class ParteDelSocio
     }
 
     /**
-     * Su parte, sin ceros de relleno: 33.5% y no 33.50%.
+     * Su parte, sin ceros de relleno: 66.67% y no 66.670%, 50% y no 50.00%.
      */
     public function porcentaje(): string
     {
-        return rtrim(rtrim($this->socio->porcentaje()->redondeado(1), '0'), '.');
+        return rtrim(rtrim($this->socio->porcentaje()->redondeado(2), '0'), '.');
     }
 }

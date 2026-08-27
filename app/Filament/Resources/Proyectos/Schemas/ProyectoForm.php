@@ -226,29 +226,45 @@ class ProyectoForm
                                             ->columnSpan(8),
 
                                         /*
-                                        | Enteros o medios: 0.5, 10, 20.5.
-                                        | Regla de Mauricio, y simplifica el
-                                        | reparto — tres socios se acomodan en
-                                        | 33.5 + 33.5 + 33 y no queda un tercio
-                                        | periódico dejando centavos sueltos.
+                                        | ═══ HASTA DOS DECIMALES ═══
                                         |
-                                        | La base lo repite en un CHECK: un
-                                        | seeder o un import tampoco pueden
-                                        | meter 33.3.
+                                        | «Que me permita como 66.67 y 33.33»
+                                        | — Mauricio, 27-ago-2026.
+                                        |
+                                        | Hasta hoy iba en enteros o medios,
+                                        | que resuelve el reparto de a TRES
+                                        | —33.5 + 33.5 + 33— y traba el de a
+                                        | DOS: dos tercios y un tercio es
+                                        | 66.67 + 33.33, y 66.5 + 33.5 no es
+                                        | «casi lo mismo», es otro reparto.
+                                        |
+                                        | Los centésimos tampoco cierran de a
+                                        | tres —33.33 × 3 = 99.99—: se acomodan
+                                        | como los centavos, 33.34 + 33.33 +
+                                        | 33.33. Por eso el aviso de arriba
+                                        | dice cuánto falta con el número
+                                        | puesto.
+                                        |
+                                        | El `step` es lo que le da al
+                                        | navegador las flechitas y la
+                                        | validación nativa; la regla de acá
+                                        | abajo es la que de verdad frena, y
+                                        | existe porque el navegador se saltea
+                                        | con un pegado.
                                         */
                                         TextInput::make('porcentaje')
                                             ->label('Le toca')
                                             ->numeric()
                                             ->required()
-                                            ->minValue(0.5)
+                                            ->minValue(0.01)
                                             ->maxValue(100)
-                                            ->step(0.5)
+                                            ->step(0.01)
                                             ->suffix('%')
                                             ->columnSpan(4)
                                             ->live(onBlur: true)
-                                            ->helperText('Enteros o medios: 0.5, 10, 20.5.')
+                                            ->helperText('Hasta dos decimales: 50, 33.33, 66.67.')
                                             ->rules([
-                                                static fn (): Closure => self::soloEnterosOMedios(...),
+                                                static fn (): Closure => self::hastaDosDecimales(...),
                                             ]),
 
                                         DNIField::make('dni')
@@ -893,29 +909,37 @@ class ProyectoForm
     }
 
     /**
-     * Un porcentaje sin ceros de relleno: 33.5 y no 33.50, 20 y no 20.0.
+     * Un porcentaje sin ceros de relleno: 66.67 y no 66.670, 20 y no 20.00.
+     *
+     * Dos decimales, que es la escala de la columna: con uno solo, «faltan
+     * 0.01%» saldría escrito «faltan 0%» y el aviso mandaría a buscar un error
+     * que no se ve.
      */
     private static function comoSeLee(Monto $porcentaje): string
     {
-        return rtrim(rtrim($porcentaje->redondeado(1), '0'), '.');
+        return rtrim(rtrim($porcentaje->redondeado(2), '0'), '.');
     }
 
     /**
-     * El porcentaje va en enteros o medios. Por dos tiene que dar entero.
+     * El porcentaje llega hasta el centésimo. Por cien tiene que dar entero.
      *
-     * Se compara sobre el string y no sobre el float: `20.5 * 2` en coma
-     * flotante no es exactamente 41 en todas las máquinas (§8.3.1).
+     * Se compara sobre el string y no sobre el float: `66.67 * 100` en coma
+     * flotante no es exactamente 6667 en todas las máquinas (§8.3.1).
+     *
+     * ⚠️ Hace falta además del `step` del campo: el navegador valida lo que se
+     * teclea, no lo que se pega, y la columna es numeric(5,2) —un tercer
+     * decimal no lo rechaza, lo REDONDEA en silencio, que es peor.
      */
-    private static function soloEnterosOMedios(string $campo, mixed $valor, Closure $fallar): void
+    private static function hastaDosDecimales(string $campo, mixed $valor, Closure $fallar): void
     {
         if (! is_numeric($valor)) {
             return;
         }
 
-        $doble = new Monto((string) $valor)->multiplicarPor('2')->redondeado(4);
+        $porCien = new Monto((string) $valor)->multiplicarPor('100')->redondeado(4);
 
-        if (! str_ends_with($doble, '.0000')) {
-            $fallar('El porcentaje va en enteros o medios: 0.5, 10, 20.5.');
+        if (! str_ends_with($porCien, '.0000')) {
+            $fallar('El porcentaje llega hasta dos decimales: 50, 33.33, 66.67.');
         }
     }
 

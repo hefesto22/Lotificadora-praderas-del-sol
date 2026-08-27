@@ -54,10 +54,10 @@ class Socio extends Model
      * `number_format()`, que recibe float (§8.3.1). Postgres ya lo devuelve
      * como string, que es lo que consume bcmath sin perder medio punto.
      *
-     * Solo enteros o medios —0.5, 10, 20.5— por decisión de Mauricio, y las
-     * partes de un proyecto suman 100 siempre. Lo primero lo garantiza un CHECK;
-     * lo segundo lo exige el formulario, porque un CHECK mira una fila y la suma
-     * es de todas.
+     * Llega hasta el centésimo —50, 33.33, 66.67— y las partes de un proyecto
+     * suman 100 siempre. Lo primero lo garantiza la escala de la columna,
+     * numeric(5,2); lo segundo lo exige el formulario, porque un CHECK mira una
+     * fila y la suma es de todas.
      *
      * @return array<string, string>
      */
@@ -115,19 +115,21 @@ class Socio extends Model
      * Cuánto de un monto le toca a este socio.
      *
      * ⚠️ NO redondea acá. Quien reparte tiene que juntar todas las partes y
-     * darle el sobrante de centavos a alguien: aunque las partes sean enteras o
-     * medias, el 33.5% de L 1,000.01 no da un número redondo, y redondear cada
-     * parte por separado es exactamente como se pierde un centavo que después
-     * nadie sabe de quién era.
+     * darle el sobrante de centavos a alguien: el 33.33% de L 1,000.01 no da un
+     * número redondo, y redondear cada parte por separado es exactamente como se
+     * pierde un centavo que después nadie sabe de quién era.
      */
     public function suParteDe(Monto $total): Monto
     {
         /*
-         * `redondeado(1)` y NO `(string)`: el casteo de Monto devuelve el
-         * formateado —«L. 33.50»— y eso no es un número. La columna es
-         * numeric(5,1), así que un decimal es exacto y no pierde nada.
+         * `redondeado(2)` y NO `(string)`: el casteo de Monto devuelve el
+         * formateado —«L. 33.33»— y eso no es un número. La columna es
+         * numeric(5,2), así que dos decimales son exactos y no pierden nada.
+         *
+         * 🔴 Si algún día la columna admite un decimal más, este 2 se queda
+         * corto y le recorta la parte a alguien sin avisar (27-ago-2026).
          */
-        return $total->aplicarPorcentaje($this->porcentaje()->redondeado(1));
+        return $total->aplicarPorcentaje($this->porcentaje()->redondeado(2));
     }
 
     // ─── Consultas ────────────────────────────────────────────────────

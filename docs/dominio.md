@@ -267,6 +267,27 @@ por defecto es quien está tecleando.
 > 🔴 **El corte de caja del día cuenta por quien RECIBIÓ**, no por quien tecleó: el arqueo
 > pregunta quién tiene el billete en la mano.
 
+**R25 · Las partes de los socios suman 100, y llegan hasta el centésimo** (Mauricio,
+27-ago-2026: «que me permita como 66.67 y 33.33, que sea obligatorio completar el 100%»).
+Un socio no compra un lote: puso el terreno o el dinero y le toca un porcentaje de lo que el
+proyecto produzca. Ese porcentaje va con **dos decimales** —50, 33.33, 66.67— y las partes de
+un proyecto **tienen que sumar 100 para poder guardar**.
+
+> **Por qué dos decimales y no medio punto.** Hasta el 27-ago la regla era «enteros o medios»,
+> que resuelve el reparto de a tres —33.5 + 33.5 + 33— y traba el de a dos: dos tercios y un
+> tercio es 66.67 + 33.33, y lo más cerca con medios era 66.5 + 33.5, que no es «casi lo
+> mismo» sino otro reparto.
+>
+> ⚠️ Los centésimos tampoco cierran de a tres: 33.33 × 3 = 99.99. Se acomodan como los
+> centavos —33.34 + 33.33 + 33.33— y la pantalla dice cuánto falta con el número puesto.
+>
+> 🔴 **El 100% lo exige el formulario, no la base.** Un CHECK mira UNA fila y esto es la suma
+> de todas; un trigger diferido tampoco sirve, porque el repetidor guarda fila por fila y al
+> reemplazar un socio del 50% habría un instante con 50% que tumbaría un guardado correcto.
+>
+> **Un proyecto SIN socios cargados sí se guarda:** no es un reparto mal hecho, es que no hay
+> reparto. Exigirlo obligaría a conocer a los socios antes de poder crear el proyecto.
+
 **R12 · Una sola numeración de recibos para toda la lotificadora.** No hay series por receptor.
 Don Elder y don Edwin consumen números de la misma secuencia, y por eso el correlativo se
 consume con bloqueo de fila dentro de la transacción (§8.3.6): dos personas cobrando al mismo

@@ -169,13 +169,32 @@ describe('El reparto entre los socios', function (): void {
     })->with([['100.01'], ['0.01'], ['33.33'], ['999999.99']]);
 
     /*
-    | Y con tres socios en medios, que es el caso que la regla de «enteros o
-    | medios» vino a hacer posible: 33.5 + 33.5 + 33.
+    | Y con tres socios en medios: 33.5 + 33.5 + 33.
     */
     test('tres socios en medios tampoco pierden un centavo', function (): void {
         Socio::factory()->delProyecto($this->proyecto)->conParte('33.5')->create(['nombre' => 'UNO']);
         Socio::factory()->delProyecto($this->proyecto)->conParte('33.5')->create(['nombre' => 'DOS']);
         Socio::factory()->delProyecto($this->proyecto)->conParte('33.0')->create(['nombre' => 'TRES']);
+
+        ($this->cobrar)('100000.07', ConceptoDeRecibo::Cuota, '2026-07-10');
+
+        $suma = Monto::cero();
+
+        foreach (RepartoDelMes::para($this->proyecto, $this->mes)->partes as $parte) {
+            $suma = $suma->sumar($parte->deLoCobrado);
+        }
+
+        expect($suma)->toBeMonto('100000.07');
+    });
+
+    /*
+    | Y con dos socios en centésimos —66.67 + 33.33, el reparto que Mauricio
+    | pidió el 27-ago-2026—, que es el que más fácil deja un centavo suelto:
+    | ninguna de las dos partes de L 100,000.07 da un número redondo.
+    */
+    test('dos socios en centesimos tampoco pierden un centavo', function (): void {
+        Socio::factory()->delProyecto($this->proyecto)->conParte('66.67')->create(['nombre' => 'UNO']);
+        Socio::factory()->delProyecto($this->proyecto)->conParte('33.33')->create(['nombre' => 'DOS']);
 
         ($this->cobrar)('100000.07', ConceptoDeRecibo::Cuota, '2026-07-10');
 

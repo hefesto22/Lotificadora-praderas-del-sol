@@ -29,7 +29,7 @@ final readonly class ParteDeUnSocio
 {
     public function __construct(
         public Socio $socio,
-        /** El porcentaje tal cual está en la tabla: 33.5 significa 33.5 %. */
+        /** El porcentaje tal cual está en la tabla: 33.33 significa 33.33 %. */
         public Monto $porcentaje,
         /** Su parte de la utilidad de ESTE mes. */
         public Monto $leToca,
@@ -57,11 +57,11 @@ final readonly class ParteDeUnSocio
     }
 
     /**
-     * El porcentaje como sale impreso: «33.5 %», y «20 %» sin el «.0».
+     * El porcentaje como sale impreso: «33.33 %», y «20 %» sin los ceros.
      */
     public function porcentajeEscrito(): string
     {
-        $crudo = $this->porcentaje->redondeado(1);
+        $crudo = $this->porcentaje->redondeado(2);
 
         return rtrim(rtrim($crudo, '0'), '.').' %';
     }

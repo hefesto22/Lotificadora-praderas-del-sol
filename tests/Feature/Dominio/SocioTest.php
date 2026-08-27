@@ -34,23 +34,47 @@ test('la parte de cada socio sale exacta, sin float', function (): void {
 });
 
 /*
-| Tres socios se acomodan con medios: 33.5 + 33.5 + 33. Es la razón de la regla
-| —«enteros o medios»— y de que no haga falta un tercio periódico.
+| Tres socios se acomodan con medios: 33.5 + 33.5 + 33.
 */
 test('tres socios en medios suman 100 y el reparto cierra', function (): void {
     foreach (['33.5', '33.5', '33.0'] as $parte) {
         Socio::factory()->delProyecto($this->proyecto)->conParte($parte)->create();
     }
 
-    expect($this->proyecto->partesDeLosSocios()->redondeado(1))->toBe('100.0')
+    expect($this->proyecto->partesDeLosSocios()->redondeado(2))->toBe('100.00')
         ->and($this->proyecto->elRepartoCierra())->toBeTrue();
+});
+
+/*
+| Y dos socios en dos tercios y un tercio se acomodan con centésimos: 66.67 +
+| 33.33. Es el pedido de Mauricio del 27-ago-2026 y la razón de que la columna
+| haya dejado de ser numeric(5,1): con medios, lo más cerca era 66.5 + 33.5, que
+| no es «casi lo mismo» sino otro reparto.
+*/
+test('dos socios en centesimos suman 100 y el reparto cierra', function (): void {
+    Socio::factory()->delProyecto($this->proyecto)->conParte('66.67')->create();
+    Socio::factory()->delProyecto($this->proyecto)->conParte('33.33')->create();
+
+    expect($this->proyecto->partesDeLosSocios()->redondeado(2))->toBe('100.00')
+        ->and($this->proyecto->elRepartoCierra())->toBeTrue();
+});
+
+/*
+| Y el centésimo tiene que llegar entero hasta el dinero. Con la escala vieja
+| —un decimal— el 66.67% se cobraba como 66.7%: sobre L 300,000.00 son L 90.00
+| que le tocaban al otro socio.
+*/
+test('el centesimo llega hasta el dinero, no se redondea en el camino', function (): void {
+    $socio = Socio::factory()->delProyecto($this->proyecto)->conParte('66.67')->create();
+
+    expect($socio->suParteDe(new Monto('300000.00'))->redondeado())->toBe('200010.00');
 });
 
 test('si las partes no llegan a 100 el reparto no cierra', function (): void {
     Socio::factory()->delProyecto($this->proyecto)->conParte('60.0')->create();
     Socio::factory()->delProyecto($this->proyecto)->conParte('30.0')->create();
 
-    expect($this->proyecto->partesDeLosSocios()->redondeado(1))->toBe('90.0')
+    expect($this->proyecto->partesDeLosSocios()->redondeado(2))->toBe('90.00')
         ->and($this->proyecto->elRepartoCierra())->toBeFalse();
 });
 
@@ -62,7 +86,7 @@ test('un socio inactivo no entra en el reparto', function (): void {
     Socio::factory()->delProyecto($this->proyecto)->conParte('100.0')->create();
     Socio::factory()->delProyecto($this->proyecto)->conParte('50.0')->inactivo()->create();
 
-    expect($this->proyecto->partesDeLosSocios()->redondeado(1))->toBe('100.0')
+    expect($this->proyecto->partesDeLosSocios()->redondeado(2))->toBe('100.00')
         ->and($this->proyecto->elRepartoCierra())->toBeTrue();
 });
 
@@ -82,20 +106,26 @@ describe('Lo que la base no deja pasar', function (): void {
     })->with([['0.0'], ['100.5'], ['-5.0']]);
 
     /*
-    | «Solo se pueden enteros o medios: 0.5, 10, 20.5» — Mauricio. Va en la base
-    | y no solo en la pantalla porque un seeder o un import tampoco pueden meter
-    | un tercio.
+    | El CHECK de «enteros o medios» se fue el 27-ago-2026: los centésimos son
+    | exactamente lo que Mauricio vino a pedir. Lo que la base sigue mirando es
+    | la escala —numeric(5,2)— y que el número sea un porcentaje posible.
     */
-    test('un porcentaje que no es entero ni medio', function (string $parte): void {
-        expect(fn () => Socio::factory()->delProyecto($this->proyecto)->conParte($parte)->create())
-            ->toThrow(QueryException::class);
-    })->with([['33.3'], ['0.1'], ['12.7']]);
-
-    test('los enteros y los medios si pasan', function (string $parte): void {
+    test('los centesimos pasan y llegan enteros', function (string $parte): void {
         $socio = Socio::factory()->delProyecto($this->proyecto)->conParte($parte)->create();
 
-        expect($socio->porcentaje()->redondeado(1))->toBe($parte);
-    })->with([['0.5'], ['10.0'], ['20.5'], ['100.0']]);
+        expect($socio->porcentaje()->redondeado(2))->toBe($parte);
+    })->with([['0.50'], ['10.00'], ['20.50'], ['33.33'], ['66.67'], ['100.00']]);
+
+    /*
+    | ⚠️ Un tercer decimal NO explota: numeric(5,2) lo REDONDEA en silencio.
+    | Por eso el formulario tiene su propia regla —`hastaDosDecimales`— que
+    | avisa en vez de dejar que la base decida por el usuario.
+    */
+    test('un tercer decimal lo redondea la base, no lo rechaza', function (): void {
+        $socio = Socio::factory()->delProyecto($this->proyecto)->conParte('33.333')->create();
+
+        expect($socio->fresh()?->porcentaje()->redondeado(2))->toBe('33.33');
+    });
 
     /*
     | Dos renglones del mismo socio en el mismo proyecto son un error de carga
