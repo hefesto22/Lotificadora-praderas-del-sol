@@ -55,8 +55,13 @@ return [
     |--------------------------------------------------------------------------
     | Checks
     |--------------------------------------------------------------------------
-    | Los checks que el endpoint /health ejecuta. Puedes agregar/quitar
-    | desde el HealthServiceProvider, o sobreescribir aquí.
+    | 🔴 ESTA LISTA NO LA LEE NADIE (verificado el 27-ago-2026 en el vendor:
+    | `spatie/laravel-health` nunca consulta `config('health.checks')`). Los
+    | checks que corren son los que registra `HealthServiceProvider::boot()`
+    | con `Health::checks()`, y ahí es donde hay que tocarlos.
+    |
+    | Se deja como referencia de lo que trae el paquete — pero **editar acá no
+    | cambia nada**, y por eso conviene borrarla el día que estorbe.
     */
     'checks' => [
         DebugModeCheck::class,

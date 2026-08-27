@@ -65,6 +65,8 @@ final readonly class ImprimirReciboController
 
         $recibo->load(['cliente', 'venta', 'compromiso.lote', 'aplicaciones.cuota.compromiso.lote', 'facturacion']);
 
+        $saldos = $this->saldosPorLote($recibo);
+
         // `variosLotes`: con un solo lote el rótulo del papel va en singular
         // y el detalle no repite el código en cada renglón.
         return view('documentos.recibo', [
@@ -74,7 +76,8 @@ final readonly class ImprimirReciboController
             'enLetras'        => MontoEnLetras::de($recibo->montoTotal()),
             'aCapital'        => $recibo->montoACapital(),
             'variosLotes'     => $recibo->tocaVariosLotes(),
-            'saldo'           => $this->saldoDelLote($recibo),
+            'saldos'          => $saldos,
+            'saldoTotal'      => $this->totalDe($saldos),
             'logo'            => $this->logo(),
             'logoDelProyecto' => $this->proyectoDe($recibo)?->logoUrl(),
 
@@ -212,27 +215,62 @@ final readonly class ImprimirReciboController
     }
 
     /**
-     * Lo que el lote debe HOY, no lo que debía el día del pago.
+     * Lo que le queda por pagar de CADA lote, uno por uno.
      *
-     * Va rotulado con la fecha de impresión en el papel a propósito: una copia
-     * sacada tres meses después muestra otro número, y sin la fecha al lado
-     * parecería que el recibo cambió.
+     * ═══ 🔴 ANTES ERA UNO SOLO, Y EL DE VARIOS LOTES NO IMPRIMIA NINGUNO ═══
+     *
+     * «Que diga cuánto le queda de x lote o lotes que él tiene, ya que les
+     * gusta saber cuánto les resta de pagar» — Mauricio, 27-ago-2026, mirando
+     * el RPS-00000013: dos lotes cobrados en un papel, y la línea del saldo
+     * sin aparecer.
+     *
+     * La causa: esto leía `$recibo->compromiso`, que en un cobro de varios
+     * lotes queda vacío a propósito (R13). Ahora la pregunta se la hace a
+     * `Recibo::compromisosTocados()`, que es donde vive esa regla.
+     *
+     * ═══ ES EL SALDO DE HOY, Y EL PAPEL LO DICE ═══
+     *
+     * No se congela: el recibo acredita **lo que se recibió**, no un saldo. Una
+     * copia sacada tres meses después va a mostrar otro número, y por eso la
+     * línea lleva la fecha de impresión al lado — sin ella parecería que el
+     * recibo cambió.
+     *
+     * @return list<array{codigo: string, saldo: Monto}>
      */
-    private function saldoDelLote(Recibo $recibo): ?Monto
+    private function saldosPorLote(Recibo $recibo): array
     {
-        $lote = $recibo->compromiso;
+        $saldos = [];
 
-        if ($lote === null) {
-            return null;
+        foreach ($recibo->compromisosTocados() as $lote) {
+            $saldo = Monto::cero();
+
+            foreach ($lote->cuotas()->get() as $cuota) {
+                $saldo = $saldo->sumar($cuota->saldo());
+            }
+
+            $saldos[] = [
+                'codigo' => (string) ($lote->lote?->getAttribute('codigo') ?? 'el lote'),
+                'saldo'  => $saldo,
+            ];
         }
 
-        $saldo = Monto::cero();
+        return $saldos;
+    }
 
-        foreach ($lote->cuotas()->get() as $cuota) {
-            $saldo = $saldo->sumar($cuota->saldo());
+    /**
+     * Y la suma, que es lo que el cliente pregunta cuando tiene varios.
+     *
+     * @param list<array{codigo: string, saldo: Monto}> $saldos
+     */
+    private function totalDe(array $saldos): Monto
+    {
+        $total = Monto::cero();
+
+        foreach ($saldos as $renglon) {
+            $total = $total->sumar($renglon['saldo']);
         }
 
-        return $saldo;
+        return $total;
     }
 
     /**

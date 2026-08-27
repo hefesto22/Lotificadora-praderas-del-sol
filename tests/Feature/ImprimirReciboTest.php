@@ -62,6 +62,86 @@ beforeEach(function (): void {
 });
 
 /*
+|--------------------------------------------------------------------------
+| 🔴 Cuánto le resta de pagar — 27-ago-2026
+|--------------------------------------------------------------------------
+| «Que diga cuánto le queda de x lote o lotes que él tiene, ya que les gusta
+| saber cuánto les resta de pagar» — Mauricio.
+|
+| La línea del saldo YA existía, pero salía de `$recibo->compromiso`, que en un
+| cobro de varios lotes queda vacío a propósito (R13). O sea: **el papel que
+| más necesita el desglose era el único que no lo imprimía.**
+*/
+
+test('el papel dice cuánto le queda por pagar de su lote', function (): void {
+    // 300,000 a financiar − 60,000 cobrados = 240,000.
+    ($this->papel)()
+        ->assertOk()
+        ->assertSee('Le queda por pagar')
+        ->assertSee((string) $this->renglon->lote?->getAttribute('codigo'))
+        ->assertSee('L. 240,000.00')
+        // Con un solo lote el total repetiría el mismo número con otro nombre.
+        ->assertDontSee('total L.');
+});
+
+test('con dos lotes en un mismo papel sale el saldo de cada uno y el total', function (): void {
+    $proyecto = Proyecto::factory()->create(['codigo' => 'RSB']);
+    $bloque = Bloque::factory()->create(['proyecto_id' => $proyecto->getKey(), 'nombre' => 'B']);
+
+    /*
+     * ⚠️ Un array LITERAL, no `collect()->map()->all()`: ese devuelve
+     * `array<int, Lote>` y `activar()` pide una `list<Lote>`. PHPStan no puede
+     * probar que las claves sean 0..n, y tiene razón. Es el molde de
+     * `una-forma-declarada-se-pierde`, y el tipo se repone en el ORIGEN.
+     */
+    $lotes = [
+        Lote::factory()->enBloque($bloque)->conMedidas('250.0000', '1400.00')->create(['numero' => '1']),
+        Lote::factory()->enBloque($bloque)->conMedidas('250.0000', '1400.00')->create(['numero' => '2']),
+    ];
+
+    // Dos lotes de 350,000 con 50,000 de prima cada uno: 300,000 a financiar
+    // por lote, cuotas de 25,000.
+    $venta = app(RegistroDeVentas::class)->activar(
+        proyecto: $proyecto,
+        lotes: $lotes,
+        clientes: [$this->cliente],
+        prima: new Monto('100000.00'),
+        plazoMeses: 12,
+        diaPago: 5,
+    );
+
+    // Por la misma razón que los lotes: `$renglones[] =` sobre un array vacío
+    // sí produce una `list`; `->map()->all()` no.
+    $renglones = [];
+
+    foreach ($venta->compromisos as $lote) {
+        $renglones[] = ['lote' => $lote, 'monto' => new Monto('25000.00')];
+    }
+
+    // UN recibo para los dos lotes: ahí `compromiso_id` queda vacío (R13).
+    $recibos = app(RegistroDePagos::class)->cobrarVariosLotes(
+        venta: $venta,
+        cliente: $this->cliente,
+        renglones: $renglones,
+        forma: FormaDePago::Efectivo,
+    );
+
+    expect($recibos)->toHaveCount(1)
+        ->and($recibos[0]->getAttribute('compromiso_id'))->toBeNull();
+
+    // 300,000 − 25,000 = 275,000 cada uno, y 550,000 entre los dos.
+    $papel = $this->get(route('documentos.recibo', $recibos[0]))->assertOk();
+
+    foreach ($venta->compromisos as $lote) {
+        $papel->assertSee((string) $lote->lote?->getAttribute('codigo'));
+    }
+
+    $papel->assertSee('Le queda por pagar')
+        ->assertSee('L. 275,000.00')
+        ->assertSee('total L. 550,000.00');
+});
+
+/*
 | El nombre se compara contra lo que la BASE guardó, no contra lo que se
 | tecleó: `clientes.nombre` pasa por un mutador que lo lleva a MAYÚSCULAS
 | (decisión del 3-ago-2026, docs/mayusculas.md). Escribir 'Leticia Romero' acá

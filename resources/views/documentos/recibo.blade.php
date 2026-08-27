@@ -434,9 +434,27 @@
         </p>
     @endif
 
-    @if ($saldo)
+    {{-- Lo que le queda por pagar, lote por lote — 27-ago-2026.
+
+         «Que diga cuánto le queda de x lote o lotes que él tiene, ya que les
+         gusta saber cuánto les resta de pagar» — Mauricio.
+
+         Hasta hoy esto imprimía UN saldo y solo cuando el recibo tenía
+         `compromiso_id`, así que el cobro de varios lotes —el único donde el
+         desglose hace falta de verdad— no mostraba ninguno.
+
+         El total va solo cuando hay más de uno: con un lote repetiría el mismo
+         número con otro nombre, y eso hace dudar de los dos. --}}
+    @if ($saldos !== [])
         <p class="nota">
-            Saldo del lote al {{ now()->format('d/m/Y') }}: <strong>{{ $saldo->formateado() }}</strong>.
+            <strong>Le queda por pagar</strong> al {{ now()->format('d/m/Y') }}:
+            @foreach ($saldos as $renglon)
+                {{ $renglon['codigo'] }} <strong>{{ $renglon['saldo']->formateado() }}</strong>{{ $loop->last ? '' : ' · ' }}
+            @endforeach
+            @if (count($saldos) > 1)
+                — <strong>total {{ $saldoTotal->formateado() }}</strong>
+            @endif
+            <br>
             El saldo cambia con cada pago; este recibo acredita el monto recibido, no el saldo.
         </p>
     @endif

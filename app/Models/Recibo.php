@@ -340,16 +340,10 @@ class Recibo extends Model
      */
     public function codigosDeLotes(): array
     {
-        $delRecibo = $this->compromiso?->lote?->getAttribute('codigo');
-
-        if (is_string($delRecibo)) {
-            return [$delRecibo];
-        }
-
         $codigos = [];
 
-        foreach ($this->aplicaciones as $aplicacion) {
-            $codigo = $aplicacion->cuota?->compromiso?->lote?->getAttribute('codigo');
+        foreach ($this->compromisosTocados() as $lote) {
+            $codigo = $lote->lote?->getAttribute('codigo');
 
             if (is_string($codigo) && ! in_array($codigo, $codigos, true)) {
                 $codigos[] = $codigo;
@@ -357,6 +351,44 @@ class Recibo extends Model
         }
 
         return $codigos;
+    }
+
+    /**
+     * Los LOTES que este recibo tocó, no solo sus códigos.
+     *
+     * ═══ POR QUE EXISTE, Y POR QUE `codigosDeLotes()` LO USA ═══
+     *
+     * «Qué lotes tocó este recibo» tiene una respuesta con dos mitades: el
+     * `compromiso_id` cuando el papel es de un solo lote, y las cuotas que
+     * aplicó cuando toca varios —ahí la columna queda vacía a propósito (R13),
+     * porque diría una mentira—.
+     *
+     * Esa regla se escribe UNA vez. Cuando el 27-ago-2026 hubo que imprimir el
+     * saldo por lote, el controlador miraba solo `compromiso_id` y devolvía
+     * null: **el recibo que más necesita el desglose —el de varios lotes— era
+     * justo el único que no lo mostraba.**
+     *
+     * @return list<Compromiso>
+     */
+    public function compromisosTocados(): array
+    {
+        $propio = $this->compromiso;
+
+        if ($propio instanceof Compromiso) {
+            return [$propio];
+        }
+
+        $lotes = [];
+
+        foreach ($this->aplicaciones as $aplicacion) {
+            $lote = $aplicacion->cuota?->compromiso;
+
+            if ($lote instanceof Compromiso) {
+                $lotes[(int) $lote->getKey()] = $lote;
+            }
+        }
+
+        return array_values($lotes);
     }
 
     /**

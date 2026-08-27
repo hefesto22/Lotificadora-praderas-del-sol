@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Support\Infraestructura;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -64,12 +65,27 @@ Schedule::command('health:schedule-check-heartbeat')
     ->onOneServer()
     ->name('health-heartbeat');
 
-// ─── Horizon ───────────────────────────────────────────────────────────
-// Snapshot de métricas para el dashboard de Horizon.
-Schedule::command('horizon:snapshot')
-    ->everyFiveMinutes()
-    ->onOneServer()
-    ->name('horizon-snapshot');
+/*
+|─── Horizon ───────────────────────────────────────────────────────────
+|
+| ═══ 🔴 SOLO SI LA COLA VA POR REDIS (27-ago-2026) ═══
+|
+| Esto estaba agendado siempre. En Praderas del Sol —cola en base de datos,
+| sin Redis, a propósito— reventaba cada cinco minutos con
+| `Class "Redis" not found`, y junto con `health:check` llenó 8 MB de log en
+| un día. El 26-ago ese ruido dejó un 500 real sepultado miles de líneas
+| arriba.
+|
+| La pregunta se la hace `Infraestructura` a los drivers del `.env`: es lo
+| único que distingue a una lotificadora de otra (Ley L0).
+*/
+if (Infraestructura::usaHorizon()) {
+    // Snapshot de métricas para el dashboard de Horizon.
+    Schedule::command('horizon:snapshot')
+        ->everyFiveMinutes()
+        ->onOneServer()
+        ->name('horizon-snapshot');
+}
 
 // ─── Mantenimiento de modelos ──────────────────────────────────────────
 // Borra registros soft-deleted que cumplan la política de retención

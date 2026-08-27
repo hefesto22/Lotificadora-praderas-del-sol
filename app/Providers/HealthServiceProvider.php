@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Support\Infraestructura;
 use Illuminate\Support\ServiceProvider;
+use Spatie\Health\Checks\Check;
 use Spatie\Health\Checks\Checks\CacheCheck;
 use Spatie\Health\Checks\Checks\DatabaseCheck;
 use Spatie\Health\Checks\Checks\DatabaseConnectionCountCheck;
@@ -35,7 +37,8 @@ class HealthServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
-        Health::checks([
+        /** @var list<Check> $checks */
+        $checks = [
             // ── Entorno ─────────────────────────────────────────────
             EnvironmentCheck::new()
                 ->expectEnvironment((string) config('app.env', 'production')),
@@ -53,9 +56,6 @@ class HealthServiceProvider extends ServiceProvider
             DatabaseConnectionCountCheck::new()
                 ->failWhenMoreConnectionsThan(80)
                 ->warnWhenMoreConnectionsThan(60),
-
-            // ── Redis ───────────────────────────────────────────────
-            RedisCheck::new(),
 
             // ── Cache (verifica que el store funciona escribiendo y leyendo) ──
             CacheCheck::new()
@@ -87,6 +87,26 @@ class HealthServiceProvider extends ServiceProvider
             UsedDiskSpaceCheck::new()
                 ->warnWhenUsedSpaceIsAbovePercentage(70)
                 ->failWhenUsedSpaceIsAbovePercentage(85),
-        ]);
+        ];
+
+        /*
+         * ═══ 🔴 REDIS, SOLO SI ESTA INSTALACION LO USA (27-ago-2026) ═══
+         *
+         * Este check estaba SIEMPRE, y en Praderas del Sol —que corre a
+         * propósito sin Redis— reventaba cada minuto con
+         * `Class "Redis" not found`. Escribió 8 MB de log en un día, y el
+         * 26-ago un 500 de verdad quedó sepultado ahí adentro: un `tail -80`
+         * solo alcanzaba para ver dos minutos de basura.
+         *
+         * Un check que falla siempre no avisa de nada; solo tapa a los que sí
+         * tienen algo que decir. La pregunta se la hace `Infraestructura` a
+         * los drivers del `.env`, que es lo único que cambia de una
+         * lotificadora a otra.
+         */
+        if (Infraestructura::usaRedis()) {
+            $checks[] = RedisCheck::new();
+        }
+
+        Health::checks($checks);
     }
 }
