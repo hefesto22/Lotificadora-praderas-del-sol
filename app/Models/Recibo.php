@@ -433,6 +433,61 @@ class Recibo extends Model
     }
 
     /**
+     * Lo que las constancias de este recibo dicen que bajó del capital (R21).
+     */
+    public function capitalReprogramado(): Monto
+    {
+        $total = Monto::cero();
+
+        foreach ($this->reprogramaciones as $constancia) {
+            $total = $total->sumar($constancia->montoAbonado());
+        }
+
+        return $total;
+    }
+
+    /**
+     * ═══ 🔴 EL CUADRE: LO QUE DICE EL PAPEL CONTRA LO QUE HIZO ═══
+     *
+     * Todo lempira de un recibo tiene que haber ido a una cuota o haber bajado
+     * el capital. Nada en el sistema comparaba las dos mitades, y por eso el
+     * defecto del 27-ago-2026 vivió invisible: el recibo RPS-00000005 de
+     * Praderas decía L 24,000.00 y solo había movido L 17,020.83.
+     *
+     * ⚠️ Solo tiene sentido en los recibos que cuelgan de cuotas —`cuota` y
+     * `abono_capital`—. Una prima o una seña no aplican a ninguna cuota: para
+     * ellas esto da el monto entero y no significa nada.
+     *
+     * `montoACapital()` no sirve para esto porque es una RESTA: da lo que el
+     * papel no aplicó, sin preguntarle a las constancias si de verdad bajó.
+     */
+    public function loQueAplico(): Monto
+    {
+        return $this->montoAplicadoACuotas()->sumar($this->capitalReprogramado());
+    }
+
+    public function cuadra(): bool
+    {
+        return $this->montoTotal()->igualA($this->loQueAplico());
+    }
+
+    /**
+     * El dinero que el cliente entregó y no llegó a ningún lado.
+     *
+     * Cero cuando cuadra y también cuando aplicó de MÁS —que es otro problema,
+     * y `Monto::restar()` no admite negativos—. La dirección peligrosa para el
+     * cliente es esta, y es la que se repara.
+     */
+    public function descuadre(): Monto
+    {
+        $aplicado = $this->loQueAplico();
+
+        return $this->montoTotal()->mayorQue($aplicado)
+            ? $this->montoTotal()->restar($aplicado)
+            : Monto::cero();
+    }
+
+    /**
      * El número, como se lee en el papel.
      *
      * ═══ DOS FORMAS, Y LA DIFERENCIA ES LA SERIE ═══

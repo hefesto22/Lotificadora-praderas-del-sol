@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Domain\Enums\ConceptoDeRecibo;
 use App\Models\User;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Throwable;
@@ -60,6 +62,7 @@ final class VerificarProduccion extends Command
         $this->respaldos();
         $this->credenciales();
         $this->operacion();
+        $this->elDinero();
 
         return $this->informe();
     }
@@ -281,7 +284,67 @@ final class VerificarProduccion extends Command
         );
     }
 
+    /**
+     * ═══ 🔴 EL DINERO QUE ENTRO Y NO LLEGO A NINGUN LADO ═══
+     *
+     * Todo lempira de un recibo tiene que estar en una cuota o en una
+     * constancia de abono a capital. Hasta el 27-ago-2026 **nadie comparaba
+     * las dos mitades**, y por eso un defecto del modo «Ambas» le dejó a un
+     * cliente de Praderas L 6,979.17 en el aire durante tres días: el papel
+     * decía L 24,000.00 y la base había movido L 17,020.83.
+     *
+     * Un descuadre no se ve distinto de un servidor sano —que es el criterio
+     * de todo este comando—: nadie va a sumar los renglones de 262 recibos a
+     * mano. Por eso vive acá y no solo en su propio comando.
+     */
+    private function elDinero(): void
+    {
+        $sinCuadrar = $this->recibosQueNoCuadran();
+
+        $this->revisar(
+            'Cada recibo aplicó lo que cobró',
+            $sinCuadrar === 0,
+            match (true) {
+                $sinCuadrar === null => 'No se pudo leer la base',
+                $sinCuadrar === 0    => 'Todos cuadran',
+                default              => $sinCuadrar.' recibo(s) cobraron más de lo que aplicaron',
+            },
+            'php artisan olympo:cuadrar-recibos para verlos, y --reparar para escribir lo que falta. '
+                .'Un recibo que no cuadra es dinero que el cliente entregó y que no le bajó el saldo.',
+        );
+    }
+
     // ─── Interno ──────────────────────────────────────────────────────
+
+    /**
+     * Cuántos recibos cobraron más de lo que aplicaron.
+     *
+     * Una sola consulta y no un recorrido: en el servidor esto corre sobre la
+     * tabla entera. `null` cuando la base no respondió, que cuenta como fallo
+     * —igual que en `hayContrasenaDelEjemplo()`—.
+     *
+     * ⚠️ Solo `cuota` y `abono_capital`: una prima o una seña no cuelgan de
+     * ninguna cuota y la resta no significaría nada.
+     */
+    private function recibosQueNoCuadran(): ?int
+    {
+        try {
+            if (! Schema::hasTable('recibos')) {
+                return 0;
+            }
+
+            return DB::table('recibos as r')
+                ->whereNull('r.anulado_el')
+                ->whereIn('r.concepto', [ConceptoDeRecibo::Cuota->value, ConceptoDeRecibo::AbonoCapital->value])
+                ->whereRaw(
+                    'r.monto <> COALESCE((SELECT SUM(a.monto) FROM aplicaciones_de_pago a WHERE a.recibo_id = r.id), 0)'
+                    .' + COALESCE((SELECT SUM(p.abono_capital) FROM reprogramaciones p WHERE p.recibo_id = r.id), 0)'
+                )
+                ->count();
+        } catch (Throwable) {
+            return null;
+        }
+    }
 
     /**
      * ¿Quedó alguien con la contraseña de la plantilla?

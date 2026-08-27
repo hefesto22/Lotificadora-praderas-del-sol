@@ -1471,12 +1471,6 @@ final readonly class RegistroDePagos
             }
 
             /*
-             * La mora se asienta UNA vez: `asentarLaMora()` hace un `update()`
-             * sobre el recibo, asi que llamarla por lote pisaria la anterior.
-             */
-            $this->asentarLaMora($recibo, $moraCobrada, Monto::cero(), '');
-
-            /*
              * 4. El abono, sobre el estado que dejo el cobro. Releer aca es el
              * corazon del metodo: la cuota que estaba a medias ya quedo saldada
              * y el lote entra al abono con cuotas que nadie toco.
@@ -1533,16 +1527,121 @@ final readonly class RegistroDePagos
             }
 
             /*
-             * `ponerAlDia` vale cero: el paso 4 releyo despues del cobro, asi
-             * que no quedo nada vencido que poner al dia. Si algun dia dejara
-             * de valer cero, `esPagoNormal` de arriba ya lo habria rechazado.
+             * === 5. LO QUE EL ABONO USA PARA PONER AL DIA, SE ESCRIBE ===
+             *
+             * Hasta el 27-ago-2026 aca habia un comentario afirmando que
+             * `ponerAlDia` valia cero «porque el paso 4 releyo despues del
+             * cobro». Vale cero SOLO si los renglones de cuota cubrieron todo
+             * lo vencido del lote del abono, y nada obliga a eso.
+             *
+             * Lo que costo: recibo RPS-00000005 de Praderas, L 24,000.00 en el
+             * expediente 0070. Marcaron una cuota por lote y el N-008 tenia
+             * dos vencidas; `EfectoDelAbono` le resto la segunda al abono
+             * —bajaron capital L 4,833.33 en vez de L 11,812.50— y nadie
+             * escribio ese pago: L 6,979.17 del cliente desaparecieron y la
+             * cuota 2 le siguio saliendo pendiente.
+             *
+             * El modal SI se lo mostraba antes de confirmar
+             * (`repartoDelAbono()`: «Pone al dia — cuota 2 … L 6,979.17»).
+             * Esto es lo que faltaba para que la base diga lo que la pantalla
+             * prometio, y es exactamente lo que `abonarEnLosDeUnMismoNombre()`
+             * ya hacia en su propio camino.
              */
+            if (! $efecto->ponerAlDia->esCero()) {
+                $reparto = $this->repartir($recibo, $limpias, $efecto->ponerAlDia, $moraDelAbono);
+                $moraCobrada = $moraCobrada->sumar($reparto['cobrada']);
+            }
+
+            /*
+             * La mora se asienta UNA vez y al final: `asentarLaMora()` hace un
+             * `update()` sobre el recibo, asi que asentarla en el paso 3 y de
+             * nuevo aca pisaria la del cobro con la del abono en vez de
+             * sumarlas.
+             */
+            $this->asentarLaMora($recibo, $moraCobrada, Monto::cero(), '');
+
             $this->reescribirElPlan($venta, $loteDelAbono, $efecto, $plan);
             $this->asentarLaConstancia($venta, $loteDelAbono, $recibo, $efecto, $plan, $porQue);
             $this->recalcularElResumen($venta);
             $this->cerrarSiQuedoPagada($venta, $cuando);
 
             return $recibo;
+        });
+    }
+
+    /**
+     * ═══ LE ESCRIBE AL RECIBO EL PAGO QUE COBRO Y NUNCA APLICO ═══
+     *
+     * Nace el 27-ago-2026 para reparar lo que dejo el defecto del paso 5 de
+     * `cobrarYAbonarEnUnMismoNombre()` —el caso que lo pidio esta en su
+     * docblock—: un recibo cuyo monto no cuadra con lo que aplico es dinero
+     * del cliente que no le bajo el saldo.
+     *
+     * Reusa `repartir()`, el MISMO FIFO del cobro, en vez de escribir la
+     * aplicacion a mano: una segunda forma de repartir un pago seria una
+     * segunda respuesta a «cuanto le tocó a cada cuota».
+     *
+     * Quien decide a que lote va el dinero es el que llama —lo sabe la
+     * constancia de reprogramacion del recibo— y no este metodo: con dos lotes
+     * reprogramados en un mismo papel la respuesta no es unica y adivinarla
+     * seria acreditarle a uno lo que entrego el otro.
+     *
+     * Devuelve lo que aplico; cero si el recibo ya cuadraba.
+     *
+     * @throws PagoInvalidoException
+     */
+    public function cuadrarElRecibo(Recibo $recibo, Compromiso $lote, ?CarbonImmutable $fecha = null): Monto
+    {
+        $falta = $recibo->descuadre();
+
+        if ($falta->esCero()) {
+            return Monto::cero();
+        }
+
+        $cuando = $fecha ?? CarbonImmutable::parse(today()->toDateString());
+
+        return DB::transaction(function () use ($recibo, $lote, $falta, $cuando): Monto {
+            $pendientes = $this->pendientesBloqueadas($lote);
+            $mora = MoraDelLote::calcular($pendientes, $this->condicionesDe($lote), $cuando);
+            $tope = $this->saldoDe($pendientes)->sumar($mora->total);
+
+            /*
+             * Si al lote ya no le queda tanto por deber, el dinero perdido no
+             * es de este lote: se rechaza entero en vez de acreditar una parte
+             * y dejar el resto flotando.
+             */
+            if ($falta->mayorQue($tope)) {
+                throw PagoInvalidoException::porPagarDeMas($falta, $tope, $this->codigo($lote));
+            }
+
+            $reparto = $this->repartir($recibo, $pendientes, $falta, $mora);
+
+            /*
+             * La mora se SUMA a la que el recibo ya tenia asentada.
+             * `asentarLaMora()` no sirve aca: escribe tambien
+             * `mora_condonada` y `motivo_condonacion`, y borraria un perdon
+             * que alguien firmo.
+             */
+            if (! $reparto['cobrada']->esCero()) {
+                $recibo->update([
+                    'monto_mora' => $recibo->montoMora()->sumar($reparto['cobrada'])->redondeado(),
+                ]);
+            }
+
+            /*
+             * El resumen NO se recalcula: `plazo_meses` y `cuota_mensual`
+             * salen de `numero` y `monto`, y un cuadre solo toca
+             * `monto_pagado`. Lo que si puede cambiar es el estado — si esto
+             * termina de pagar el expediente, queda Liquidado —, y ese es el
+             * unico camino que no se puede olvidar (`anular-liquidar-fecha`).
+             */
+            $venta = $recibo->venta;
+
+            if ($venta instanceof Venta) {
+                $this->cerrarSiQuedoPagada($venta, $cuando);
+            }
+
+            return $falta;
         });
     }
 

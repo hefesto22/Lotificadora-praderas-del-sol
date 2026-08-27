@@ -480,3 +480,60 @@ test('el saldo baja exactamente lo que entró, en cualquier combinación', funct
     ['128745.19', 'bajar_cuota', true],
     ['0.01', 'acortar_plazo', false],
 ]);
+
+/*
+|--------------------------------------------------------------------------
+| 🔴🔴 Lo que el recibo dice y lo que aplicó — 27-ago-2026
+|--------------------------------------------------------------------------
+| Producción, expediente 0070, recibo RPS-00000005 por L 24,000.00. Marcaron
+| UNA cuota por lote y el RPS-N-008 tenía DOS vencidas. `EfectoDelAbono` le
+| restó la segunda al abono —bajó capital L 4,833.33 en vez de L 11,812.50— y
+| nadie escribió ese pago: L 6,979.17 del cliente desaparecieron y la cuota 2
+| le siguió saliendo pendiente. El papel decía 24,000 y la base tenía 17,020.83.
+|
+| El mismo caso con los números de este archivo: dos cuotas vencidas de
+| L 25,000.00, se marca UNA sola, y los otros L 35,000.00 entran como abono.
+| De esos, 25,000 ponen al día la que quedó y 10,000 bajan el capital.
+|
+| ⚠️ El invariante que fija este test —lo que no fue a cuotas es exactamente lo
+| que bajó de capital— es el mismo que revisa `olympo:cuadrar-recibos` sobre la
+| base entera. Si acá se cae, allá hay expedientes con plata perdida.
+*/
+
+test('con dos vencidas y una sola marcada, el sobrante pone al día y el recibo cuadra', function (): void {
+    ($this->atrasar)([1, 2]);
+
+    $recibos = $this->pagos->cobrarYAbonar(
+        venta: $this->venta,
+        cliente: $this->cliente,
+        cuotas: [['lote' => $this->renglon, 'monto' => new Monto('25000.00')]],
+        loteDelAbono: $this->renglon,
+        aCapital: new Monto('35000.00'),
+        modalidad: ModalidadDeReprogramacion::AcortarPlazo,
+        motivo: 'Abono a capital solicitado por el cliente',
+        forma: FormaDePago::Efectivo,
+    );
+
+    $recibo = $recibos[0];
+
+    // Las dos vencidas quedaron saldadas: la marcada y la que puso al día el
+    // sobrante. Si esto falla, el cliente pagó una cuota que le sigue
+    // apareciendo pendiente.
+    expect(Cuota::query()
+        ->where('compromiso_id', $this->renglon->getKey())
+        ->whereIn('numero', [1, 2])
+        ->orderBy('numero')
+        ->pluck('monto_pagado', 'numero')
+        ->all())->toBe([1 => '25000.00', 2 => '25000.00']);
+
+    // 🔴 El cuadre: lo que no fue a cuotas es lo que bajó de capital.
+    $constancia = Reprogramacion::query()->where('recibo_id', $recibo->getKey())->firstOrFail();
+
+    expect($recibo->montoTotal())->toBeMonto('60000.00')
+        ->and($recibo->montoAplicadoACuotas())->toBeMonto('50000.00')
+        ->and($recibo->montoACapital())->toBeMonto('10000.00')
+        ->and($constancia->montoAbonado())->toBeMonto('10000.00');
+
+    // Y el saldo bajó exactamente lo que entró: 300,000 − 60,000.
+    expect($this->venta->refresh()->saldoPendiente())->toBeMonto('240000.00');
+});
