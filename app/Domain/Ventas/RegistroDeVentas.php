@@ -497,10 +497,36 @@ final readonly class RegistroDeVentas
     {
         $ids = array_map(static fn (Lote $lote): int => (int) $lote->getKey(), $lotes);
 
+        /*
+         * ═══ 🔴 EL ORDEN NO LO DECIDE POSTGRES (27-ago-2026) ═══
+         *
+         * Sin `orderBy`, un `SELECT … FOR UPDATE` devuelve las filas en el
+         * orden que le convenga al planificador —heap, indice, bitmap—, y eso
+         * cambia entre versiones de Postgres y con las estadisticas de la
+         * tabla. Esta lista es el ORDEN DE LOS RENGLONES DEL CONTRATO, y de
+         * ahi salen dos cosas que no pueden quedar al azar:
+         *
+         * 1. **El centavo del residuo.** `repartirPrima()` se lo da al ULTIMO
+         *    renglon. Con L 1,000.00 entre tres lotes iguales alguien recibe
+         *    333.34 y los otros 333.33 — y quien es «alguien» lo estaba
+         *    eligiendo el plan de la consulta. Local decia un lote y el CI
+         *    otro: el mismo contrato, dos repartos.
+         * 2. **El orden del bloqueo.** Dos ventas simultaneas que comparten un
+         *    lote y lo toman en orden distinto se traban entre si. Es la misma
+         *    razon por la que `cobrarVariosLotes()` hace `usort` antes de
+         *    bloquear.
+         *
+         * `codigo` y no `id` porque es el criterio que ya usan los otros dos
+         * que bloquean lotes —`RegistroDeCompromisos::apartar()` y
+         * `FijacionDePrecios`—: para que el orden sirva de defensa contra
+         * trabas tiene que ser el MISMO en todo el sistema.
+         */
+
         /** @var list<Lote> $frescos */
         $frescos = Lote::query()
             ->whereIn('id', $ids)
             ->lockForUpdate()
+            ->orderBy('codigo')
             ->get()
             ->all();
 

@@ -273,6 +273,36 @@ describe('La prima del contrato, repartida', function (): void {
             ->and($venta->montoPrima())->toBeMonto('1000.00');
     });
 
+    /*
+    | 🔴🔴 Y a QUIEN le toca ese centavo no lo puede decidir Postgres.
+    |
+    | 27-ago-2026: el test de arriba pasaba en la Mac y fallaba en el CI —el
+    | residuo caia en otro lote—. `bloquearYVerificar()` leia los lotes con un
+    | `FOR UPDATE` SIN `orderBy`, asi que el orden de los renglones del
+    | contrato lo elegia el plan de la consulta, que no es el mismo en dos
+    | versiones de Postgres.
+    |
+    | Este test lo fija desde el otro lado: los lotes entran AL REVES, como si
+    | la pantalla los hubiera marcado 3, 2, 1. El reparto tiene que dar lo
+    | mismo, porque el orden lo pone el dominio y no quien llama.
+    */
+    test('a quién le toca el centavo no depende del orden en que se eligieron', function (): void {
+        $lotes = [($this->lote)('1'), ($this->lote)('2'), ($this->lote)('3')];
+
+        $venta = $this->registro->activar(
+            proyecto: $this->proyecto,
+            lotes: array_reverse($lotes),
+            clientes: [$this->cliente],
+            prima: new Monto('1000.00'),
+            plazoMeses: 12,
+            diaPago: 5,
+        );
+
+        expect($venta->compromisos()->orderBy('lote_id')->pluck('prima')->all())
+            ->toBe(['333.33', '333.33', '333.34'])
+            ->and($venta->montoPrima())->toBeMonto('1000.00');
+    });
+
     test('primas por lote que no dan la del contrato se rechazan', function (): void {
         $uno = ($this->lote)('1');
         $dos = ($this->lote)('2');
