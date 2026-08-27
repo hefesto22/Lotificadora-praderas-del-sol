@@ -55,10 +55,27 @@ return [
             |------------------------------------------------------------------
             | Bases de datos a respaldar. Por defecto la conexión principal.
             | Postgres usa pg_dump (instalado dentro del contenedor postgres).
+            |
+            | 🔴 `env()` Y NO `config('database.default')` — 27-ago-2026
+            |
+            | Un archivo de configuración NO puede leer otro con `config()`:
+            | Laravel los carga en orden alfabético, así que cuando toca este
+            | `database.php` todavía no existe y `config('database.default')`
+            | devuelve **null**. Con `config:cache` ese null queda CONGELADO en
+            | el archivo cacheado.
+            |
+            | El primer `backup:run` de producción murió así:
+            | «Argument #1 ($dbConnectionName) must be of type string, null
+            | given» en `BackupJobFactory::createDbDumpers()` — y el respaldo
+            | nunca se había probado, así que llevaba tres días sin correr sin
+            | que nadie lo supiera.
+            |
+            | La expresión es la MISMA de `config/database.php:21`, para que las
+            | dos digan lo mismo aunque una instalación no declare la variable.
             |------------------------------------------------------------------
             */
             'databases' => [
-                config('database.default'),
+                env('DB_CONNECTION', 'pgsql'),
             ],
         ],
 
