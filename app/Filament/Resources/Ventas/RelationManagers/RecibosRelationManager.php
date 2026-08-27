@@ -118,7 +118,15 @@ class RecibosRelationManager extends RelationManager
             ->recordActions([
                 ImprimirRecibo::accion(),
             ])
-            ->defaultSort('numero', 'desc')
+            /*
+             * Por fecha y no por numero: desde el 23-ago-2026 conviven dos
+             * series que empiezan las dos en 1, asi que el numero dejo de ser
+             * cronologico. Acá se veia la prima `000178` de junio ARRIBA del
+             * abono `RPS-00000005` del 26 de agosto. Filament agrega `id` en la
+             * misma direccion, asi que el orden real es `fecha desc, id desc`.
+             * La razon larga esta en `RecibosTable`.
+             */
+            ->defaultSort('fecha', 'desc')
             ->emptyStateHeading('Este expediente no ha pagado nada todavía')
             ->emptyStateDescription('El primer recibo sale al registrar un pago.')
             ->emptyStateIcon('heroicon-o-receipt-percent');

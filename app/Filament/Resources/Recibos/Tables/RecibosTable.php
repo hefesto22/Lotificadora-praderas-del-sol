@@ -165,7 +165,20 @@ class RecibosTable
                     ->description(static fn (Recibo $record): ?string => is_string($record->getAttribute('referencia'))
                         ? 'ref. '.$record->getAttribute('referencia')
                         : null)
-                    ->toggleable(),
+                    /*
+                     * 🔴 OCULTA POR DEFECTO desde el 27-ago-2026.
+                     *
+                     * Con nueve columnas el MONTO —que es a lo que se entra a
+                     * esta pantalla— quedaba cortado contra el borde derecho.
+                     * Esta es la mas ancha de las prescindibles: un badge mas
+                     * un `ref.` que en esta cartera suele traer el nombre
+                     * completo de quien recibio la plata.
+                     *
+                     * No se pierde nada: vuelve con un clic en el selector de
+                     * columnas —y ahi se queda, porque Filament lo recuerda— y
+                     * el recibo abierto la muestra siempre.
+                     */
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 TextColumn::make('monto')
                     ->label('Monto')
@@ -174,26 +187,6 @@ class RecibosTable
                     ->sortable()
                     ->formatStateUsing(static fn (Recibo $record): string => $record->montoTotal()->formateado()),
 
-                /*
-                 * Dos papeles con el mismo número no pueden hacerse pasar por
-                 * dos cobros. Que la lista diga cuántas veces salió impreso es
-                 * lo que permite notarlo antes de que sea un problema.
-                 */
-                TextColumn::make('impresiones_count')
-                    ->label('Impreso')
-                    ->badge()
-                    ->color(static fn (Recibo $record): string => match (true) {
-                        (int) $record->getAttribute('impresiones_count') === 0 => 'warning',
-                        (int) $record->getAttribute('impresiones_count') === 1 => 'gray',
-                        default                                                => 'danger',
-                    })
-                    ->formatStateUsing(static fn (Recibo $record): string => match ((int) $record->getAttribute('impresiones_count')) {
-                        0       => 'nunca',
-                        1       => 'original',
-                        2       => '1 copia',
-                        default => ((int) $record->getAttribute('impresiones_count') - 1).' copias',
-                    })
-                    ->toggleable(),
             ])
             ->filters([
                 SelectFilter::make('concepto')
@@ -240,7 +233,28 @@ class RecibosTable
                     self::anular(),
                 ]),
             ])
-            ->defaultSort('numero', 'desc')
+            /*
+             * ═══ 🔴 POR FECHA, NO POR NUMERO (27-ago-2026) ═══
+             *
+             * Ordenar por `numero` fue correcto mientras hubo UNA serie. Desde
+             * el 23-ago hay dos —el talonario anterior al sistema, sin serie, y
+             * la del proyecto, `RPS-…`— y las DOS empiezan en 1: el numero dejo
+             * de ser cronologico.
+             *
+             * Lo que eso hacia en pantalla, y lo agarro Mauricio mirando la
+             * lista: con 257 historicos y la serie nueva en 10, los recibos que
+             * la recepcion emitio HOY caian en la ULTIMA pagina —la 27 de 27—
+             * revueltos con pagos de junio, y la primera pagina mostraba el
+             * talonario viejo.
+             *
+             * `fecha` sola no desempata —hay varios recibos del mismo dia— pero
+             * no hay que escribirlo: cuando el orden por defecto no incluye la
+             * llave, Filament le agrega `id` en la MISMA direccion
+             * (`hasDefaultKeySort`, true de fabrica; el cuerpo esta en
+             * `CanSortRecords::applySortingToTableQuery()`). El orden real es
+             * `fecha desc, id desc`: lo ultimo cobrado, arriba.
+             */
+            ->defaultSort('fecha', 'desc')
             ->emptyStateHeading('Todavía no se ha cobrado nada')
             ->emptyStateDescription('Los recibos nacen al registrar un pago desde el expediente.')
             ->emptyStateIcon('heroicon-o-receipt-percent');
@@ -328,11 +342,30 @@ class RecibosTable
     }
 
     /**
-     * La segunda línea del folio: la anulación primero, la factura después.
+     * La segunda línea del folio: si el papel vale, con qué número salió, y
+     * cuántas veces se imprimió.
      *
-     * Las dos pueden estar juntas —un recibo anulado que había salido con
-     * CAI— y en ese orden: lo que cambia si el papel vale o no vale se lee
-     * antes que su numeración.
+     * Las tres pueden estar juntas —un recibo anulado que había salido con CAI
+     * y del que circulan copias— y en ese orden: lo que cambia si el papel vale
+     * o no vale se lee antes que su numeración.
+     *
+     * ═══ 🔴 «IMPRESO» DEJO DE SER COLUMNA (27-ago-2026) ═══
+     *
+     * Era una columna entera —encabezado, ancho y badge— para decir «original»
+     * en casi todas las filas. Se fue por lo mismo que se fue «Estado» el
+     * 23-ago y con el mismo criterio: acá ocupa cero cuando no aplica, y ese
+     * ancho es el que le faltaba al monto.
+     *
+     * Lo que NO se fue es la señal, porque aplica en dos casos y los dos
+     * importan:
+     *
+     * - **sin imprimir**: el pago se registró y el cliente se fue sin papel.
+     * - **copias**: dos papeles con el mismo número no pueden hacerse pasar por
+     *   dos cobros, y notarlo antes de que sea un problema es justo para lo que
+     *   está este renglón.
+     *
+     * El caso normal —salió una vez, el original— no dice nada. Es el 99 % de
+     * las filas.
      */
     private static function debajoDelFolio(Recibo $record): ?string
     {
@@ -348,6 +381,30 @@ class RecibosTable
             $renglones[] = 'Factura '.$record->numeroDelPapel();
         }
 
+        $papel = self::comoSalioElPapel($record);
+
+        if ($papel !== null) {
+            $renglones[] = $papel;
+        }
+
         return $renglones === [] ? null : implode(' · ', $renglones);
+    }
+
+    /**
+     * Cuántas veces salió impreso, y solo cuando eso dice algo.
+     *
+     * ⚠️ Depende del `withCount('impresiones')` de `modifyQueryUsing()`: sin él
+     * la columna no existe y esto diría «sin imprimir» en todas las filas.
+     */
+    private static function comoSalioElPapel(Recibo $record): ?string
+    {
+        $veces = (int) $record->getAttribute('impresiones_count');
+
+        return match (true) {
+            $veces === 0 => 'sin imprimir',
+            $veces === 1 => null,
+            $veces === 2 => '1 copia',
+            default      => ($veces - 1).' copias',
+        };
     }
 }

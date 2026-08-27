@@ -74,6 +74,53 @@ describe('La lista general', function (): void {
             ->assertCanSeeTableRecords(Recibo::query()->get());
     });
 
+    /*
+    | 🔴 27-ago-2026 — el orden.
+    |
+    | Con dos series que empiezan las dos en 1, ordenar por número dejó de ser
+    | ordenar por tiempo: los recibos del día caían en la última página. Acá el
+    | del talonario viejo lleva el número MÁS ALTO y la fecha MÁS VIEJA, que es
+    | exactamente el caso que se veía en producción.
+    */
+    test('lo último cobrado sale primero, aunque su número sea más chico', function (): void {
+        $viejo = $this->recibo;
+
+        // Se escribe por query y no con `update()`: `numero` y `serie` no son
+        // fillable a propósito —los pone el correlativo, no un formulario—.
+        Recibo::query()->whereKey($viejo->getKey())->update([
+            'serie'  => null,
+            'numero' => 900,
+            'fecha'  => today()->subMonths(2)->toDateString(),
+        ]);
+
+        // El de hoy sale con la serie del proyecto y su número chico, tal como
+        // lo emite el sistema. No se le toca nada: el correlativo ya le puso
+        // uno libre, y forzarlo acá chocaría contra el índice único.
+        $nuevo = app(RegistroDePagos::class)->cobrarCuotas(
+            venta: $this->venta,
+            lote: $this->venta->compromisos()->firstOrFail(),
+            cliente: $this->cliente,
+            monto: new Monto('25000.00'),
+            forma: FormaDePago::Efectivo,
+        );
+
+        expect((int) $nuevo->getAttribute('numero'))->toBeLessThan(900);
+
+        Livewire::test(ListRecibos::class)
+            ->assertSuccessful()
+            ->assertCanSeeTableRecords([$nuevo, $viejo->refresh()], inOrder: true);
+    });
+
+    /*
+    | «Impreso» dejó de ser columna: el ancho se lo llevaba el monto. La señal
+    | sigue, debajo del folio, y solo cuando dice algo.
+    */
+    test('el recibo que se registró y nadie imprimió lo dice debajo del folio', function (): void {
+        Livewire::test(ListRecibos::class)
+            ->assertSuccessful()
+            ->assertSee('sin imprimir');
+    });
+
     test('la ficha se abre sin imprimir nada', function (): void {
         Livewire::test(ViewRecibo::class, ['record' => $this->recibo->getKey()])
             ->assertSuccessful()

@@ -25,8 +25,11 @@ use Illuminate\Console\Command;
  * `RegistroDePagos::cobrarYAbonarEnUnMismoNombre()`, que es donde estaba el
  * defecto y donde está arreglado—.
  *
- * Lo que dejó ese defecto vivir tres días no fue su dificultad: fue que
- * **nada en el sistema comparaba el monto del recibo contra lo que aplicó**.
+ * Lo que hizo peligroso ese defecto no fue su dificultad: fue que **nada en
+ * el sistema comparaba el monto del recibo contra lo que aplicó**. El del 0070
+ * lo cazó un cliente preguntando; el segundo —RPS-00000010, L 5,000.00 del
+ * expediente 0038— no lo había reportado nadie y salió en la primera corrida
+ * de este comando.
  * Las dos mitades se escribían en la misma transacción y nadie las volvía a
  * mirar juntas. Este comando es esa mirada, y corre sobre la base entera.
  *

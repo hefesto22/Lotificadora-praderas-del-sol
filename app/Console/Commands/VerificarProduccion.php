@@ -289,9 +289,10 @@ final class VerificarProduccion extends Command
      *
      * Todo lempira de un recibo tiene que estar en una cuota o en una
      * constancia de abono a capital. Hasta el 27-ago-2026 **nadie comparaba
-     * las dos mitades**, y por eso un defecto del modo «Ambas» le dejó a un
-     * cliente de Praderas L 6,979.17 en el aire durante tres días: el papel
-     * decía L 24,000.00 y la base había movido L 17,020.83.
+     * las dos mitades**, y por eso un defecto del modo «Ambas» dejó en el aire
+     * L 11,979.17 de DOS clientes de Praderas el mismo día: el papel de uno
+     * decía L 24,000.00 y la base había movido L 17,020.83, y del otro solo
+     * preguntó el primero.
      *
      * Un descuadre no se ve distinto de un servidor sano —que es el criterio
      * de todo este comando—: nadie va a sumar los renglones de 262 recibos a
