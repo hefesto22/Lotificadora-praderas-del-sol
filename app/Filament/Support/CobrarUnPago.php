@@ -24,6 +24,7 @@ use App\Models\Recibo;
 use App\Models\Reprogramacion;
 use App\Models\User;
 use App\Models\Venta;
+use BezhanSalleh\FilamentShield\Support\Utils as Shield;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Filament\Actions\Action;
@@ -41,6 +42,7 @@ use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as Cuotas;
 use Illuminate\Support\Collection;
 use Illuminate\Support\HtmlString;
@@ -516,6 +518,14 @@ final readonly class CobrarUnPago
             'forma_pago'    => FormaDePago::Efectivo->value,
             'compromiso_id' => $this->primerLoteConSaldo()?->getKey(),
             'modalidad'     => ModalidadDeReprogramacion::AcortarPlazo->value,
+            /*
+             * ⚠️ Acá y NO en un `->default()` del campo: la acción llena el
+             * formulario con `fillForm()`, y ese arreglo ES el estado inicial —
+             * los `default()` de cada campo no se aplican. Ya estaba anotado
+             * unas líneas más abajo para la fecha; costó verlo en pantalla:
+             * el campo salía vacío con un `default()` perfectamente escrito.
+             */
+            'recibido_por' => $this->porDefectoQuienTeclea(),
         ];
 
         $lotes = $this->lotesQueDeben();
@@ -702,7 +712,6 @@ final readonly class CobrarUnPago
             Select::make('recibido_por')
                 ->label('¿Quién recibió el dinero?')
                 ->options(fn (): array => $this->quienesPuedenCobrar())
-                ->default(fn (): ?int => $this->porDefectoQuienTeclea())
                 /*
                  * ⚠️ NO lleva `required()`, y no es un olvido.
                  *
@@ -1330,10 +1339,22 @@ final readonly class CobrarUnPago
     /**
      * Quiénes pueden figurar como que recibieron el dinero.
      *
-     * Sale del PERMISO y no de una lista de nombres ni de un rol con nombre
-     * propio: `Create:Recibo` es exactamente «esta persona cobra». Así la
-     * administradora entra si cobra, y una lotificadora que arme sus roles de
-     * otra manera no tiene que tocar código (Ley L0).
+     * Sale del PERMISO y no de una lista de nombres: `Create:Recibo` es
+     * exactamente «esta persona cobra». Así la administradora entra porque
+     * cobra, y una lotificadora que arme sus roles de otra manera no tiene que
+     * tocar código (Ley L0).
+     *
+     * ═══ 🔴 MENOS EL SUPER-ADMIN (27-ago-2026) ═══
+     *
+     * «Mauricio Cruz no debe de aparecer ahí» — mirando la lista en pruebas.
+     * Y tiene razón: **el super-admin es la cuenta de quien hace el sistema, no
+     * personal de la caja de la lotificadora.** Tiene todos los permisos por
+     * definición, así que sin esto se cuela en cada pantalla que pregunte
+     * «¿quién de ustedes?».
+     *
+     * Se excluye por ROL y no por nombre —`Shield::getSuperAdminName()`—, que
+     * es lo único que sigue siendo verdad en la instalación de la próxima
+     * lotificadora.
      *
      * @return array<int, string>
      */
@@ -1342,36 +1363,28 @@ final readonly class CobrarUnPago
         /** @var array<int, string> $gente */
         $gente = User::query()
             ->permission('Create:Recibo')
+            ->whereDoesntHave('roles', static fn (Builder $rol): Builder => $rol->where('name', Shield::getSuperAdminName()))
             ->orderBy('name')
             ->pluck('name', 'id')
             ->all();
-
-        /*
-         * ⚠️ Quien está tecleando entra SIEMPRE, tenga o no el permiso por rol:
-         * está registrando un cobro en este preciso momento, así que decir que
-         * no puede haberlo recibido sería absurdo. Y de paso, esto es lo que
-         * evita que un permiso mal sembrado deje la lista vacía y con ella un
-         * campo obligatorio imposible de llenar.
-         */
-        $yo = auth()->user();
-
-        if ($yo instanceof User) {
-            $gente[(int) $yo->getKey()] = (string) $yo->getAttribute('name');
-        }
-
-        asort($gente);
 
         return $gente;
     }
 
     /**
-     * Quien está tecleando, que es el caso de todos los días.
+     * Quien está tecleando, para dejar el campo marcado.
+     *
+     * ⚠️ Solo si figura en la lista. Si el que abre el modal es el super-admin
+     * —o alguien sin el permiso—, el campo sale vacío y hay que elegir: es
+     * mejor que ponerle el nombre de quien no estuvo en la caja.
      */
     private function porDefectoQuienTeclea(): ?int
     {
         $yo = auth()->id();
 
-        return is_numeric($yo) ? (int) $yo : null;
+        return is_numeric($yo) && array_key_exists((int) $yo, $this->quienesPuedenCobrar())
+            ? (int) $yo
+            : null;
     }
 
     /**
