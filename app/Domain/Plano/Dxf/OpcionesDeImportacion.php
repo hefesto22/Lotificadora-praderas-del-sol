@@ -21,6 +21,21 @@ use App\Domain\Plano\ValidaMedidas;
  * el factor de la vara —que sigue pendiente de confirmar, ver pregunta 16
  * de docs/dominio.md— no toca el area de ningun lote.
  *
+ * `sufijosDeArea` decide de donde sale el AREA de cada lote. Vacio -el
+ * default- la calcula del contorno, que es lo unico posible cuando el
+ * plano no la rotula. Con las unidades adentro -['m2'], ['v2','vr2']- se
+ * lee el numero que escribio el topografo, y ESE es el que se guarda.
+ *
+ * La diferencia no es cosmetica: un lote con un lado curvo entra con el
+ * arco teselado, y una poligonal inscrita encierra siempre MENOS area que
+ * el arco. El G-7 de Altamira dice 314.16 m2 en el plano y su contorno da
+ * 314.02. El area multiplica al precio y sale impresa en la escritura, asi
+ * que cuando el plano la dice, la dice el plano. Ver RotuloDxf::areaRotulada().
+ *
+ * ⚠️ Se piden las unidades y no un booleano porque un plano rotula las DOS
+ * -«A=200.00m2» y «286.85v2» en el mismo lote- y hay que tomar la del
+ * proyecto, o cada lote entra con el area de la otra unidad.
+ *
  * `bloquePorRotulo` es para los planos que traen la manzana pegada al
  * numero ("A1", "B-7"): con la opcion prendida, cada lote entra en el
  * bloque que dice su rotulo y el bloque elegido en el formulario pasa a
@@ -39,6 +54,9 @@ final readonly class OpcionesDeImportacion
     /** @var numeric-string */
     public string $varaEnMetros;
 
+    /**
+     * @param list<string> $sufijosDeArea las unidades del rotulo de area: ['m2'], ['v2', 'vr2']
+     */
     public function __construct(
         public string $capaDeLotes,
         string $precioVara,
@@ -48,6 +66,7 @@ final readonly class OpcionesDeImportacion
         public bool $dibujadoEnVaras = false,
         string $varaEnMetros = '0.8359',
         public bool $bloquePorRotulo = false,
+        public array $sufijosDeArea = [],
     ) {
         if (trim($capaDeLotes) === '') {
             throw ValueObjectInvalidoException::paraCampo(
@@ -90,6 +109,11 @@ final readonly class OpcionesDeImportacion
     public function usaCapa(?string $capa, string $contra): bool
     {
         return $capa !== null && self::normalizar($capa) === self::normalizar($contra);
+    }
+
+    public function leeElAreaDelRotulo(): bool
+    {
+        return $this->sufijosDeArea !== [];
     }
 
     /**

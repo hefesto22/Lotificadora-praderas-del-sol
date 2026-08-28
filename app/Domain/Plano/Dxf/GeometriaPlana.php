@@ -138,7 +138,24 @@ final class GeometriaPlana
     }
 
     /**
-     * Promedio de los vertices. Alcanza para colgar una etiqueta.
+     * Promedio de los vertices.
+     *
+     * ⚠️ NO SIRVE PARA COLGAR UNA ETIQUETA, aunque lo dijo este docblock
+     * hasta el 25-ago-2026. Un promedio de vertices pondera por CUANTOS
+     * hay, no por donde estan: en un lote con un lado curvo, el arco entra
+     * teselado en 30 o 60 vertices y arrastra el promedio hacia esa
+     * pared. Medido sobre RESIDENCIAL ALTAMIRA, 268 lotes: 64 rotulos
+     * corridos mas de 1.5 m y TRES fuera de su propio lote -y como el
+     * rotulo se dibuja en blanco, afuera cae sobre la calle y desaparece-.
+     *
+     * En un cuadrilatero regular coincide con el centroide, y por eso el
+     * error vivio meses invisible: los 309 lotes de Praderas del Sol
+     * tienen cuatro vertices.
+     *
+     * Para poner una etiqueta va centroide(). Este metodo sigue existiendo
+     * porque el importador lo usa para otra cosa: decidir cual de los
+     * rotulos que caen ADENTRO de un contorno es el numero del lote, donde
+     * lo que importa es una referencia estable, no el centro de masa.
      *
      * @param list<array{float, float}> $puntos
      *
@@ -156,6 +173,59 @@ final class GeometriaPlana
             array_sum(array_map(static fn (array $p): float => $p[0], $puntos)) / $total,
             array_sum(array_map(static fn (array $p): float => $p[1], $puntos)) / $total,
         ];
+    }
+
+    /**
+     * Centro de masa del poligono: el punto donde se cuelga la etiqueta.
+     *
+     * Sale de los mismos productos cruzados que area(), ponderando cada
+     * arista por lo que encierra. Es INVARIANTE a como este teselado el
+     * contorno -da igual si una pared curva entro en cuatro segmentos o en
+     * sesenta-, que es exactamente lo que le falta a centro().
+     *
+     * Medido sobre los dos planos reales del sistema: de los 268 lotes de
+     * Altamira ninguno queda con el centroide afuera (con el promedio,
+     * tres), y el mas apretado tiene 4.60 m libres hasta su lindero mas
+     * cercano, contra los ~1.2 m que mide de alto el rotulo. En los 309 de
+     * Praderas del Sol la mediana del movimiento es CERO: sus lotes son
+     * cuadrilateros y ahi las dos formulas coinciden.
+     *
+     * Un poligono degenerado -area cero, o menos de tres vertices- no
+     * tiene centro de masa: ahi devuelve el promedio, que al menos es un
+     * punto del dibujo. No se inventa nada.
+     *
+     * @param list<array{float, float}> $puntos
+     *
+     * @return array{float, float}
+     */
+    public static function centroide(array $puntos): array
+    {
+        $total = count($puntos);
+
+        if ($total < 3) {
+            return self::centro($puntos);
+        }
+
+        $doble = 0.0;
+        $x = 0.0;
+        $y = 0.0;
+
+        for ($i = 0; $i < $total; $i++) {
+            [$x1, $y1] = $puntos[$i];
+            [$x2, $y2] = $puntos[($i + 1) % $total];
+
+            $cruz = ($x1 * $y2) - ($x2 * $y1);
+
+            $doble += $cruz;
+            $x += ($x1 + $x2) * $cruz;
+            $y += ($y1 + $y2) * $cruz;
+        }
+
+        if (abs($doble) < 1e-9) {
+            return self::centro($puntos);
+        }
+
+        return [$x / (3.0 * $doble), $y / (3.0 * $doble)];
     }
 
     /**

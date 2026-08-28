@@ -128,6 +128,7 @@ final readonly class ImportadorDeDxf
         $bloquePorDefecto = (string) $bloque->getAttribute('nombre');
 
         $candidatos = $this->candidatos($rotulos, $opciones);
+        $areasRotuladas = $this->areasRotuladas($rotulos, $opciones);
         $bloquesDelProyecto = $this->bloquesDelProyecto($proyectoId);
         $usados = $this->numerosOcupadosPorBloque($bloquesDelProyecto);
 
@@ -136,6 +137,7 @@ final readonly class ImportadorDeDxf
         $descartados = 0;
         $repetidos = 0;
         $conLetra = 0;
+        $sinAreaRotulada = 0;
         $areaTotal = 0.0;
 
         /** @var list<array{bloque: string, numero: string, area: string, puntos: list<array{float, float}>}> $planificados */
@@ -179,16 +181,41 @@ final readonly class ImportadorDeDxf
             }
 
             $usados[$destino][$numero] = true;
-            $areaTotal += $area;
+
+            /*
+             * EL AREA LA DICE EL PLANO, CUANDO EL PLANO LA DICE.
+             *
+             * El area es lo que se vende: multiplica al precio y sale
+             * impresa en la escritura. El contorno NO puede darla exacta
+             * cuando el lote tiene un lado curvo, porque el arco entra
+             * teselado y una poligonal inscrita encierra menos que el arco
+             * (ver GeometriaPlana::GRADOS_POR_SEGMENTO). Medido sobre
+             * ALTAMIRA el 25-ago-2026: el G-7 dice 314.16 m2 en el plano y
+             * su contorno da 314.02; el J-1 dice 296.72 y da 296.78.
+             *
+             * ⚠️ El numero del rotulo NO se transforma: ya viene en la
+             * unidad del negocio. El que se transforma es el DIBUJO.
+             */
+            $rotulada = $opciones->leeElAreaDelRotulo()
+                ? $this->areaPara($poligono, $areasRotuladas)
+                : null;
+
+            if ($opciones->leeElAreaDelRotulo() && $rotulada === null) {
+                $sinAreaRotulada++;
+            }
+
+            // El total suma lo que se va a guardar, no otra cosa.
+            $areaTotal += $rotulada === null ? $area : (float) $rotulada;
 
             $planificados[] = [
                 'bloque' => $destino,
                 'numero' => $numero,
-                // Unico lugar del sistema donde un area nace de un float:
-                // la fuente es geometria y no hay otra manera. Se fija a los
-                // 4 decimales de la columna en el momento de cruzar la
-                // frontera, y de ahi en adelante es string (§8.3.1).
-                'area'   => number_format($area, 4, '.', ''),
+                // Cuando sale del contorno es el unico lugar del sistema
+                // donde un area nace de un float: la fuente es geometria y
+                // no hay otra manera. Se fija a los 4 decimales de la
+                // columna al cruzar la frontera, y de ahi en adelante es
+                // string (§8.3.1). Cuando sale del rotulo NUNCA fue float.
+                'area'   => $rotulada ?? number_format($area, 4, '.', ''),
                 'puntos' => $puntos,
             ];
         }
@@ -215,6 +242,12 @@ final readonly class ImportadorDeDxf
 
         if ($descartados > 0) {
             $advertencias[] = "{$descartados} contornos se descartaron por tener area despreciable.";
+        }
+
+        if ($sinAreaRotulada > 0) {
+            $advertencias[] = "{$sinAreaRotulada} lotes no traian el area rotulada adentro y entraron ".
+                'con la medida del dibujo, que en un lado curvo queda corta. '.
+                'Cotejalos contra el plano impreso.';
         }
 
         if ($opciones->bloquePorRotulo && $conLetra === 0) {
@@ -280,6 +313,7 @@ final readonly class ImportadorDeDxf
             advertencias: $advertencias,
             lotesPorBloque: $lotesPorBloque,
             bloquesCreados: $bloquesCreados,
+            sinAreaRotulada: $sinAreaRotulada,
         );
     }
 
@@ -375,6 +409,77 @@ final readonly class ImportadorDeDxf
             if ($distancia < $distanciaMenor) {
                 $distanciaMenor = $distancia;
                 $mejor = ['numero' => $candidato['numero'], 'bloque' => $candidato['bloque']];
+            }
+        }
+
+        return $mejor;
+    }
+
+    /**
+     * Las areas que el topografo escribio adentro de los lotes.
+     *
+     * Se resuelven una sola vez, igual que candidatos() y por el mismo
+     * motivo: areaPara() las recorre todas por cada contorno.
+     *
+     * @param list<RotuloDxf> $rotulos
+     *
+     * @return list<array{area: numeric-string, x: float, y: float}>
+     */
+    private function areasRotuladas(array $rotulos, OpcionesDeImportacion $opciones): array
+    {
+        if (! $opciones->leeElAreaDelRotulo()) {
+            return [];
+        }
+
+        $areas = [];
+
+        foreach ($rotulos as $rotulo) {
+            if ($opciones->capaDeRotulos !== null && ! $opciones->usaCapa($rotulo->capa, $opciones->capaDeRotulos)) {
+                continue;
+            }
+
+            $area = $rotulo->areaRotulada($opciones->sufijosDeArea);
+
+            if ($area === null) {
+                continue;
+            }
+
+            $areas[] = ['area' => $area, 'x' => $rotulo->x, 'y' => $rotulo->y];
+        }
+
+        return $areas;
+    }
+
+    /**
+     * El area rotulada adentro de este contorno, o null si no hay ninguna.
+     *
+     * Misma regla que rotuloPara(): tiene que caer ADENTRO, y si hay varias
+     * gana la mas cercana al centro. Medido sobre los 268 lotes de
+     * ALTAMIRA, la contencion sola alcanza para los 268 — no hace falta
+     * ninguna heuristica de cercania, que es justo lo que no se quiere
+     * cuando el numero termina en una escritura.
+     *
+     * @param list<array{area: numeric-string, x: float, y: float}> $areas
+     *
+     * @return numeric-string|null
+     */
+    private function areaPara(PoligonoDxf $poligono, array $areas): ?string
+    {
+        [$centroX, $centroY] = $poligono->centro();
+
+        $mejor = null;
+        $distanciaMenor = INF;
+
+        foreach ($areas as $candidata) {
+            if (! $poligono->contiene($candidata['x'], $candidata['y'])) {
+                continue;
+            }
+
+            $distancia = hypot($candidata['x'] - $centroX, $candidata['y'] - $centroY);
+
+            if ($distancia < $distanciaMenor) {
+                $distanciaMenor = $distancia;
+                $mejor = $candidata['area'];
             }
         }
 

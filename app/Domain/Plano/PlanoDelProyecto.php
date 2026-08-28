@@ -8,6 +8,7 @@ use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\EstadoVenta;
 use App\Domain\Enums\TipoCalle;
 use App\Domain\Enums\UnidadDeArea;
+use App\Domain\Plano\Dxf\GeometriaPlana;
 use App\Domain\Ventas\CarteraDelPlano;
 use App\Models\Bloque;
 use App\Models\Calle;
@@ -500,9 +501,25 @@ final readonly class PlanoDelProyecto
     /**
      * Centro para colgar la etiqueta con el numero de lote.
      *
-     * Es el promedio de los vertices, no el centroide real del poligono.
-     * Para rectangulos coinciden, y para una forma irregular la etiqueta
-     * queda igual de bien puesta sin arrastrar la formula completa.
+     * ═══ 25-AGO-2026: ERA EL PROMEDIO DE LOS VERTICES, Y ESTABA MAL ═══
+     *
+     * Este docblock decia: «para una forma irregular la etiqueta queda
+     * igual de bien puesta sin arrastrar la formula completa». Era verdad
+     * mientras todos los lotes del sistema fueran cuadrilateros, y dejo de
+     * serlo el dia que entro un plano con esquinas curvas.
+     *
+     * Un promedio de vertices pondera por CUANTOS hay. La pared curva de
+     * un lote de esquina entra teselada en 30 o 60 vertices -ver
+     * GeometriaPlana::GRADOS_POR_SEGMENTO- y se lleva el promedio hacia
+     * ella. Lo reporto Mauricio mirando el plano de Altamira: «hay lotes
+     * donde no se ve bien el numero que les corresponde». Medido: 64 de
+     * 268 rotulos corridos mas de 1.5 m, y TRES fuera de su propio lote.
+     * Como el rotulo se dibuja en blanco, afuera cae sobre la calle y no
+     * se ve; el lote se queda sin numero.
+     *
+     * Con el centroide de area no queda ninguno afuera, y el mas apretado
+     * tiene 4.60 m libres hasta su lindero. Praderas del Sol no se mueve:
+     * la mediana de su corrimiento es cero.
      *
      * @param list<array{float, float}> $puntos
      *
@@ -510,10 +527,7 @@ final readonly class PlanoDelProyecto
      */
     private function centroDe(array $puntos): array
     {
-        $total = count($puntos);
-
-        $x = array_sum(array_map(static fn (array $p): float => $p[0], $puntos)) / $total;
-        $y = array_sum(array_map(static fn (array $p): float => $p[1], $puntos)) / $total;
+        [$x, $y] = GeometriaPlana::centroide($puntos);
 
         return [round($x, 3), round($y, 3)];
     }

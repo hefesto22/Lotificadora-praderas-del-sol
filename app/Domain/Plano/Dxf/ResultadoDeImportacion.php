@@ -13,6 +13,8 @@ final readonly class ResultadoDeImportacion
      * @param list<string> $advertencias
      * @param array<string, int> $lotesPorBloque cuantos lotes cayo en cada bloque
      * @param list<string> $bloquesCreados los que no existian y nacieron con la importacion
+     * @param int $sinAreaRotulada cuantos entraron con el area CALCULADA del contorno porque
+     *                             el plano no se la rotulaba (ver OpcionesDeImportacion)
      */
     public function __construct(
         public int $lotesCreados,
@@ -23,6 +25,7 @@ final readonly class ResultadoDeImportacion
         public array $advertencias,
         public array $lotesPorBloque = [],
         public array $bloquesCreados = [],
+        public int $sinAreaRotulada = 0,
     ) {}
 
     /**

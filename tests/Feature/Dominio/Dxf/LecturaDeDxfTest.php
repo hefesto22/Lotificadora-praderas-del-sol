@@ -381,3 +381,73 @@ describe('Lector — contra el plano de prueba completo', function (): void {
         }
     });
 });
+
+describe('DXF — el area que escribio el topografo', function (): void {
+    /*
+    | 25-ago-2026. Mauricio, con el plano de ALTAMIRA al lado de la
+    | pantalla: «no esta dando medidas exactas; ejemplo, ese es 314.16 la
+    | medida real, tiene que ser exacto».
+    |
+    | El area es lo que se VENDE: multiplica al precio y sale impresa en la
+    | escritura. Sacada del contorno no puede ser exacta cuando el lote
+    | tiene un lado curvo —el arco entra teselado y una poligonal inscrita
+    | encierra menos que el arco—: el G-7 daba 314.02 contra los 314.16 del
+    | plano, y el J-1 daba 296.78 contra 296.72.
+    |
+    | Cuando el plano dice el area, la dice el plano.
+    */
+
+    /**
+     * @param list<string> $sufijos
+     *
+     * @return list<?string>
+     */
+    function areasLeidas(string $texto, array $sufijos): array
+    {
+        $archivo = new LectorDxf()->leer(dxfConEntidades([
+            [0, 'TEXT'], [8, 'TEXTOS'], [10, '0'], [20, '0'], [40, '2'], [1, $texto],
+        ]));
+
+        return array_map(
+            static fn (RotuloDxf $rotulo): ?string => $rotulo->areaRotulada($sufijos),
+            new ExtractorDeGeometria()->rotulos($archivo)
+        );
+    }
+
+    test('lee el numero tal como lo escribio el topografo', function (): void {
+        // String y no float: «314.16» es exactamente 314.16 y el float no.
+        expect(areasLeidas('A=314.16m2', ['m2']))->toBe(['314.16'])
+            ->and(areasLeidas('A=157.63m2', ['m2']))->toBe(['157.63'])
+            ->and(areasLeidas('250 m2', ['m2']))->toBe(['250'])
+            ->and(areasLeidas('521.563V2', ['v2']))->toBe(['521.563'])
+            ->and(areasLeidas('286.85v2', ['v2', 'vr2']))->toBe(['286.85']);
+    });
+
+    test('toma la unidad del PROYECTO, no la primera que encuentre', function (): void {
+        /*
+        | 🔴 Es el caso que decide todo: un plano rotula las DOS areas del
+        | mismo lote —«A=200.00m2» arriba y «286.85v2» abajo—. Leer la que
+        | no es deja cada lote con el area de la otra unidad, que es un
+        | error del 43 % pasando por exacto.
+        */
+        expect(areasLeidas('A=200.00m2', ['v2', 'vr2']))->toBe([null])
+            ->and(areasLeidas('286.85v2', ['m2']))->toBe([null]);
+    });
+
+    test('una medida, un radio o un nombre no son un area', function (): void {
+        expect(areasLeidas('17.40m', ['m2']))->toBe([null])
+            ->and(areasLeidas('r=20.00m', ['m2']))->toBe([null])
+            ->and(areasLeidas('AREA MUNICIPAL', ['m2']))->toBe([null])
+            ->and(areasLeidas('A12', ['m2']))->toBe([null]);
+    });
+
+    test('sin unidades declaradas no lee ninguna area', function (): void {
+        // El default del importador: calcular el area del contorno, que es
+        // lo unico posible cuando el plano no la rotula.
+        expect(areasLeidas('A=314.16m2', []))->toBe([null]);
+    });
+
+    test('el separador de miles del dibujante no se cuela en el numero', function (): void {
+        expect(areasLeidas('A=1,234.56m2', ['m2']))->toBe(['1234.56']);
+    });
+});

@@ -966,33 +966,155 @@
                     const maxX = Math.max(...xs);
                     const minY = Math.min(...ys);
                     const maxY = Math.max(...ys);
-                    const cx = xs.reduce((a, b) => a + b, 0) / xs.length;
-                    const cy = ys.reduce((a, b) => a + b, 0) / ys.length;
+
+                    /*
+                       El centro es el CENTROIDE DE AREA, no el promedio de
+                       los vertices, y es la misma cuenta que hace
+                       GeometriaPlana::centroide() del lado de PHP.
+
+                       Un promedio pondera por CUANTOS vertices hay, no por
+                       donde estan: la pared curva de un lote de esquina
+                       llega teselada en decenas de vertices y se lleva el
+                       promedio con ella. De ahi salian las dos cosas que se
+                       veian mal el 25-ago-2026: el area escrita contra un
+                       lindero en vez del medio, y las normales de las cotas
+                       -que se orientan mirando este punto- apuntando para
+                       adentro del lote.
+                    */
+                    let doble = 0;
+                    let sumaX = 0;
+                    let sumaY = 0;
+
+                    for (let i = 0; i < puntos.length; i++) {
+                        const [x1, y1] = puntos[i];
+                        const [x2, y2] = puntos[(i + 1) % puntos.length];
+                        const cruz = (x1 * y2) - (x2 * y1);
+
+                        doble += cruz;
+                        sumaX += (x1 + x2) * cruz;
+                        sumaY += (y1 + y2) * cruz;
+                    }
+
+                    // Sin area no hay centro de masa: ahi vale el promedio,
+                    // que al menos es un punto del dibujo.
+                    const sinArea = Math.abs(doble) < 1e-9;
+                    const cx = sinArea ? xs.reduce((a, b) => a + b, 0) / xs.length : sumaX / (3 * doble);
+                    const cy = sinArea ? ys.reduce((a, b) => a + b, 0) / ys.length : sumaY / (3 * doble);
 
                     const diagonal = Math.hypot(maxX - minX, maxY - minY) || 1;
                     const separacion = diagonal * 0.055;
                     const fuente = diagonal * 0.05;
 
-                    const lados = [];
+                    /*
+                       UN LADO CURVO ES UN LADO, NO TREINTA Y CUATRO.
+
+                       ⚠️ Todo esto vive adentro del ATRIBUTO x-data, que
+                       va entre comillas dobles. Por eso ni un comentario
+                       puede llevar una: cierra el atributo y la pagina sale
+                       en blanco. Para citar algo se usan « ».
+
+                       El contorno llega con los arcos ya teselados a 3 grados
+                       por segmento -GeometriaPlana::GRADOS_POR_SEGMENTO-, asi
+                       que la esquina redondeada de radio 20 de un lote de
+                       Altamira son ~35 segmentos de 91 cm. Cotados uno por
+                       uno tapaban el croquis con decenas de «0.91 m» que
+                       ademas se salian del recuadro (lote RAL-E-008,
+                       25-ago-2026).
+
+                       Los segmentos que giran menos de 10 grados entre si son
+                       el MISMO lado: se juntan en un tramo y se cota su
+                       DESARROLLO, que es el numero que el topografo escribe
+                       sobre un arco. Medido sobre los dos planos: el peor
+                       lote de Altamira pasa de 34 cotas a 3, y los 309 de
+                       Praderas del Sol no se mueven. Diez grados y no mas:
+                       con quince empiezan a fundirse linderos quebrados de
+                       verdad.
+                    */
+                    const GIRO_DEL_MISMO_LADO = 10 * Math.PI / 180;
+                    const tramos = [];
 
                     for (let i = 0; i < puntos.length; i++) {
                         const a = puntos[i];
                         const b = puntos[(i + 1) % puntos.length];
-                        const dx = b[0] - a[0];
-                        const dy = b[1] - a[1];
-                        const largo = Math.hypot(dx, dy);
+                        const largo = Math.hypot(b[0] - a[0], b[1] - a[1]);
 
+                        if (largo < 1e-9) continue;
+
+                        const rumbo = Math.atan2(b[1] - a[1], b[0] - a[0]);
+                        const ultimo = tramos[tramos.length - 1];
+
+                        if (ultimo && Math.abs(this.giroEntre(ultimo.rumbo, rumbo)) < GIRO_DEL_MISMO_LADO) {
+                            ultimo.largo += largo;
+                            ultimo.rumbo = rumbo;
+                            ultimo.vertices.push(b);
+
+                            continue;
+                        }
+
+                        tramos.push({ largo, rumbo, arranque: rumbo, vertices: [a, b] });
+                    }
+
+                    /*
+                       El contorno es cerrado y puede haber empezado A LA
+                       MITAD de un arco: entonces el ultimo tramo y el
+                       primero son el mismo lado y hay que unirlos, o el
+                       croquis muestra el arco partido en dos cotas.
+                    */
+                    if (tramos.length > 1) {
+                        const cola = tramos[tramos.length - 1];
+
+                        if (Math.abs(this.giroEntre(cola.rumbo, tramos[0].arranque)) < GIRO_DEL_MISMO_LADO) {
+                            tramos.pop();
+                            tramos[0].largo += cola.largo;
+                            tramos[0].vertices = cola.vertices.concat(tramos[0].vertices.slice(1));
+                        }
+                    }
+
+                    const lados = [];
+
+                    for (const tramo of tramos) {
                         // Un lado de menos de 2% de la diagonal es ruido del
                         // trazado, no una medida que alguien vaya a cotar.
-                        if (largo < diagonal * 0.02) continue;
+                        if (tramo.largo < diagonal * 0.02) continue;
 
-                        const mx = (a[0] + b[0]) / 2;
-                        const my = (a[1] + b[1]) / 2;
+                        /*
+                           La etiqueta va a MITAD DEL DESARROLLO, caminando el
+                           tramo vertice por vertice. En un arco el medio de
+                           la cuerda cae por adentro del lote y la cota
+                           terminaria escrita encima del dibujo.
+                        */
+                        let recorrido = 0;
+                        let mx = tramo.vertices[0][0];
+                        let my = tramo.vertices[0][1];
+                        let dx = 1;
+                        let dy = 0;
+
+                        for (let i = 0; i < tramo.vertices.length - 1; i++) {
+                            const desde = tramo.vertices[i];
+                            const hasta = tramo.vertices[i + 1];
+                            const paso = Math.hypot(hasta[0] - desde[0], hasta[1] - desde[1]);
+
+                            dx = hasta[0] - desde[0];
+                            dy = hasta[1] - desde[1];
+
+                            if (recorrido + paso >= tramo.largo / 2 || i === tramo.vertices.length - 2) {
+                                const t = paso > 0 ? Math.min(1, Math.max(0, (tramo.largo / 2 - recorrido) / paso)) : 0;
+
+                                mx = desde[0] + dx * t;
+                                my = desde[1] + dy * t;
+
+                                break;
+                            }
+
+                            recorrido += paso;
+                        }
+
+                        const tangente = Math.hypot(dx, dy) || 1;
 
                         // Normal unitaria, girada hacia AFUERA: si apunta
                         // hacia el centro del lote se invierte.
-                        let nx = -dy / largo;
-                        let ny = dx / largo;
+                        let nx = -dy / tangente;
+                        let ny = dx / tangente;
 
                         if ((mx - cx) * nx + (my - cy) * ny < 0) { nx = -nx; ny = -ny }
 
@@ -1003,7 +1125,18 @@
                         if (angulo > 90) angulo -= 180;
                         if (angulo < -90) angulo += 180;
 
-                        lados.push({ a, b, mx, my, nx, ny, largo, angulo, extra: 0, texto: this.cota(largo) });
+                        lados.push({
+                            a: tramo.vertices[0],
+                            b: tramo.vertices[tramo.vertices.length - 1],
+                            mx,
+                            my,
+                            nx,
+                            ny,
+                            largo: tramo.largo,
+                            angulo,
+                            extra: 0,
+                            texto: this.cota(tramo.largo),
+                        });
                     }
 
                     /*
@@ -1095,6 +1228,24 @@
                    .content— y Alpine lo ignora en silencio. Ya paso una vez
                    con los rotulos del calco.
                 */
+                /**
+                 * Cuanto gira el rumbo `b` respecto del `a`, en radianes y
+                 * normalizado al rango [-PI, PI].
+                 *
+                 * Sin normalizar, dos segmentos casi identicos que cruzan el
+                 * corte de atan2 -uno a 179 grados y el otro a -179- se leen
+                 * como un giro de 358 grados en vez de 2, y el arco se corta
+                 * ahi en dos cotas.
+                 */
+                giroEntre(a, b) {
+                    let giro = b - a;
+
+                    while (giro > Math.PI) giro -= 2 * Math.PI;
+                    while (giro < -Math.PI) giro += 2 * Math.PI;
+
+                    return giro;
+                },
+
                 dibujarCotas(g) {
                     const NS = 'http://www.w3.org/2000/svg';
                     const figura = this.figura;

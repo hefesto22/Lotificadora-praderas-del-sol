@@ -84,6 +84,67 @@ final readonly class RotuloDxf
     }
 
     /**
+     * El AREA que dice el rotulo, tal como la escribio el topografo.
+     *
+     * ═══ POR QUE EL NUMERO IMPRESO Y NO EL DEL DIBUJO ═══
+     *
+     * Porque el area es lo que se vende: multiplica al precio y sale
+     * impresa en la escritura. Y el area que se saca del contorno NO puede
+     * ser exacta cuando el lote tiene un lado curvo: el arco entra
+     * teselado y una poligonal inscrita siempre encierra MENOS que el arco
+     * -ver GeometriaPlana::GRADOS_POR_SEGMENTO-.
+     *
+     * Medido sobre RESIDENCIAL ALTAMIRA el 25-ago-2026: el lote G-7 dice
+     * 314.16 m2 en el plano y el poligono da 314.02. Cuatro centesimas de
+     * porciento que no se pueden defender delante de un comprador con el
+     * plano del ingeniero en la mano. Mauricio: «no esta dando medidas
+     * exactas, tiene que ser exacto».
+     *
+     * Devuelve STRING y no float a proposito: es una medida que despues
+     * entra a bcmath (§8.3.1), y «314.16» es exactamente 314.16 mientras
+     * que el float no.
+     *
+     * ⚠️ El numero viene YA en la unidad del negocio -m2 o varas2 segun
+     * que sufijo se pida- y por eso NO se le aplica la transformacion del
+     * dibujo. El contorno esta en unidades de CAD; el rotulo, en las del
+     * contrato.
+     *
+     * @param list<string> $sufijos las unidades que cuentan: ['m2'] o ['v2', 'vr2']
+     *
+     * @return numeric-string|null
+     */
+    public function areaRotulada(array $sufijos): ?string
+    {
+        if ($sufijos === []) {
+            return null;
+        }
+
+        $unidades = implode('|', array_map(
+            static fn (string $sufijo): string => preg_quote($sufijo, '/'),
+            $sufijos,
+        ));
+
+        $forma = '/^\s*(?:A\s*=\s*)?([\d.,]+)\s*(?:'.$unidades.')\s*$/iu';
+
+        foreach ($this->lineas() as $linea) {
+            if (preg_match($forma, $linea, $partes) !== 1) {
+                continue;
+            }
+
+            // Los separadores de miles del dibujante: «1,234.56».
+            $numero = str_replace(',', '', $partes[1]);
+
+            if (! is_numeric($numero)) {
+                continue;
+            }
+
+            return $numero;
+        }
+
+        return null;
+    }
+
+    /**
      * El rotulo descompuesto, leyendo linea por linea.
      *
      * Linea por linea y no sobre el texto entero porque el numero suele
@@ -94,18 +155,7 @@ final readonly class RotuloDxf
      */
     private function partes(): ?array
     {
-        $lineas = preg_split('/\R/u', $this->texto);
-
-        if (! is_array($lineas)) {
-            $lineas = [$this->texto];
-        }
-
-        foreach ($lineas as $linea) {
-            $limpia = trim((string) preg_replace('/\s+/u', ' ', $linea));
-
-            if ($limpia === '') {
-                continue;
-            }
+        foreach ($this->lineas() as $limpia) {
 
             if (preg_match(self::FORMA_DE_ROTULO, $limpia, $partes) !== 1) {
                 continue;
@@ -135,5 +185,35 @@ final readonly class RotuloDxf
         }
 
         return null;
+    }
+
+    /**
+     * El texto partido en lineas limpias y sin las vacias.
+     *
+     * Linea por linea y no sobre el texto entero porque el numero suele
+     * venir arriba y el area abajo, en el mismo MTEXT: aplastar los saltos
+     * de linea con espacios haria que ninguna de las dos formas calce.
+     *
+     * @return list<string>
+     */
+    private function lineas(): array
+    {
+        $partido = preg_split('/\R/u', $this->texto);
+
+        if (! is_array($partido)) {
+            $partido = [$this->texto];
+        }
+
+        $lineas = [];
+
+        foreach ($partido as $linea) {
+            $limpia = trim((string) preg_replace('/\s+/u', ' ', (string) $linea));
+
+            if ($limpia !== '') {
+                $lineas[] = $limpia;
+            }
+        }
+
+        return $lineas;
     }
 }
