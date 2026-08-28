@@ -100,3 +100,103 @@ describe('Geometria — arcos por bulge', function (): void {
         expect(GeometriaPlana::arcoPorBulge(5.0, 5.0, 5.0, 5.0, 1.0))->toBe([]);
     });
 });
+
+/**
+ * Un cuarto de disco de radio 20, con el arco partido en `segmentos`.
+ *
+ * Es la forma de un lote de esquina de los que trajo RESIDENCIAL
+ * ALTAMIRA, y sirve de patron porque su centro de masa se sabe de
+ * memoria: 4r/3pi en cada eje, o sea 8.4883.
+ *
+ * @return list<array{float, float}>
+ */
+function cuartoDeDiscoTeselado(int $segmentos): array
+{
+    $puntos = [[0.0, 0.0]];
+
+    for ($paso = 0; $paso <= $segmentos; $paso++) {
+        $angulo = M_PI_2 * ($paso / $segmentos);
+
+        $puntos[] = [20.0 * cos($angulo), 20.0 * sin($angulo)];
+    }
+
+    return $puntos;
+}
+
+describe('Geometria — el centro del que se cuelga el rotulo', function (): void {
+    /*
+    | 25-ago-2026. Mauricio, mirando el plano de RESIDENCIAL ALTAMIRA:
+    | «hay lotes donde no se ve bien el numero que les corresponde».
+    |
+    | El rotulo se colgaba del PROMEDIO de los vertices, que pondera por
+    | cuantos hay y no por donde estan. La pared curva de un lote de
+    | esquina entra teselada en decenas de vertices y se lleva el promedio
+    | con ella: 64 de 268 rotulos corridos mas de 1.5 m, y tres FUERA de
+    | su propio lote. Como el rotulo se dibuja en blanco, afuera cae sobre
+    | la calle y el lote se queda sin numero.
+    */
+
+    /** 4r/3pi con r = 20. El centro de masa de un cuarto de disco. */
+    $exacto = 4.0 * 20.0 / (3.0 * M_PI);
+
+    test('el promedio se sigue moviendo cuanto mas fino se tesela el arco', function () use ($exacto): void {
+        /*
+        | Esta es la prueba de que el promedio no mide lo que dice medir:
+        | la FIGURA no cambia entre estas tres, solo cuantos vertices la
+        | describen, y el promedio se corre mas de una unidad mientras
+        | tanto.
+        */
+        [$ocho] = GeometriaPlana::centro(cuartoDeDiscoTeselado(8));
+        [$cuarenta] = GeometriaPlana::centro(cuartoDeDiscoTeselado(40));
+        [$ciento] = GeometriaPlana::centro(cuartoDeDiscoTeselado(120));
+
+        expect($ocho)->toBeLessThan($cuarenta)
+            ->and($cuarenta)->toBeLessThan($ciento)
+            ->and($ciento - $ocho)->toBeGreaterThan(1.0)
+            // Y los tres estan lejos del centro de masa de verdad.
+            ->and($cuarenta - $exacto)->toBeGreaterThan(3.0);
+    });
+
+    test('el centroide da el centro de masa, y no le importa la teselacion', function () use ($exacto): void {
+        foreach ([8, 40, 120] as $segmentos) {
+            [$x, $y] = GeometriaPlana::centroide(cuartoDeDiscoTeselado($segmentos));
+
+            expect(abs($x - $exacto))->toBeLessThan(0.05)
+                ->and(abs($y - $exacto))->toBeLessThan(0.05);
+        }
+    });
+
+    test('en la figura en L el promedio cae en el hueco y el centroide no', function (): void {
+        /*
+        | El mismo ele de «mide bien una figura concava». El promedio de
+        | sus seis vertices da (4.67, 4.67), que es justo el pedazo que la
+        | figura NO tiene. Ahi el numero del lote se dibuja sobre la calle.
+        */
+        $ele = [[0.0, 0.0], [10.0, 0.0], [10.0, 4.0], [4.0, 4.0], [4.0, 10.0], [0.0, 10.0]];
+
+        [$px, $py] = GeometriaPlana::centro($ele);
+        [$cx, $cy] = GeometriaPlana::centroide($ele);
+
+        expect(GeometriaPlana::contiene($ele, $px, $py))->toBeFalse()
+            ->and(GeometriaPlana::contiene($ele, $cx, $cy))->toBeTrue();
+    });
+
+    test('en un cuadrilatero regular da exactamente lo mismo que el promedio', function (): void {
+        /*
+        | Los 309 lotes de Praderas del Sol tienen cuatro vertices. Este
+        | test es la promesa de que arreglar Altamira no les mueve el
+        | rotulo ni un milimetro.
+        */
+        $cuadrado = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]];
+
+        expect(GeometriaPlana::centroide($cuadrado))->toBe(GeometriaPlana::centro($cuadrado))
+            ->and(GeometriaPlana::centroide($cuadrado))->toBe([5.0, 5.0]);
+    });
+
+    test('un poligono sin area devuelve el promedio en vez de romperse', function (): void {
+        // Tres puntos alineados encierran area cero: la formula se
+        // dividiria por cero. Ahi vale mas un punto del dibujo que un NaN.
+        expect(GeometriaPlana::centroide([[0.0, 0.0], [5.0, 0.0], [10.0, 0.0]]))->toBe([5.0, 0.0])
+            ->and(GeometriaPlana::centroide([[3.0, 4.0], [3.0, 4.0]]))->toBe([3.0, 4.0]);
+    });
+});
