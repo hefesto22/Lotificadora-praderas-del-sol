@@ -62,6 +62,35 @@ return [
             'application_name' => env('APP_NAME', 'Laravel'),
         ],
 
+        /*
+        | La MISMA base, pero sin PgBouncer en el medio.
+        |
+        | PgBouncer agrupa por TRANSACCION y reusa la conexion entre
+        | clientes distintos: lo que vive fuera de una transaccion no
+        | sobrevive. Una migracion toma locks y usa sesion; un worker de
+        | cola vive horas. Los dos van por aca, al puerto directo de
+        | Postgres. Las peticiones web siguen por el pool, que es para lo
+        | que sirve.
+        |
+        | Sin DB_DIRECT_PORT cae al mismo puerto que 'pgsql': en local las
+        | dos conexiones son la misma cosa y no hay nada que recordar.
+        */
+        'pgsql_direct' => [
+            'driver'           => 'pgsql',
+            'url'              => env('DB_DIRECT_URL'),
+            'host'             => env('DB_HOST', '127.0.0.1'),
+            'port'             => env('DB_DIRECT_PORT', env('DB_PORT', '5442')),
+            'database'         => env('DB_DATABASE', 'praderas_dev'),
+            'username'         => env('DB_USERNAME', 'postgres'),
+            'password'         => env('DB_PASSWORD', ''),
+            'charset'          => env('DB_CHARSET', 'utf8'),
+            'prefix'           => '',
+            'prefix_indexes'   => true,
+            'search_path'      => env('DB_SCHEMA', 'public'),
+            'sslmode'          => env('DB_SSLMODE', 'prefer'),
+            'application_name' => env('APP_NAME', 'Laravel'),
+        ],
+
     ],
 
     /*
@@ -121,6 +150,30 @@ return [
             'password'          => env('REDIS_PASSWORD'),
             'port'              => env('REDIS_PORT', '6389'),
             'database'          => env('REDIS_CACHE_DB', '1'),
+            'max_retries'       => env('REDIS_MAX_RETRIES', 3),
+            'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
+            'backoff_base'      => env('REDIS_BACKOFF_BASE', 100),
+            'backoff_cap'       => env('REDIS_BACKOFF_CAP', 1000),
+        ],
+
+        /*
+        | Las colas NO viven donde vive la cache.
+        |
+        | Un Redis de cache se configura para DESALOJAR cuando se llena
+        | (allkeys-lru). Un trabajo encolado ahi se puede evaporar sin
+        | error y sin registro: el cobro que iba a facturar simplemente no
+        | ocurre. Por eso hay un Redis aparte para las colas.
+        |
+        | Sin las REDIS_QUEUE_* cae en el mismo Redis que todo lo demas:
+        | en local sigue siendo una sola instancia.
+        */
+        'queue' => [
+            'url'               => env('REDIS_QUEUE_URL'),
+            'host'              => env('REDIS_QUEUE_HOST', env('REDIS_HOST', '127.0.0.1')),
+            'username'          => env('REDIS_QUEUE_USERNAME', env('REDIS_USERNAME')),
+            'password'          => env('REDIS_QUEUE_PASSWORD', env('REDIS_PASSWORD')),
+            'port'              => env('REDIS_QUEUE_PORT', env('REDIS_PORT', '6389')),
+            'database'          => env('REDIS_QUEUE_DB', '2'),
             'max_retries'       => env('REDIS_MAX_RETRIES', 3),
             'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
             'backoff_base'      => env('REDIS_BACKOFF_BASE', 100),
