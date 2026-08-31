@@ -2,10 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\ModalidadDeReprogramacion;
 use App\Domain\Pagos\RegistroDePagos;
 use App\Domain\ValueObjects\Monto;
+use App\Domain\Ventas\RegistroDeCompromisos;
 use App\Domain\Ventas\RegistroDeVentas;
 use App\Models\Bloque;
 use App\Models\Cliente;
@@ -13,6 +15,7 @@ use App\Models\Cuota;
 use App\Models\ImpresionDeRecibo;
 use App\Models\Lote;
 use App\Models\Proyecto;
+use App\Models\Recibo;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Spatie\Permission\PermissionRegistrar;
@@ -31,7 +34,9 @@ use Spatie\Permission\PermissionRegistrar;
 */
 
 beforeEach(function (): void {
-    actingAsAdmin();
+    // Con nombre: desde el 31-ago el papel dice quién recibió el dinero, y
+    // quien teclea es quien recibe mientras nadie diga otra cosa.
+    $this->usuario = actingAsAdmin();
 
     $proyecto = Proyecto::factory()->create(['codigo' => 'RPS']);
     $bloque = Bloque::factory()->create(['proyecto_id' => $proyecto->getKey(), 'nombre' => 'A']);
@@ -241,6 +246,158 @@ test('el recibo de un abono imprime sus dos renglones', function (): void {
         ->assertSee('Abono a capital')
         ->assertSee('L. 60,000.00')
         ->assertSee('L. 100,000.00');
+});
+
+/*
+|--------------------------------------------------------------------------
+| 🔴 Quién recibió el dinero — 31-ago-2026
+|--------------------------------------------------------------------------
+| «También debe de decir el nombre de la persona que recibió el dinero»
+| — Mauricio, mirando el RPS-00000008.
+|
+| El sistema lo sabía desde el 27-ago (R24) y el corte de caja del día cuenta
+| por él. Lo que faltaba era que lo dijera el papel que se lleva el cliente.
+*/
+test('el papel dice quién recibió el dinero, arriba y en la firma', function (): void {
+    $nombre = (string) $this->usuario->getAttribute('name');
+
+    ($this->papel)()
+        ->assertOk()
+        ->assertSee('Recibido por')
+        // Las dos rayas del final dejan de ser anónimas: en un recibo el
+        // dinero ENTRA, así que «recibí» es la lotificadora y «entregué», quien pagó.
+        ->assertSee('Recibí conforme — '.$nombre)
+        ->assertSee('Entregué conforme — '.$this->cliente->getAttribute('nombre'));
+});
+
+/*
+|--------------------------------------------------------------------------
+| 🔴 El recibo de la PRIMA — 31-ago-2026
+|--------------------------------------------------------------------------
+| «Acá en lote aparece solo una línea en el recibo» y «que salga cuánto le
+| queda por pagar, que cuando es recibo por prima no sale» — Mauricio.
+|
+| Las dos cosas tenían la misma causa: la prima se pacta por el CONTRATO
+| aunque el expediente lleve tres lotes (R5), así que su recibo va sin
+| `compromiso_id` y sin aplicaciones. Preguntar «qué lotes tocó» devolvía la
+| lista vacía, y de ahí salían el rótulo Y el saldo.
+|
+| La pregunta del papel es otra: de qué lotes HABLA.
+*/
+describe('El recibo de la prima', function (): void {
+    beforeEach(function (): void {
+        // `activar()` ya emitió este recibo: se busca por su venta y su
+        // concepto, nunca con un `firstOrFail()` pelado.
+        $this->prima = Recibo::query()
+            ->where('venta_id', '=', $this->venta->getKey())
+            ->where('concepto', '=', ConceptoDeRecibo::Prima->value)
+            ->firstOrFail();
+
+        $this->papelDeLaPrima = fn () => $this->get(route('documentos.recibo', $this->prima));
+    });
+
+    test('dice de qué lote es, aunque la prima no toque ninguno', function (): void {
+        ($this->papelDeLaPrima)()
+            ->assertOk()
+            ->assertSee((string) $this->renglon->lote?->getAttribute('codigo'));
+    });
+
+    /*
+    | `montoACapital()` es una RESTA —lo cobrado menos lo aplicado a cuotas—,
+    | así que en un recibo de prima da el papel entero. El renglón existía para
+    | el abono del R21 y salía con ese nombre acá: un papel diciéndole al
+    | cliente que su saldo bajó por fuera del plan.
+    */
+    test('no le llama «abono a capital» a la prima', function (): void {
+        ($this->papelDeLaPrima)()
+            ->assertOk()
+            ->assertSee('Prima')
+            ->assertDontSee('Abono a capital')
+            ->assertSee('L. 50,000.00');
+    });
+
+    /*
+    | Es el saldo de HOY, no el del día que se firmó: los 300,000 financiados
+    | menos los 60,000 que el `beforeEach` ya cobró. Por eso el papel lleva al
+    | lado la fecha de impresión.
+    */
+    test('dice cuánto le queda por pagar', function (): void {
+        ($this->papelDeLaPrima)()
+            ->assertOk()
+            ->assertSee('Le queda por pagar')
+            ->assertSee('L. 240,000.00');
+    });
+
+    /*
+    | 🔴 El corte de caja del día agrupa por `recibido_por`. Hasta hoy la prima
+    | no lo escribía —solo lo hacía el modal de cobro— y el arqueo la sumaba
+    | bajo «Sin usuario». El default se mudó al modelo justamente para que
+    | ningún camino nuevo se olvide.
+    */
+    test('queda anotada a nombre de quien la recibió', function (): void {
+        expect((int) $this->prima->getAttribute('recibido_por'))
+            ->toBe((int) $this->usuario->getKey());
+    });
+
+    test('con dos lotes los nombra a los dos, en plural', function (): void {
+        $proyecto = Proyecto::factory()->create(['codigo' => 'RDL']);
+        $bloque = Bloque::factory()->create(['proyecto_id' => $proyecto->getKey(), 'nombre' => 'D']);
+
+        $lotes = [
+            Lote::factory()->enBloque($bloque)->conMedidas('250.0000', '1400.00')->create(['numero' => '1']),
+            Lote::factory()->enBloque($bloque)->conMedidas('250.0000', '1400.00')->create(['numero' => '2']),
+        ];
+
+        $venta = app(RegistroDeVentas::class)->activar(
+            proyecto: $proyecto,
+            lotes: $lotes,
+            clientes: [$this->cliente],
+            prima: new Monto('100000.00'),
+            plazoMeses: 12,
+            diaPago: 5,
+        );
+
+        $prima = Recibo::query()
+            ->where('venta_id', '=', $venta->getKey())
+            ->where('concepto', '=', ConceptoDeRecibo::Prima->value)
+            ->firstOrFail();
+
+        $papel = $this->get(route('documentos.recibo', $prima))->assertOk()->assertSee('Lotes');
+
+        foreach ($venta->compromisos as $renglon) {
+            $papel->assertSee((string) $renglon->lote?->getAttribute('codigo'));
+        }
+    });
+});
+
+/*
+| La otra mitad de la misma regla: un lote SIN plan de cuotas no promete un
+| saldo. El apartado todavía no tiene plan, y sumar cero ahí daría «le queda
+| por pagar L 0.00» a alguien que debe el lote entero.
+|
+| Y su renglón se llama como su concepto, igual que el de la prima.
+*/
+test('el recibo de la seña no le llama abono a capital ni promete un saldo que no existe', function (): void {
+    $proyecto = Proyecto::factory()->create(['codigo' => 'RSN']);
+    $bloque = Bloque::factory()->create(['proyecto_id' => $proyecto->getKey(), 'nombre' => 'S']);
+    $lote = Lote::factory()->enBloque($bloque)->conMedidas('250.0000', '1400.00')->create(['numero' => '7']);
+
+    $apartado = app(RegistroDeCompromisos::class)->apartar(
+        lote: $lote,
+        cliente: $this->cliente,
+        montoSenia: '5000.00',
+        forma: FormaDePago::Efectivo,
+    );
+
+    $senia = Recibo::query()
+        ->where('compromiso_id', '=', $apartado->getKey())
+        ->firstOrFail();
+
+    $this->get(route('documentos.recibo', $senia))
+        ->assertOk()
+        ->assertSee('Seña del apartado')
+        ->assertDontSee('Abono a capital')
+        ->assertDontSee('Le queda por pagar');
 });
 
 describe('Quién puede sacar el papel', function (): void {

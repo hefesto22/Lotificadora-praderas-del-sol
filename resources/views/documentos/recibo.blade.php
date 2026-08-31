@@ -298,6 +298,25 @@
                 @endif
             </div>
         </div>
+        {{-- Quién recibió el dinero — 31-ago-2026.
+
+             «También debe de decir el nombre de la persona que recibió el
+             dinero» — Mauricio. El sistema ya lo sabía (R24, 27-ago) y el
+             corte de caja del día cuenta por él; lo que faltaba era que el
+             papel del cliente lo dijera.
+
+             Va ACA ARRIBA y no solo en la firma: cuando alguien vuelve con un
+             reclamo, «a quién le pagué» se busca entre los datos, no entre
+             las rayas del final.
+
+             Sale solo si se sabe. Los recibos de la cartera vieja se cargaron
+             sin sesión, y ahí el papel no inventa un nombre. --}}
+        @if ($recibio)
+            <div class="dato">
+                <div class="rotulo">Recibido por</div>
+                <div class="valor">{{ $recibio }}</div>
+            </div>
+        @endif
     </div>
 
     {{-- La factura imprime SIEMPRE su detalle. Un recibo de prima o de seña no
@@ -346,9 +365,15 @@
                         capital con el sobrante. Los dos renglones se imprimen,
                         o el cliente no entiende por qué pagó L 100,000.00 y sus
                         cuotas solo bajaron L 50,000.00.
+
+                        🔴 El nombre del renglón sale del CONCEPTO del recibo y
+                        no está escrito acá — 31-ago-2026. `montoACapital()` es
+                        una resta, así que en un recibo de prima o de seña da el
+                        papel entero y este renglón salía llamándole «abono a
+                        capital» a una prima. Ver `Recibo::rotuloDelSobrante()`.
                     --}}
                     <tr class="capital">
-                        <td>Abono a capital</td>
+                        <td>{{ $recibo->rotuloDelSobrante() }}</td>
                         <td>—</td>
                         @if ($recibo->esFactura())
                             <td>1</td>
@@ -519,9 +544,18 @@
         <p class="nota">Documento de uso interno.</p>
     @endif
 
+    {{-- Las dos firmas dicen QUIENES son — 31-ago-2026.
+
+         En un recibo el dinero ENTRA: firma «recibí» quien lo recibió por la
+         lotificadora, y «entregué» quien lo pagó. (En el acta de devolución el
+         dinero SALE, así que ahí los dos papeles están al revés — y esa ya
+         dice de quién es cada raya desde el 14-ago.)
+
+         Una raya sin nombre no identifica a nadie: dos meses después, la firma
+         de quien recibió no la reconoce ni quien la hizo. --}}
     <div class="firmas">
-        <div class="firma">Recibí conforme</div>
-        <div class="firma">Entregué conforme</div>
+        <div class="firma">Recibí conforme{{ $recibio === null ? '' : ' — '.$recibio }}</div>
+        <div class="firma">Entregué conforme{{ $recibo->nombreDelPapel() === '—' ? '' : ' — '.$recibo->nombreDelPapel() }}</div>
     </div>
 
     <div class="corte"></div>

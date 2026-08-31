@@ -63,19 +63,34 @@ final readonly class ImprimirReciboController
     {
         Gate::authorize('view', $recibo);
 
-        $recibo->load(['cliente', 'venta', 'compromiso.lote', 'aplicaciones.cuota.compromiso.lote', 'facturacion']);
+        /*
+         * `venta.compromisos.lote` no estaba, y desde el 31-ago hace falta: el
+         * papel de la prima nombra los lotes del CONTRATO, porque la prima no
+         * toca ninguno (ver `Recibo::compromisosDelPapel()`). Sin esto, cada
+         * llamada del rótulo volvía a la base.
+         *
+         * `recibidoPor` y `createdBy`, por el renglón «Recibido por» y por la
+         * firma.
+         */
+        $recibo->load([
+            'cliente', 'venta', 'venta.compromisos.lote', 'compromiso.lote',
+            'aplicaciones.cuota.compromiso.lote', 'facturacion', 'recibidoPor', 'createdBy',
+        ]);
 
         $saldos = $this->saldosPorLote($recibo);
 
         // `variosLotes`: con un solo lote el rótulo del papel va en singular
-        // y el detalle no repite el código en cada renglón.
+        // y el detalle no repite el código en cada renglón. Se pregunta por
+        // los lotes que el papel NOMBRA —no solo los que tocó—, que es lo que
+        // hace que el recibo de la prima diga «Lotes» cuando son tres.
         return view('documentos.recibo', [
             'recibo'          => $recibo,
             'impresion'       => $this->impresiones->registrar($recibo),
             'emisor'          => $this->emisorDe($recibo, $this->proyectoDe($recibo)),
             'enLetras'        => MontoEnLetras::de($recibo->montoTotal()),
             'aCapital'        => $recibo->montoACapital(),
-            'variosLotes'     => $recibo->tocaVariosLotes(),
+            'variosLotes'     => $recibo->nombraVariosLotes(),
+            'recibio'         => $recibo->nombreDeQuienRecibio(),
             'saldos'          => $saldos,
             'saldoTotal'      => $this->totalDe($saldos),
             'logo'            => $this->logo(),
@@ -225,8 +240,21 @@ final readonly class ImprimirReciboController
      * sin aparecer.
      *
      * La causa: esto leía `$recibo->compromiso`, que en un cobro de varios
-     * lotes queda vacío a propósito (R13). Ahora la pregunta se la hace a
-     * `Recibo::compromisosTocados()`, que es donde vive esa regla.
+     * lotes queda vacío a propósito (R13). Ahora la pregunta se la hace al
+     * modelo, que es donde vive esa regla.
+     *
+     * ═══ Y EL DE LA PRIMA TAMPOCO LO IMPRIMIA — 31-ago-2026 ═══
+     *
+     * «Y también que salga cuánto le queda por pagar, que cuando es recibo por
+     * prima no sale» — Mauricio. Por lo mismo: la prima no toca ningún lote,
+     * así que no había ninguno del cual sacar el saldo. La pregunta pasa a ser
+     * `compromisosDelPapel()`: los lotes de los que el papel HABLA.
+     *
+     * ⚠️ UN LOTE SIN PLAN DE CUOTAS NO IMPRIME LINEA. La seña de un apartado
+     * cuelga de un compromiso que todavía no tiene cuotas, y sumar cero ahí
+     * daría «le queda por pagar L 0.00» a alguien que debe el lote entero. Lo
+     * mismo en una venta de contado, que se paga toda al firmar. Cero cuotas
+     * no es cero saldo: es que todavía no hay plan del cual hablar.
      *
      * ═══ ES EL SALDO DE HOY, Y EL PAPEL LO DICE ═══
      *
@@ -241,10 +269,16 @@ final readonly class ImprimirReciboController
     {
         $saldos = [];
 
-        foreach ($recibo->compromisosTocados() as $lote) {
+        foreach ($recibo->compromisosDelPapel() as $lote) {
+            $cuotas = $lote->cuotas()->get();
+
+            if ($cuotas->isEmpty()) {
+                continue;
+            }
+
             $saldo = Monto::cero();
 
-            foreach ($lote->cuotas()->get() as $cuota) {
+            foreach ($cuotas as $cuota) {
                 $saldo = $saldo->sumar($cuota->saldo());
             }
 

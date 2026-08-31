@@ -69,7 +69,34 @@ final readonly class RegistroDeVentas
         private ConsumoDeFacturas $facturas,
         private RegistroDeCompromisos $compromisos,
         private ListaDePrecios $lista,
+        private ?int $recibidoPor = null,
     ) {}
+
+    /**
+     * Quién recibió la prima, cuando no es quien teclea (R24).
+     *
+     * «Y cuando se vende también quién recibe el dinero» — Mauricio,
+     * 31-ago-2026. La prima se cobra al firmar y sale con su recibo: es la
+     * entrada de dinero más grande del sistema y hasta hoy era la única que no
+     * decía de quién era.
+     *
+     *     $ventas->loRecibio($id)->activar(...)
+     *
+     * ⚠️ Se la pasa TAMBIÉN a `$this->compromisos`. Hoy ese colaborador no
+     * emite ningún papel desde acá —solo crea el renglón del contrato—, pero
+     * el día que emita uno, la lección del 31-ago dice qué pasaría si no se lo
+     * pasáramos: un recibo sin dueño en el corte de caja.
+     */
+    public function loRecibio(?int $usuario): self
+    {
+        return new self(
+            $this->correlativos,
+            $this->facturas,
+            $this->compromisos->loRecibio($usuario),
+            $this->lista,
+            $usuario,
+        );
+    }
 
     /**
      * Registra una venta firme y devuelve el expediente ya numerado.
@@ -338,6 +365,12 @@ final readonly class RegistroDeVentas
         $factura = $this->facturas->paraElProyecto($venta->proyecto);
         $delTalonario = $this->correlativos->paraUnReciboNuevo($venta->proyecto, $deLaCarteraVieja);
 
+        /*
+         * ⚠️ `recibido_por` (R24). Queda en null cuando nadie eligió, y ahí lo
+         * llena `Recibo::booted()` con quien teclea — que es lo que este camino
+         * hizo hasta el 31-ago-2026, y por eso el corte de caja del día sumaba
+         * la prima del día bajo «Sin usuario».
+         */
         Recibo::query()->create([
             'numero'        => $delTalonario['numero'],
             'serie'         => $delTalonario['serie'],
@@ -353,6 +386,7 @@ final readonly class RegistroDeVentas
                 $prima->formateado(),
                 $senias->formateado(),
             ),
+            'recibido_por' => $this->recibidoPor,
             /*
              * ═══ LA FACTURA CON CAI, DESDE EL 14-AGO-2026 ═══
              *

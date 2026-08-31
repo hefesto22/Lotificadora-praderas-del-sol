@@ -53,7 +53,34 @@ final readonly class RegistroDeCompromisos
     public function __construct(
         private ConsumoDeCorrelativos $correlativos,
         private ConsumoDeFacturas $facturas,
+        private ?int $recibidoPor = null,
     ) {}
+
+    /**
+     * Quién recibió la seña, cuando no es quien teclea (R24).
+     *
+     * «Acá en apartar que se coloque quién recibe el dinero» — Mauricio,
+     * 31-ago-2026. La seña se cobra en el momento y sale con su recibo
+     * numerado: el billete lo tiene quien atendió, y el arqueo del día es de
+     * quien lo tiene en la mano.
+     *
+     * Se lee así en el llamador, igual que en el cobro:
+     *
+     *     $compromisos->loRecibio($id)->apartarVarios(...)
+     *
+     * Mismo molde que `RegistroDePagos::loRecibio()` y por las mismas razones:
+     * es un dato que no participa de ningún cálculo —solo se escribe en la
+     * fila— y meterlo como parámetro obligaría a atravesar métodos que no
+     * tienen nada que ver con él. La clase es `readonly`: esto devuelve una
+     * instancia NUEVA y no muta nada.
+     *
+     * Y el modo de fallar es el correcto: si nadie lo llama, el recibo lo
+     * escribe `Recibo::booted()` con quien teclea.
+     */
+    public function loRecibio(?int $usuario): self
+    {
+        return new self($this->correlativos, $this->facturas, $usuario);
+    }
 
     /**
      * Aparta un lote disponible a nombre de un cliente.
@@ -1025,6 +1052,12 @@ final readonly class RegistroDeCompromisos
         $factura = $this->facturas->paraElProyecto($compromiso->proyecto);
         $delTalonario = $this->correlativos->paraUnReciboNuevo($compromiso->proyecto);
 
+        /*
+         * ⚠️ `recibido_por` (R24). Queda en null cuando nadie eligió, y ahí lo
+         * llena `Recibo::booted()` con quien teclea — que es lo que este camino
+         * hizo hasta el 31-ago-2026, y por eso el corte de caja del día sumaba
+         * las señas del día bajo «Sin usuario».
+         */
         Recibo::query()->create([
             'numero'        => $delTalonario['numero'],
             'serie'         => $delTalonario['serie'],
@@ -1036,6 +1069,7 @@ final readonly class RegistroDeCompromisos
             'monto'         => $senia->redondeado(),
             'fecha'         => $compromiso->getAttribute('fecha'),
             'observaciones' => $observaciones,
+            'recibido_por'  => $this->recibidoPor,
             /*
              * ═══ LA FACTURA CON CAI, DESDE EL 14-AGO-2026 ═══
              *

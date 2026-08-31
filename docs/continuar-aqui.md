@@ -1,7 +1,538 @@
-# Continuar acá — 22-ago-2026
+# Continuar acá — 31-ago-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 🔴 31-ago — El recibo de la prima: sin lote, sin saldo, y con el nombre equivocado
+
+**Lo vio Mauricio en `pruebas`, mirando el RPS-00000008:** «acá en lote aparece
+solo una línea en el recibo, y también debe de decir el nombre de la persona
+que recibió el dinero», y «que salga cuánto le queda por pagar, que cuando es
+recibo por prima no sale».
+
+**Tres de las cuatro cosas eran la MISMA causa.** La prima se pacta por el
+CONTRATO aunque el expediente lleve tres lotes (R5), así que su recibo va sin
+`compromiso_id` y sin aplicaciones — a propósito. Todo el papel preguntaba
+«¿qué lotes tocó este recibo?», que ahí devuelve la lista vacía:
+
+| Salía | Por qué |
+|---|---|
+| `LOTE —` | `codigosDeLotes()` vacío |
+| sin «Le queda por pagar» | `saldosPorLote()` no tenía de qué lote sacarlo |
+| renglón azul «Abono a capital» | `montoACapital()` es una RESTA: sin cuotas aplicadas da el papel entero |
+
+La pregunta del papel es otra —**de qué lotes HABLA**— y ahora la contesta
+`Recibo::compromisosDelPapel()`: los que tocó, y si no tocó ninguno, los
+renglones vivos del contrato (los rescindidos afuera, ordenados por código).
+
+### Lo que cambió
+
+1. **`LOTE` dice los lotes del contrato** en el recibo de prima; con dos o más,
+   el rótulo va en plural (`Recibo::nombraVariosLotes()`).
+2. **«Le queda por pagar» sale también en la prima.** ⚠️ Y un lote **sin plan
+   de cuotas ya no imprime la línea**: la seña de un apartado decía «le queda
+   por pagar L 0.00» a alguien que debe el lote entero. Cero cuotas no es cero
+   saldo.
+3. **El renglón se llama como el CONCEPTO** (`Recibo::rotuloDelSobrante()`):
+   «Prima», «Seña del apartado», y «Abono a capital» solo cuando de verdad lo
+   es (R21).
+4. **El papel dice quién recibió el dinero**: renglón «Recibido por» arriba, y
+   las dos firmas con nombre — «Recibí conforme — ELDER» / «Entregué conforme
+   — YOSSELIN», como ya hacía el acta de devolución.
+5. 🔴 **Y ese dato ahora lo escriben TODOS los caminos.** `recibido_por` nació
+   en el modal de cobro (27-ago) y ni la prima ni la seña lo llenaban: el corte
+   de caja del día las sumaba bajo **«Sin usuario»**. El default se mudó al
+   modelo (`Recibo::booted()`), así que el camino que se olvide queda bien
+   igual. Es el molde de `Venta::liquidarSiYaNoDebe()`.
+
+### Qué mirar en pruebas
+
+`Recibos` → cualquiera con concepto **Prima** → «Imprimir». Tiene que decir el
+lote, «Recibido por», «Prima» en el renglón azul, «Le queda por pagar», y las
+dos firmas con nombre. Después uno de **Cuota** (no cambió, salvo el nombre en
+las firmas) y uno de **Seña** (dice «Seña del apartado» y NO promete saldo).
+
+## 🔴 31-ago — Y ahora las TRES puertas preguntan quién recibió el dinero
+
+«Acá en apartar que se coloque quién recibe el dinero, y cuando se vende
+también quién recibe el dinero» — Mauricio, mirando los dos modales del plano.
+
+El campo nació el 27-ago adentro del modal de cobro. Pero **el dinero entra por
+tres puertas**: la cuota, la seña de un apartado y la prima de una venta. Las
+otras dos ni lo preguntaban ni lo escribían.
+
+- Nace **`App\Filament\Support\QuienRecibeElDinero`**: la pregunta, la lista
+  (quien tiene `Create:Recibo`, menos el super-admin) y el valor por defecto,
+  **escritos una sola vez**. El modal de cobro pasó a usarlo — se le fueron tres
+  métodos privados y tres imports.
+- `RegistroDeCompromisos` y `RegistroDeVentas` estrenan **`loRecibio($id)`**,
+  el mismo molde de `RegistroDePagos`: la clase es `readonly` y devuelve una
+  instancia nueva.
+- ⚠️ **El valor inicial va en el `fillForm()` de cada acción, NO en un
+  `default()` del campo**: ese arreglo ES el estado inicial y los `default()`
+  no se aplican. Está anotado en los tres lugares.
+- En apartar el campo aparece **solo si hay seña que cobrar**, igual que la
+  forma de pago: sin seña no hay recibo.
+
+### La casilla de confirmar YA era obligatoria
+
+«Si no se marca el revisé el plazo y precio no se pueda vender» — ya no se
+puede desde el 14-ago: las dos casillas (vender y apartar) llevan `accepted()`
+y hay dos tests que sostienen que sin tildarla **no se firma y no se aparta**
+(`VenderDesdeElPlanoTest`, «sin confirmar no se firma la venta»). No se tocó
+nada. Si alguna vez pasa una venta sin tildarla, eso es un hallazgo nuevo y hay
+que perseguirlo.
+
+### Al desplegar
+
+**Sin migración y sin permisos nuevos.** Los recibos viejos de prima y de seña
+siguen con `recibido_por` en NULL —el default solo corre al crear—, pero el
+papel cae en quien lo tecleó (`created_by`), que es lo que la migración del
+27-ago escribió en los 257 de la cartera vieja.
+
+## 🔴🔴 27-ago — Un recibo cobró L 24,000.00 y aplicó L 17,020.83 (PRODUCCIÓN)
+
+**Lo encontró Mauricio mirando la ficha del expediente 0070:** «por qué me
+dice que aún debe L 567,979.17 si 805,000 menos 220,000 de prima y menos los
+24,000 que dio». Debía L 561,000.00.
+
+**El modo «Ambas» se comía el dinero que ponía al día.** El paso 5 de
+`cobrarYAbonarEnUnMismoNombre()` tenía un comentario donde iba el código: daba
+por hecho que `ponerAlDia` valía cero. Solo vale cero si los renglones de
+cuota cubrieron TODO lo vencido del lote del abono. En el RPS-00000005
+marcaron una cuota por lote, el RPS-N-008 tenía dos vencidas, y la segunda se
+comió L 6,979.17.
+
+**Lo que lo hacía peligroso: nadie comparaba las dos mitades del recibo.** Del
+segundo caso —L 5,000.00 del expediente 0038— nadie se había dado cuenta.
+De ahí sale lo nuevo — `Recibo::cuadra()`, `olympo:cuadrar-recibos
+[--reparar]` y una revisión más en `olympo:verificar-produccion`.
+
+### 🔴 En producción eran DOS, no uno
+
+La primera corrida del comando encontró uno que nadie había reportado:
+
+| Recibo | Contrato | Cobró | Aplicó | Faltaba | Lote |
+|---|---|---|---|---|---|
+| RPS-00000005 | RPS-2026-0070 | L 24,000.00 | L 17,020.83 | **L 6,979.17** | RPS-N-008 |
+| RPS-00000010 | RPS-2026-0038 | L 50,000.00 | L 45,000.00 | **L 5,000.00** | RPS-H-005 |
+
+**L 11,979.17** de dos clientes, los dos del 26-ago —el primer día que alguien
+usó «Ambas» de verdad—. Reparados el 27-ago con `--reparar`. El que preguntó
+fue uno solo: **un defecto de dinero se audita sobre la base entera, no sobre
+el caso que llegó.**
+
+### Al desplegar
+
+Sin migración y sin permisos nuevos.
+
+```
+php8.5 artisan olympo:cuadrar-recibos            # lista lo que no cuadra
+php8.5 artisan olympo:cuadrar-recibos --reparar  # escribe lo que falta
+```
+
+⚠️ La reimpresión del RPS-00000005 va a mostrar otro desglose —cuotas
+L 19,166.67 y capital L 4,833.33— con el mismo total de L 24,000.00. El nuevo
+es el verdadero; el viejo salía de una resta.
+
+## ✅ 27-ago, 1:55 a.m. — TODO ESTO YA ESTÁ EN PRODUCCIÓN
+
+Cinco entregas de una sola noche, desplegadas y verificadas en
+`praderasdelsol.cloud`:
+
+1. **El cuadre de los recibos** — `olympo:cuadrar-recibos`. Encontró y reparó
+   **L 11,979.17 de DOS clientes** (el 0070 y el 0038).
+2. **La lista de recibos por fecha** y el monto que dejó de cortarse.
+3. **El orden del bloqueo en Postgres** (el centavo del residuo).
+4. **«¿Quién recibió el dinero?» (R24)** y **la referencia que dejó de trabar
+   el cobro (R11-bis)** — las dos escritas en `docs/dominio.md`.
+5. **El respaldo, que nunca había corrido**: `config/backup.php` pedía la base
+   con `config()` adentro de un archivo de config y siempre fue `null`.
+   Primer respaldo real: 6.3 MB, 5,187 archivos.
+
+`olympo:verificar-produccion` da **«Cada recibo aplicó lo que cobró — Todos
+cuadran»**.
+
+### Lo que quedó pendiente, en orden
+
+1. 🔴 **La contraseña `12345678`** de `rosa@gmail.com`. Se cambia **desde el
+   panel**, no por terminal (así no queda en el historial de bash).
+2. **`BACKUP_DISKS=local`**: el respaldo vive en el mismo disco que la base.
+3. **`MAIL_MAILER=log`**: si un respaldo falla, nadie se entera.
+4. 🆕 **El chequeo del cron da falso positivo después de cada despliegue**: lee
+   el latido de `Cache::get('health:checks:schedule:latestHeartbeatAt')` y
+   `optimize:clear` lo borra. **Un detector que grita de más se deja de
+   mirar** — hay que sacar el latido de esa cache o distinguir «nunca latió»
+   de «se limpió recién».
+5. **El CI corre 1,152 tests y la Mac 1,180.** Sin explicar.
+6. Preguntarle a la contratante por R11-bis y R24 (están marcadas como
+   decisión de Mauricio, pendientes de confirmar).
+
+---
+
+## 🔴🔴 27-ago — Un `SELECT` sin `ORDER BY` decidía a quién le tocaba el centavo
+
+El CI se puso rojo con **un** test que la Mac daba verde: el reparto de una
+prima de L 1,000.00 entre tres lotes iguales. `bloquearYVerificar()` leía los
+lotes con `FOR UPDATE` y **sin `orderBy`**, así que el orden de los renglones
+del contrato —y con él, quién recibe el centavo del residuo— lo elegía el plan
+de la consulta, que no es el mismo en dos versiones de Postgres.
+
+Se ordena por `codigo`, que es el criterio que ya usaban `apartar()` y
+`FijacionDePrecios`. Vender era el único de los tres sin él. De regalo, un
+orden de bloqueo consistente es lo que evita que dos ventas simultáneas se
+traben.
+
+**La regla:** si el ORDEN de un resultado decide algo, ese orden se escribe.
+Y **local verde no es CI verde**: son dos Postgres distintos.
+
+⚠️ Quedó una duda por mirar: el CI corrió **1,152** tests y la Mac **1,177**.
+
+---
+
+### Lo que quedó abierto de acá
+
+- **Ver la pantalla después de reparar**: el expediente 0070 tiene que decir
+  L 561,000.00 y «140 de 144».
+- Preguntarle a la contratante si en «Ambas» quiere que el sistema **exija**
+  marcar todo lo vencido del lote del abono, en vez de completarlo solo.
+
+---
+
+## 25-ago — Los dos planos de Inmobiliaria Maya entran por un seeder
+
+**✅ LA PUERTA PASÓ Y ALTAMIRA ESTÁ CARGADO.** `composer ci` verde:
+**1,161 tests** (5,238 assertions, 54.7 s), PHPStan 458/458 sin errores,
+Pint y Rector limpios sobre 861 archivos. El seed dijo:
+
+> RESIDENCIAL ALTAMIRA (RAL): 268 lotes en 16 manzanas, 64,213.77 metros².
+> Calles: 0. Reparto: 35 en A, 11 en B, 28 en C, 27 en D, 17 en E, 16 en F,
+> 14 en G, 14 en H, 7 en I, 17 en J, 16 en K, 25 en L, 13 en M, 15 en N,
+> 8 en O, 5 en P
+
+**El Bambú NO se recargó, y eso es la guarda haciendo su trabajo:** «Hay 5
+lote(s) apartados o vendidos en el proyecto REB. No los piso.» Los 84 que
+ya están son idénticos a los que cargaría el seeder —mismo archivo, mismo
+importador, misma cuenta—, así que **no hay nada que recargar**. Lo único
+que sobra ahí es el bloque **G vacío**, que se borra desde la pantalla.
+
+Mauricio: «ahora cargaremos ese, es en Mts2, carguémoslo y de paso hagamos
+seeder de carga de este y de El Bambú para cuando lo subamos solo correr el
+seeder. Estos son dos lotificaciones de Inmobiliaria Maya».
+
+**Los dos son de otro cliente, no de Praderas.** Van a su propia
+instalación, su propia base. El Bambú estaba cargado en la base de acá
+desde el 13-ago como prueba; a partir de ahora su lugar es la instalación
+de Maya.
+
+### La decisión de fondo: el seeder LEE EL DXF, no un JSON masticado
+
+Praderas del Sol entró por `database/data/praderas-plano.json`, una
+traducción nuestra del dibujo. Acá no: el seeder corre el
+`ImportadorDeDxf` de producción sobre el archivo del topógrafo.
+
+- Hay **una sola fuente de verdad** y es la que firma el ingeniero. Un
+  JSON intermedio se puede editar a mano sin que nadie note la diferencia,
+  que es exactamente como se pierde un lote.
+- La geometría la arma `ExtractorDeGeometria`, que ya sabe de arcos, de
+  `INSERT` anidados y de las siete trampas del formato. **58 de los 268
+  lotes de Altamira tienen un lado curvo**; leídos como polígonos de
+  líneas rectas, los diez de esquina saldrían de 200 m² en vez de 314.16.
+- El día que el topógrafo mande una revisión, se reemplaza el archivo y se
+  vuelve a correr.
+
+### 🔴 O entra el plano completo, o no entra nada
+
+`PlanoDeclarado` es lo que dice el **plano de papel**, escrito a mano
+manzana por manzana. `PlanoDesdeDxfSeeder` corre todo dentro de una
+transacción y exige, adentro:
+
+| Control | Qué atrapa |
+|---|---|
+| El reparto por manzana, uno a uno | **La manzana I del 22-ago**: media manzana que ningún control del importador podía ver |
+| El total de lotes | Un contorno de más o de menos |
+| `sinRotulo === 0` | Un lote al que el sistema le **inventó** el número, que después sale impreso en un contrato |
+| El área contra la suma de los rótulos, ±0.05 % | Una escala mal leída |
+
+Si algo no cuadra, **se lanza y no queda nada cargado** — ni el proyecto.
+Un plano a medias no avisa que está a medias, y el día que se descubre ya
+hay contratos encima.
+
+Y de yapa **LA RESTA**: el seeder cuenta los rótulos de área del archivo
+(en la unidad del proyecto) contra los lotes cargados, y avisa si no dan
+lo mismo. Es el control que faltaba el 22-ago, ahora escrito. Hoy da
+268/268 y 84/84.
+
+### Qué entró
+
+1. **`database/seeders/PlanoDeclarado.php`** — el plano impreso como dato.
+   Producto, sin nombres de cliente.
+2. **`database/seeders/PlanoDesdeDxfSeeder.php`** — el seeder abstracto.
+   Producto. Sirve para cualquier lotificadora que tenga un DXF.
+3. **`database/seeders/Clientes/AltamiraSeeder.php`**, **`ElBambuSeeder.php`**
+   y **`InmobiliariaMayaSeeder.php`** — la instalación de Maya (§4.L0).
+   ⚠️ El directorio es `Clientes` con C mayúscula, no `clientes`: PSR-4 es
+   sensible a mayúsculas en Linux y el `Cartera/` de la cartera histórica
+   ya sentó el precedente. En el Mac funcionaría igual; en el VPS no.
+4. **`database/data/altamira-plano.dxf`** y **`el-bambu-plano.dxf`** — los
+   archivos del topógrafo. El de El Bambú vivía en `storage/app/_analisis/`,
+   que está en `.gitignore`: no estaba versionado.
+5. **`tests/Feature/Dominio/PlanoDesdeDxfSeederTest.php`** — 12 tests, y
+   **`tests/Fixtures/PlanoQueNoCuadraSeeder.php`**, el caso de control:
+   declara una manzana G de seis lotes que el archivo no tiene y afirma
+   que la base queda **como estaba**.
+
+### Lo que dicen los dos planos
+
+| | RESIDENCIAL ALTAMIRA (`RAL`) | RESIDENCIAL EL BAMBU (`REB`) |
+|---|---|---|
+| Lotes | **268** | **84** |
+| Manzanas | 16, A a P | 6, A a F — **no hay G** |
+| Área | 64,214.72 m² rotulados · 64,213.77 leídos (0.0015 %) | 16,438.69 · 16,438.68 (0.00003 %) |
+| Unidad | **metros²** | **metros²** |
+| Capa de rótulos | `textos` | `NOMENCLATURA` |
+| Capa de calles | ninguna importable | ninguna importable |
+| Precio | **0.00 — falta** | **0.00 — falta** |
+
+Altamira: planta de distribución de MAYAP CONSTRUCTORA, agosto de 2026,
+escala 1:200, Santa Rosa de Copán. Propietario: Inversiones La Roca.
+Dibujó Arq. Alejandra María Reyes, aprobó Ing. Bayron Huberto Peña.
+
+El Bambú da **exactamente** la misma cuenta que la importación a mano del
+13-ago: 84 lotes, 16,438.68, «36 en A, 7 en B, 8 en C, 17 en D, 8 en E,
+8 en F». No es una transcripción de aquel resultado: es la misma cuenta
+otra vez, sobre el mismo archivo. Y de paso se va el **bloque G vacío**
+que había quedado del plano viejo de 26 lotes.
+
+### Cómo se corre
+
+```bash
+herd php artisan db:seed --class="Database\Seeders\Clientes\InmobiliariaMayaSeeder"
+```
+
+Idempotente. Se detiene solo —sin borrar nada— en cuanto alguno de los dos
+tenga un lote apartado o vendido, porque **reemplaza** el trazado. Desde
+ese día el plano se corrige con `olympo:completar-plano`, que solo inserta.
+
+### 🔴 Rector se lleva el COMENTARIO junto con el argumento
+
+`RemoveNullNamedArgOnNullDefaultParamRector` borró `capaDeCalles: null` de
+los dos seeders —correcto, el default ya es null— y **se llevó puestas las
+dos líneas que explicaban por qué ese plano no tiene calles que
+importar**. Nadie lo ve: `php -l`, Pint y PHPStan quedan verdes y el diff
+de Rector se lee como una limpieza.
+
+**La regla: una razón que vive pegada a un argumento se pierde el día que
+el argumento sobra.** Si la explicación importa, va en el docblock de la
+clase, que ningún fixer toca. Las dos están repuestas ahí.
+
+## 🔴 25-ago — El rótulo del lote colgaba del punto equivocado
+
+Mauricio, mirando el plano de Altamira ya cargado: «hay lotes donde no se
+ve bien el número que les corresponde».
+
+`PlanoDelProyecto::centroDe()` colgaba la etiqueta del **promedio de los
+vértices**. Su propio docblock decía «para una forma irregular la etiqueta
+queda igual de bien puesta sin arrastrar la fórmula completa» — y era
+verdad mientras todos los lotes del sistema fueran cuadriláteros.
+
+**Un promedio de vértices pondera por CUÁNTOS hay, no por dónde están.**
+La pared curva de un lote de esquina entra teselada en 30 o 60 vértices
+—`GRADOS_POR_SEGMENTO` = 3°— y se lleva el promedio con ella.
+
+Medido sobre los 268 de Altamira: **64 rótulos corridos más de 1.5 m, y
+TRES fuera de su propio lote**. Y como el rótulo se dibuja en blanco,
+afuera cae sobre la calle blanca y el lote **se queda sin número**. Por eso
+se veía «-26», «G-», «F-».
+
+**Por qué vivió meses invisible:** los 309 lotes de Praderas del Sol tienen
+cuatro vértices, y ahí promedio y centroide coinciden.
+
+### Qué entró
+
+1. **`GeometriaPlana::centroide()`** — el centro de masa por la misma
+   fórmula del cordón de zapato que ya usa `area()`. Es **invariante a la
+   teselación**: da igual si una pared curva entró en 4 segmentos o en 60.
+   Un polígono degenerado cae al promedio en vez de dividir por cero.
+2. **`PlanoDelProyecto::centroDe()`** lo usa. Es el único llamador.
+3. **5 tests** en `GeometriaPlanaTest`, con el caso de control adentro: el
+   promedio del cuarto de disco **se sigue moviendo** cuando se tesela más
+   fino (11.15 → 12.36 → 12.61) mientras el centroide converge a 4r/3π =
+   8.4883. Y en la figura en L que ese test ya usaba, el promedio cae en el
+   hueco y el centroide no.
+
+**Medido antes de tocar nada:** con el centroide, de los 268 de Altamira no
+queda **ninguno** afuera, y el más apretado tiene 4.60 m libres hasta su
+lindero contra los ~1.2 m que mide de alto el rótulo. En Praderas la
+mediana del movimiento es **cero**.
+
+⚠️ `GeometriaPlana::centro()` **no se tocó**: el importador lo usa para
+otra cosa —decidir cuál de los rótulos que caen adentro de un contorno es
+el número del lote— y ahí funciona. Su docblock ahora dice para qué NO
+sirve.
+
+### Y el croquis del modal tenía los DOS problemas
+
+Mauricio, después del primer arreglo: «en muchos el total no se ve centrado
+y muchas líneas». El croquis del lote (`figura()` en el blade) calculaba su
+propio centro **también con el promedio de vértices**, y encima cotaba
+**lado por lado**:
+
+1. **El área escrita contra un lindero.** Mismo bug del rótulo. Y peor: las
+   normales de las cotas se orientan mirando ese punto, así que con el
+   centro corrido salían disparadas para cualquier lado. Ahora es el
+   centroide de área, la misma cuenta que `GeometriaPlana::centroide()`.
+2. **Un lado curvo cotado 34 veces.** El arco llega teselado a 3°, así que
+   una esquina redondeada son ~35 segmentos de 91 cm y el croquis se
+   llenaba de «0.91 m» que se salían del recuadro. Ahora los segmentos que
+   giran menos de **10°** entre sí son el mismo lado: se juntan y se cota
+   su **desarrollo**, que es el número que el topógrafo escribe sobre un
+   arco.
+
+**El cierre circular importa:** el contorno puede arrancar a mitad de un
+arco. En el RAL-E-008 de la captura, el arco de 90° venía partido en dos
+tramos (24.13 + 8.63) y sin unirlos habrían quedado dos cotas de un mismo
+lindero. Ahora da **32.76 m · 20.00 m · 20.00 m**: tres cotas para un lote
+que tenía 34.
+
+**Verificado corriendo el JS de verdad.** Se extrae el getter `figura()`
+del blade y se corre con node contra los polígonos reales de los dos
+planos:
+
+| | ALTAMIRA (268) | PRADERAS (309) |
+|---|---|---|
+| Cotas por lote | max **34 → 5** · promedio 5.4 → 3.8 | max 6 → **6**, promedio 4.1 → **4.1** |
+| El área cae fuera del lote | **0** | **0** |
+| Cotas escritas encima del dibujo | **0** | **0** |
+
+Praderas no se mueve, que es lo que había que probar. Diez grados y no más:
+con quince empiezan a fundirse linderos quebrados de verdad de Praderas.
+
+### 🔴🔴 Y en el camino dejé la pantalla EN BLANCO
+
+El comentario que escribí para explicar todo esto citaba «0.91 m» **con
+comillas dobles**. Ese JS vive adentro del atributo `x-data`, que va entre
+comillas dobles: la comilla **cierra el atributo**, el navegador se come el
+resto del componente y la página sale en blanco.
+
+**Lo caro no es el error, es que mi verificación no podía verlo.** Había
+corrido `node --check` sobre el JS *extraído* del atributo — y extraer el
+contenido es exactamente borrar la capa donde estaba el bug.
+
+> **Verificar el contenido de algo por separado no verifica la frontera.**
+> Si para revisar una cosa hay que sacarla de su envase, lo que falta
+> revisar es el envase.
+
+Ninguno de los escalones de siempre lo ve: `php -l` pasa (el blade es PHP
+válido), Pint pasa, PHPStan no mira vistas, Pest tampoco.
+
+**Nace el séptimo detector**, `storage/app/_analisis/alpine.py`: toma el
+contenido de cada atributo `x-*`, `:*` y `wire:*` hasta la comilla que lo
+cierra y cuenta el balance de `()`, `{}` y `[]`. **Un atributo cortado no
+balancea; uno sano sí.** Con su caso de control al lado —dos `x-data`
+seguidos, uno con «» y otro con `""`— y cero falsos positivos sobre los 21
+blades del repo.
+
+```bash
+python3 storage/app/_analisis/alpine.py $(find resources/views -name '*.blade.php')
+```
+
+**Los cinco escalones que ahora corren sobre ese archivo:** `php -l`, el
+detector nuevo, `node --check` del componente entero, el getter corrido
+contra los polígonos reales, y Pint. Los cinco verdes.
+
+## 🔴🔴 25-ago — El área tiene que ser la del PLANO, no la del dibujo
+
+Mauricio, con el PDF del topógrafo al lado de la pantalla: «no está dando
+medidas exactas; ejemplo, ese es 314.16 la medida real, tiene que ser
+exacto».
+
+| Lote | Dice el plano | Decía el sistema |
+|---|---|---|
+| G-7 | **314.16 m²** | 314.02 |
+| J-1 | **296.72 m²** | 296.78 |
+| G-11 | **382.29 m²** | 382.33 |
+| I-1 | **507.06 m²** | 507.11 |
+
+El área salía del **contorno**, y un contorno con lado curvo llega teselado
+a 3°: una poligonal inscrita encierra menos que el arco. El propio
+`GRADOS_POR_SEGMENTO` lo advertía y daba el 0.036 % por «debajo del
+redondeo». **No lo está**: ese número multiplica al precio y sale impreso
+en la escritura.
+
+### La salida ya era la doctrina del repo
+
+Praderas del Sol carga **el área que escribió el topógrafo**, no la
+calculada — `docs/plano-real.md`: «acá no se calcula NADA que el plano ya
+diga». Altamira trae sus 268 rótulos `A=…m2` y El Bambú sus 84. Ahora el
+importador los lee.
+
+1. **`RotuloDxf::areaRotulada(array $sufijos)`** — el número tal como está
+   escrito, y como **string**: «314.16» es exactamente 314.16 y el float
+   no. Entra a bcmath sin haber sido float nunca (§8.3.1).
+2. **`OpcionesDeImportacion::$sufijosDeArea`** — vacío (el default) calcula
+   del contorno, que es lo único posible cuando el plano no la rotula. Con
+   `['m2']` o `['v2','vr2']` manda el rótulo. **Nada cambia para quien no
+   lo pida.**
+3. **`ImportadorDeDxf`** — misma regla que el número de lote: el rótulo
+   tiene que caer **adentro** del contorno y gana el más cercano al centro.
+   Cuenta los que no encuentra en `ResultadoDeImportacion::$sinAreaRotulada`
+   y avisa.
+4. **`PlanoDeclarado`** pasa `unidadesDelRotulo()`, que ya existía para la
+   resta.
+
+### 🔴 Se piden las UNIDADES, no un booleano
+
+Porque el plano rotula **las dos áreas del mismo lote** —«A=200.00m2»
+arriba y «286.85v2» abajo—. Leer la que no es deja cada lote con el área de
+la otra unidad: un error del 43 % pasando por exacto. Ese es el test que
+importa de los cinco nuevos en `LecturaDeDxfTest`.
+
+### Verificado sobre los dos planos, lote por lote
+
+| | ALTAMIRA | EL BAMBÚ |
+|---|---|---|
+| Lotes con área del plano | **268 / 268** | **84 / 84** |
+| Suma contra el papel | **64,214.72 = 64,214.72** | **16,438.69 = 16,438.69** |
+| Diferencia | **0.00000 %** | **0.00000 %** |
+| `sinAreaRotulada` · advertencias | 0 · ninguna | 0 · ninguna |
+
+La asignación **por contención sola alcanza para los 268**: no hace falta
+ninguna heurística de cercanía, que es justo lo que no se quiere cuando el
+número termina en una escritura.
+
+⚠️ La mayor discrepancia entre el dibujo y el rótulo queda en **0.046 %**,
+muy por debajo del 2 % de `Lote::TOLERANCIA_DE_AREA`: **ningún lote sale
+marcado como desalineado**.
+
+**Los tests dejaron de tener tolerancia.** `expect(areaTotalDe($proyecto))
+->toBe(64214.72)` y `areaDelLote($proyecto, 'G', '7')->toBe('314.1600')`.
+O es el número del plano, o no es.
+
+### Qué falta
+
+- 🔴 **Correr la puerta otra vez**, por el arreglo del rótulo:
+  `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+- **Mirar el plano de Altamira de nuevo** y confirmar que los 268 números
+  se leen. Es la única verificación que cuenta.
+- 🔴 **El precio de los dos desarrollos.** Los 352 lotes entran en 0.00 y
+  un lote sin precio no se puede vender. Y ninguno de los dos tiene planes
+  de pago cargados.
+- 🔴 **El Bambú ya existe en la base con código `REB`** (7 bloques: los 6
+  del plano más el G vacío del plano viejo). El seeder lo declara con ESE
+  código, así que lo **actualiza** en vez de duplicarlo, y de paso se lleva
+  el bloque G. No hay que eliminar nada.
+- **Verificar en pantalla.** La última verificación de un plano es mirar
+  el mapa contra el PDF del topógrafo.
+
+### 💡 La mejora que propongo (L5)
+
+**Que la pantalla de importación de DXF muestre LA RESTA.** Hoy ese número
+—cuántos rótulos de área trae el archivo contra cuántos lotes se
+crearon— existe solo adentro de este seeder. Puesto en el aviso de
+`ResultadoDeImportacion`, cualquier lotificadora que importe un plano
+desde el panel vería el 22-ago-2026 el mismo día y no quince después. Son
+unas quince líneas en `ImportadorDeDxf` y una fila más en el aviso.
 
 ## 22-ago — El expediente cambia de titular (R23)
 

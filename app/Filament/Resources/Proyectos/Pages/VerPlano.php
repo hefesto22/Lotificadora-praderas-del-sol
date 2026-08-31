@@ -35,6 +35,7 @@ use App\Filament\Schemas\Components\TelefonoHondurasField;
 use App\Filament\Support\CobrarUnPago;
 use App\Filament\Support\Cuadros;
 use App\Filament\Support\DevolverLaSenia;
+use App\Filament\Support\QuienRecibeElDinero;
 use App\Models\Bloque;
 use App\Models\Cliente;
 use App\Models\Lote;
@@ -344,6 +345,18 @@ class VerPlano extends Page
                     ->required(fn (Get $get): bool => $this->hayQueCobrarSenia($get))
                     ->helperText('Va impreso en el recibo que se lleva el cliente.'),
 
+                /*
+                 * Quien recibio la seña (R24) — 31-ago-2026. «Aca en apartar
+                 * que se coloque quien recibe el dinero» — Mauricio.
+                 *
+                 * Al lado de la forma de pago y con su misma visibilidad: sin
+                 * seña que cobrar no hay recibo, y preguntar quien recibio un
+                 * dinero que nadie entrego no tiene respuesta.
+                 */
+                QuienRecibeElDinero::campo(
+                    'Viene marcado con tu nombre; cambialo si la seña la recibió otra persona. De acá sale el corte de caja del día.'
+                )->visible(fn (Get $get): bool => $this->hayQueCobrarSenia($get)),
+
                 TextInput::make('referencia')
                     ->label('Numero de referencia')
                     ->maxLength(60)
@@ -360,15 +373,17 @@ class VerPlano extends Page
                     $cliente = Cliente::query()->findOrFail($this->entero($data, 'cliente_id', 0));
                     $lotes = $this->lotesDelContrato((int) $lote->getKey(), $data['lotes_extra'] ?? null);
 
-                    app(RegistroDeCompromisos::class)->apartarVarios(
-                        $lotes,
-                        $cliente,
-                        montoSenia: $this->texto($data, 'monto_senia', '') ?: null,
-                        venceEl: $this->texto($data, 'vence_el', '') ?: null,
-                        observaciones: $this->texto($data, 'observaciones', '') ?: null,
-                        forma: FormaDePago::tryFrom($this->texto($data, 'forma_pago', '')),
-                        referencia: $this->texto($data, 'referencia', '') ?: null,
-                    );
+                    app(RegistroDeCompromisos::class)
+                        ->loRecibio(QuienRecibeElDinero::elegido($data))
+                        ->apartarVarios(
+                            $lotes,
+                            $cliente,
+                            montoSenia: $this->texto($data, 'monto_senia', '') ?: null,
+                            venceEl: $this->texto($data, 'vence_el', '') ?: null,
+                            observaciones: $this->texto($data, 'observaciones', '') ?: null,
+                            forma: FormaDePago::tryFrom($this->texto($data, 'forma_pago', '')),
+                            referencia: $this->texto($data, 'referencia', '') ?: null,
+                        );
 
                     return sprintf(
                         '%s %s a nombre de %s.',
@@ -665,6 +680,18 @@ class VerPlano extends Page
                             ->native(false)
                             ->helperText('Va impreso en el recibo de la prima.'),
 
+                        /*
+                         * Quien recibio la prima (R24) — 31-ago-2026. «Y cuando
+                         * se vende tambien quien recibe el dinero» — Mauricio.
+                         *
+                         * Es la entrada de dinero mas grande del sistema y era
+                         * la unica que no decia de quien era: el corte de caja
+                         * del dia la sumaba bajo «Sin usuario».
+                         */
+                        QuienRecibeElDinero::campo(
+                            'Viene marcado con tu nombre; cambialo si la prima la recibió otra persona. De acá sale el corte de caja del día.'
+                        ),
+
                         TextInput::make('referencia_prima')
                             ->label('Numero de referencia')
                             ->maxLength(60)
@@ -807,22 +834,24 @@ class VerPlano extends Page
                         );
                     }
 
-                    $venta = app(RegistroDeVentas::class)->activar(
-                        proyecto: $proyecto,
-                        lotes: $lotes,
-                        clientes: $clientes,
-                        prima: $primaTotal,
-                        plazoMeses: $condiciones[0]['plazo'] ?? 0,
-                        diaPago: $this->entero($data, 'dia_pago', 1),
-                        fechaContrato: CarbonImmutable::parse(
-                            $this->texto($data, 'fecha_contrato', today()->toDateString())
-                        ),
-                        observaciones: $this->texto($data, 'observaciones', '') ?: null,
-                        precios: $precios,
-                        formaPrima: FormaDePago::tryFrom($this->texto($data, 'forma_pago_prima', ''))
-                            ?? FormaDePago::Efectivo,
-                        referenciaPrima: $this->texto($data, 'referencia_prima', '') ?: null,
-                    );
+                    $venta = app(RegistroDeVentas::class)
+                        ->loRecibio(QuienRecibeElDinero::elegido($data))
+                        ->activar(
+                            proyecto: $proyecto,
+                            lotes: $lotes,
+                            clientes: $clientes,
+                            prima: $primaTotal,
+                            plazoMeses: $condiciones[0]['plazo'] ?? 0,
+                            diaPago: $this->entero($data, 'dia_pago', 1),
+                            fechaContrato: CarbonImmutable::parse(
+                                $this->texto($data, 'fecha_contrato', today()->toDateString())
+                            ),
+                            observaciones: $this->texto($data, 'observaciones', '') ?: null,
+                            precios: $precios,
+                            formaPrima: FormaDePago::tryFrom($this->texto($data, 'forma_pago_prima', ''))
+                                ?? FormaDePago::Efectivo,
+                            referenciaPrima: $this->texto($data, 'referencia_prima', '') ?: null,
+                        );
 
                     // El contrato ya existe: lo que sigue pasa en su ficha.
                     $this->destinoDespues = VentaResource::getUrl('view', ['record' => $venta]);
@@ -1371,6 +1400,10 @@ class VerPlano extends Page
             // mostrador, y un Select requerido sin default obliga a un clic
             // mas en el tramite mas largo del sistema.
             'forma_pago_prima' => FormaDePago::Efectivo->value,
+
+            // Igual que el de arriba: `fillForm()` es el estado inicial, así
+            // que el valor va acá y no en un `default()` del campo.
+            'recibido_por' => QuienRecibeElDinero::porDefecto(),
         ];
     }
 
@@ -1445,6 +1478,13 @@ class VerPlano extends Page
              * mas apurado del mostrador. Quien deposito lo cambia.
              */
             'forma_pago' => FormaDePago::Efectivo->value,
+
+            /*
+             * ⚠️ Acá y NO en un `->default()` del campo: `fillForm()` ES el
+             * estado inicial y los `default()` no se aplican. Mismo motivo que
+             * en el modal de cobro, donde ya costó verlo en pantalla.
+             */
+            'recibido_por' => QuienRecibeElDinero::porDefecto(),
 
             // Al estado y no a $arguments: los closures de un componente del
             // schema no reciben $arguments. Mismo motivo que en la venta.

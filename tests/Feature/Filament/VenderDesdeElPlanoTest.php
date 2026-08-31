@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\EstadoCompromiso;
 use App\Domain\Enums\EstadoLote;
+use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\TipoCompromiso;
 use App\Domain\Lotes\RegistroDeReservas;
 use App\Domain\Ventas\RegistroDeCompromisos;
@@ -17,6 +19,8 @@ use App\Models\Cuota;
 use App\Models\Lote;
 use App\Models\PlanDePago;
 use App\Models\Proyecto;
+use App\Models\Recibo;
+use App\Models\User;
 use App\Models\Venta;
 use Livewire\Livewire;
 
@@ -845,6 +849,86 @@ test('sin confirmar no se aparta el lote', function (): void {
         ->assertHasActionErrors(['confirmado']);
 
     expect($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Disponible);
+});
+
+/*
+|--------------------------------------------------------------------------
+| 🔴 Quién recibió el dinero, también acá — 31-ago-2026
+|--------------------------------------------------------------------------
+| «Acá en apartar que se coloque quién recibe el dinero, y cuando se vende
+| también quién recibe el dinero» — Mauricio.
+|
+| El campo existía desde el 27-ago, pero solo en el modal de cobro. La seña y
+| la prima —las otras dos puertas por donde entra dinero— no lo preguntaban ni
+| lo escribían, así que el corte de caja del día las sumaba bajo «Sin usuario».
+|
+| Cada test cubre el cable entero: el campo del modal tiene que llegar hasta la
+| fila del recibo.
+*/
+describe('Quién recibió el dinero (R24)', function (): void {
+    beforeEach(function (): void {
+        $this->enLaCaseta = User::factory()->create(['name' => 'Elder Martínez', 'is_active' => true]);
+
+        /*
+         * ⚠️ El permiso no es decorado: el `Select` de Filament arma solo una
+         * regla `in` con sus opciones, y las opciones de este campo son «quien
+         * puede cobrar». Sin esto el valor se rechaza por inválido — que es
+         * justo lo que tiene que pasar con alguien que no cobra.
+         */
+        $this->enLaCaseta->givePermissionTo('Create:Recibo');
+    });
+
+    test('la seña del apartado queda a nombre de quien la recibió', function (): void {
+        $lote = ($this->lote)('40');
+
+        Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->callAction('apartarLote', [
+                'confirmado'   => true,
+                'cliente_id'   => $this->rosa->getKey(),
+                'monto_senia'  => '5000.00',
+                'forma_pago'   => FormaDePago::Efectivo->value,
+                'recibido_por' => $this->enLaCaseta->getKey(),
+            ], ['lote' => $lote->getKey()])
+            ->assertHasNoActionErrors();
+
+        $senia = Recibo::query()->where('concepto', '=', ConceptoDeRecibo::Senia->value)->firstOrFail();
+
+        // Quién lo recibió y quién lo tecleó son dos preguntas, y las dos se guardan.
+        expect((int) $senia->getAttribute('recibido_por'))->toBe((int) $this->enLaCaseta->getKey())
+            ->and((int) $senia->getAttribute('created_by'))->toBe((int) auth()->id());
+    });
+
+    test('la prima de la venta queda a nombre de quien la recibió', function (): void {
+        $lote = ($this->lote)('41');
+
+        ($this->vender)(
+            ['cliente_id' => $this->rosa->getKey(), 'recibido_por' => $this->enLaCaseta->getKey()],
+            ['lote' => $lote->getKey(), 'plazo' => 12, 'precio' => '1500.00', 'prima' => '50000.00'],
+        )->assertHasNoActionErrors();
+
+        $prima = Recibo::query()->where('concepto', '=', ConceptoDeRecibo::Prima->value)->firstOrFail();
+
+        expect((int) $prima->getAttribute('recibido_por'))->toBe((int) $this->enLaCaseta->getKey())
+            ->and((int) $prima->getAttribute('created_by'))->toBe((int) auth()->id());
+    });
+
+    /*
+    | La otra mitad, y la razón de que el campo NO sea obligatorio: si nadie
+    | elige a nadie, el recibo dice quien tecleó. Es lo que el sistema hizo
+    | siempre y nunca es mentira — lo escribe `Recibo::booted()`.
+    */
+    test('sin elegir a nadie, el recibo dice quien tecleó', function (): void {
+        $lote = ($this->lote)('42');
+
+        ($this->vender)(
+            ['cliente_id' => $this->rosa->getKey()],
+            ['lote' => $lote->getKey(), 'plazo' => 12, 'precio' => '1500.00', 'prima' => '50000.00'],
+        )->assertHasNoActionErrors();
+
+        $prima = Recibo::query()->where('concepto', '=', ConceptoDeRecibo::Prima->value)->firstOrFail();
+
+        expect((int) $prima->getAttribute('recibido_por'))->toBe((int) auth()->id());
+    });
 });
 
 /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Domain\Enums\ConceptoDeRecibo;
+use App\Domain\Enums\EstadoCompromiso;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Enums\TipoDocumento;
 use App\Domain\ValueObjects\Monto;
@@ -15,6 +16,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Auth;
 use Override;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
@@ -116,6 +118,38 @@ class Recibo extends Model
         ];
     }
 
+    /**
+     * Quién recibió el dinero, lo pregunte o no el camino que emitió el papel.
+     *
+     * ═══ 🔴 LO QUE LLENA UN SOLO CAMINO SE OLVIDA EN TODOS LOS DEMÁS ═══
+     *
+     * `recibido_por` nació el 27-ago-2026 en el modal de cobro, que sí lo
+     * pregunta. Los otros dos caminos que emiten recibos —la PRIMA de una
+     * venta y la SEÑA de un apartado— nunca lo escribieron, así que sus
+     * papeles quedaban sin dueño: el corte de caja del día los sumaba bajo
+     * «Sin usuario», y el papel no podía decir quién había recibido el dinero.
+     *
+     * Es el mismo molde de `Venta::liquidarSiYaNoDebe()`, y por eso el default
+     * vive acá y no en cada `create()`: el camino que se olvide de escribirlo
+     * sigue quedando bien.
+     *
+     * Quien teclea es quien recibe mientras nadie diga otra cosa —es lo que el
+     * sistema asumió siempre, y lo que la migración del 27-ago escribió en los
+     * 257 papeles viejos—. El modal, que sí pregunta, ya trae su valor cuando
+     * llega acá, y no se lo pisa.
+     *
+     * Sin sesión —los seeders, la consola— queda en NULL, igual que hoy.
+     */
+    #[Override]
+    protected static function booted(): void
+    {
+        static::creating(static function (self $recibo): void {
+            if ($recibo->getAttribute('recibido_por') === null && Auth::check()) {
+                $recibo->setAttribute('recibido_por', Auth::id());
+            }
+        });
+    }
+
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
@@ -203,6 +237,29 @@ class Recibo extends Model
     public function dniDelPapel(): ?string
     {
         return $this->textoDe('a_nombre_de_dni');
+    }
+
+    /**
+     * El nombre de quien recibió el dinero, como va impreso.
+     *
+     * «También debe de decir el nombre de la persona que recibió el dinero»
+     * — Mauricio, 31-ago-2026. El dato se guardaba desde el 27-ago (R24) y el
+     * corte de caja cuenta por él; lo que faltaba era que el papel del cliente
+     * lo dijera. Cuando alguien vuelve con un reclamo, «a quién le pagué» es
+     * la primera pregunta, y hasta hoy la contestaba la memoria de ventanilla.
+     *
+     * De respaldo, quien TECLEÓ el recibo: es lo que el sistema asumió hasta
+     * el 27-ago y nunca es mentira. Si no hay ninguno de los dos —la cartera
+     * vieja se cargó sin sesión— devuelve null, y el papel no inventa un
+     * nombre: no imprime el renglón.
+     */
+    public function nombreDeQuienRecibio(): ?string
+    {
+        $usuario = $this->recibidoPor ?? $this->createdBy;
+
+        $nombre = $usuario instanceof User ? $usuario->getAttribute('name') : null;
+
+        return is_string($nombre) && trim($nombre) !== '' ? trim($nombre) : null;
     }
 
     /**
@@ -340,17 +397,107 @@ class Recibo extends Model
      */
     public function codigosDeLotes(): array
     {
+        return $this->codigosDe($this->compromisosTocados());
+    }
+
+    /**
+     * Los lotes de los que HABLA el papel — que no siempre son los que tocó.
+     *
+     * ═══ 🔴 EL RECIBO DE LA PRIMA SALIA CON UN GUION EN «LOTE» ═══
+     *
+     * «Acá en lote aparece solo una línea en el recibo» — Mauricio,
+     * 31-ago-2026, mirando el RPS-00000008.
+     *
+     * `compromisosTocados()` contesta a qué lote se le APLICÓ el dinero, y esa
+     * es la pregunta correcta para el detalle y para el saldo. Pero la prima
+     * no se aplica a ningún lote: se pacta por el CONTRATO aunque el
+     * expediente lleve tres (R5), y por eso su recibo va sin `compromiso_id` y
+     * sin aplicaciones. La lista quedaba vacía y el papel salía sin decir de
+     * qué lote hablaba — justo el papel que el cliente guarda para siempre.
+     *
+     * Cuando no tocó ninguno, los lotes del papel son los RENGLONES VIVOS DEL
+     * CONTRATO. Los rescindidos quedan afuera por la misma razón que en el
+     * aviso del modal de cobro: nombrarlos diría que el contrato lleva tres
+     * lotes cuando ya lleva dos.
+     *
+     * El orden es por código y está escrito. Si el orden decide lo que se lee,
+     * no lo decide el planificador de Postgres.
+     *
+     * @return list<Compromiso>
+     */
+    public function compromisosDelPapel(): array
+    {
+        $tocados = $this->compromisosTocados();
+
+        if ($tocados !== []) {
+            return $tocados;
+        }
+
+        $renglones = $this->venta?->compromisos;
+
+        if ($renglones === null) {
+            return [];
+        }
+
+        $vivos = [];
+
+        foreach ($renglones as $renglon) {
+            if ($renglon->getAttribute('estado') !== EstadoCompromiso::Rescindido) {
+                $vivos[] = $renglon;
+            }
+        }
+
+        usort($vivos, static fn (Compromiso $uno, Compromiso $otro): int => strcmp(
+            self::codigoDe($uno),
+            self::codigoDe($otro),
+        ));
+
+        return $vivos;
+    }
+
+    /**
+     * Y sus códigos, sin repetir.
+     *
+     * @return list<string>
+     */
+    public function codigosDelPapel(): array
+    {
+        return $this->codigosDe($this->compromisosDelPapel());
+    }
+
+    /**
+     * La regla de «un código por lote, sin repetir», escrita una sola vez.
+     *
+     * @param list<Compromiso> $renglones
+     *
+     * @return list<string>
+     */
+    private function codigosDe(array $renglones): array
+    {
         $codigos = [];
 
-        foreach ($this->compromisosTocados() as $lote) {
-            $codigo = $lote->lote?->getAttribute('codigo');
+        foreach ($renglones as $renglon) {
+            $codigo = self::codigoDe($renglon);
 
-            if (is_string($codigo) && ! in_array($codigo, $codigos, true)) {
+            if ($codigo !== '' && ! in_array($codigo, $codigos, true)) {
                 $codigos[] = $codigo;
             }
         }
 
         return $codigos;
+    }
+
+    /**
+     * El código de un renglón, o cadena vacía si el lote no llegó cargado.
+     *
+     * Vacía y no null: es lo que se compara al ordenar, y una comparación con
+     * null decidiría el orden por donde no debe.
+     */
+    private static function codigoDe(Compromiso $renglon): string
+    {
+        $codigo = $renglon->lote?->getAttribute('codigo');
+
+        return is_string($codigo) ? $codigo : '';
     }
 
     /**
@@ -396,9 +543,22 @@ class Recibo extends Model
      */
     public function rotuloDeLotes(): string
     {
-        $codigos = $this->codigosDeLotes();
+        $codigos = $this->codigosDelPapel();
 
         return $codigos === [] ? '—' : implode(' · ', $codigos);
+    }
+
+    /**
+     * ¿El papel NOMBRA más de un lote? — decide el rótulo en singular o plural.
+     *
+     * No es lo mismo que `tocaVariosLotes()`, y la diferencia importa: un
+     * recibo de prima de un contrato de tres lotes no toca ninguno y nombra
+     * los tres. Cuando hay aplicaciones las dos contestan igual, porque ahí
+     * los lotes del papel SON los que tocó.
+     */
+    public function nombraVariosLotes(): bool
+    {
+        return count($this->codigosDelPapel()) > 1;
     }
 
     public function tocaVariosLotes(): bool
@@ -480,6 +640,37 @@ class Recibo extends Model
     public function montoACapital(): Monto
     {
         return $this->montoTotal()->restar($this->montoAplicadoACuotas());
+    }
+
+    /**
+     * Cómo se llama, en el papel, el dinero que no fue a ninguna cuota.
+     *
+     * ═══ 🔴 EL RECIBO DE LA PRIMA DECIA «ABONO A CAPITAL» ═══
+     *
+     * `montoACapital()` es una RESTA —lo cobrado menos lo aplicado a cuotas—,
+     * así que en un recibo de prima o de seña da el papel entero: esos dos
+     * conceptos no tocan cuotas por definición (R5, R14). El renglón se había
+     * escrito para el abono del R21 y salía con ese nombre en los tres.
+     *
+     * Y no es un detalle de redacción. Un recibo de prima que dice «Abono a
+     * capital» le dice al cliente que su saldo bajó por fuera del plan, y a
+     * quien lo revise dentro de dos años, que hubo un extraordinario que nunca
+     * existió.
+     *
+     * El renglón se llama como el CONCEPTO del recibo. «Abono a capital» queda
+     * para cuando de verdad lo es: el abono a secas, o el sobrante de un cobro
+     * de cuotas —que es el único concepto que se aplica a cuotas, y por eso lo
+     * que le sobra sí bajó capital—.
+     */
+    public function rotuloDelSobrante(): string
+    {
+        $concepto = $this->concepto;
+
+        if (! $concepto instanceof ConceptoDeRecibo || $concepto->seAplicaACuotas()) {
+            return ConceptoDeRecibo::AbonoCapital->etiqueta();
+        }
+
+        return $concepto->etiqueta();
     }
 
     /**

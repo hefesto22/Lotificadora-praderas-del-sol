@@ -22,9 +22,7 @@ use App\Models\Facturacion;
 use App\Models\Proyecto;
 use App\Models\Recibo;
 use App\Models\Reprogramacion;
-use App\Models\User;
 use App\Models\Venta;
-use BezhanSalleh\FilamentShield\Support\Utils as Shield;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Filament\Actions\Action;
@@ -42,7 +40,6 @@ use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Icons\Heroicon;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as Cuotas;
 use Illuminate\Support\Collection;
 use Illuminate\Support\HtmlString;
@@ -525,7 +522,7 @@ final readonly class CobrarUnPago
              * unas líneas más abajo para la fecha; costó verlo en pantalla:
              * el campo salía vacío con un `default()` perfectamente escrito.
              */
-            'recibido_por' => $this->porDefectoQuienTeclea(),
+            'recibido_por' => QuienRecibeElDinero::porDefecto(),
         ];
 
         $lotes = $this->lotesQueDeben();
@@ -697,7 +694,7 @@ final readonly class CobrarUnPago
              * ═══ QUIEN RECIBIO EL DINERO — 27-ago-2026 ═══
              *
              * «Que la administradora y yo podamos seleccionar quién recibió el
-             * dinero, y también los receptores» — Mauricio. Hasta hoy el
+             * dinero, y también los receptores» — Mauricio. Hasta ese día el
              * sistema solo sabía quién TECLEÓ, y lo daba por lo mismo: la
              * administradora registra un pago que recibió don Elder en la
              * caseta, y el efectivo lo tiene él.
@@ -705,30 +702,11 @@ final readonly class CobrarUnPago
              * 🔴 De esto sale el arqueo del día: el corte de caja cuenta por
              * quien recibió, no por quien tecleó.
              *
-             * La lista no son «los receptores»: es **quien puede cobrar**, y
-             * eso lo dice el permiso. Una lotificadora que mañana arme sus
-             * roles distinto no tiene que tocar código (Ley L0).
+             * El campo se mudó a `QuienRecibeElDinero` el 31-ago, cuando la
+             * misma pregunta entró en apartar y en vender: el dinero llega por
+             * tres puertas y la pregunta tiene que ser una sola.
              */
-            Select::make('recibido_por')
-                ->label('¿Quién recibió el dinero?')
-                ->options(fn (): array => $this->quienesPuedenCobrar())
-                /*
-                 * ⚠️ NO lleva `required()`, y no es un olvido.
-                 *
-                 * El campo llega preseleccionado con quien abrió el modal, así
-                 * que en la pantalla siempre viene lleno. Y si igual llegara
-                 * vacío, el dominio escribe `auth()->id()` — quien teclea—, que
-                 * es exactamente lo que el sistema hacía hasta ayer y nunca es
-                 * una mentira. Ver `RegistroDePagos::loRecibio()`.
-                 *
-                 * Ponerle `required()` fue el primer intento y costó 38 tests:
-                 * `callAction()` de Filament **no aplica los `default()`**, así
-                 * que todo test que cobra llegaba con el campo en blanco. Eso
-                 * no fue el descubrimiento de un problema en los tests: fue la
-                 * pantalla exigiendo un dato que el dominio ya sabe resolver.
-                 */
-                ->native(false)
-                ->helperText('Viene marcado con tu nombre; cambialo si el dinero lo recibió otra persona. De acá sale el corte de caja del día.'),
+            QuienRecibeElDinero::campo(),
 
             TextInput::make('referencia')
                 ->label('Número de referencia')
@@ -1258,7 +1236,7 @@ final readonly class CobrarUnPago
     private function soloLaCuota(array $data): array
     {
         return app(RegistroDePagos::class)
-            ->loRecibio($this->quienRecibio($data))
+            ->loRecibio(QuienRecibeElDinero::elegido($data))
             ->cobrarVariosLotes(
                 venta: $this->venta,
                 cliente: $this->quienPaga(),
@@ -1278,7 +1256,7 @@ final readonly class CobrarUnPago
     private function soloElAbono(array $data): array
     {
         return app(RegistroDePagos::class)
-            ->loRecibio($this->quienRecibio($data))
+            ->loRecibio(QuienRecibeElDinero::elegido($data))
             ->abonarAVariosLotes(
                 venta: $this->venta,
                 cliente: $this->quienPaga(),
@@ -1299,7 +1277,7 @@ final readonly class CobrarUnPago
     private function soloElProntoPago(array $data): array
     {
         return app(RegistroDePagos::class)
-            ->loRecibio($this->quienRecibio($data))
+            ->loRecibio(QuienRecibeElDinero::elegido($data))
             ->prontoPago(
                 venta: $this->venta,
                 cliente: $this->quienPaga(),
@@ -1320,7 +1298,7 @@ final readonly class CobrarUnPago
     private function laCuotaYElAbono(array $data): array
     {
         return app(RegistroDePagos::class)
-            ->loRecibio($this->quienRecibio($data))
+            ->loRecibio(QuienRecibeElDinero::elegido($data))
             ->cobrarYAbonar(
                 venta: $this->venta,
                 cliente: $this->quienPaga(),
@@ -1334,67 +1312,6 @@ final readonly class CobrarUnPago
                 fecha: CarbonImmutable::parse((string) $data['fecha']),
                 observaciones: is_string($data['observaciones'] ?? null) ? $data['observaciones'] : null,
             );
-    }
-
-    /**
-     * Quiénes pueden figurar como que recibieron el dinero.
-     *
-     * Sale del PERMISO y no de una lista de nombres: `Create:Recibo` es
-     * exactamente «esta persona cobra». Así la administradora entra porque
-     * cobra, y una lotificadora que arme sus roles de otra manera no tiene que
-     * tocar código (Ley L0).
-     *
-     * ═══ 🔴 MENOS EL SUPER-ADMIN (27-ago-2026) ═══
-     *
-     * «Mauricio Cruz no debe de aparecer ahí» — mirando la lista en pruebas.
-     * Y tiene razón: **el super-admin es la cuenta de quien hace el sistema, no
-     * personal de la caja de la lotificadora.** Tiene todos los permisos por
-     * definición, así que sin esto se cuela en cada pantalla que pregunte
-     * «¿quién de ustedes?».
-     *
-     * Se excluye por ROL y no por nombre —`Shield::getSuperAdminName()`—, que
-     * es lo único que sigue siendo verdad en la instalación de la próxima
-     * lotificadora.
-     *
-     * @return array<int, string>
-     */
-    private function quienesPuedenCobrar(): array
-    {
-        /** @var array<int, string> $gente */
-        $gente = User::query()
-            ->permission('Create:Recibo')
-            ->whereDoesntHave('roles', static fn (Builder $rol): Builder => $rol->where('name', Shield::getSuperAdminName()))
-            ->orderBy('name')
-            ->pluck('name', 'id')
-            ->all();
-
-        return $gente;
-    }
-
-    /**
-     * Quien está tecleando, para dejar el campo marcado.
-     *
-     * ⚠️ Solo si figura en la lista. Si el que abre el modal es el super-admin
-     * —o alguien sin el permiso—, el campo sale vacío y hay que elegir: es
-     * mejor que ponerle el nombre de quien no estuvo en la caja.
-     */
-    private function porDefectoQuienTeclea(): ?int
-    {
-        $yo = auth()->id();
-
-        return is_numeric($yo) && array_key_exists((int) $yo, $this->quienesPuedenCobrar())
-            ? (int) $yo
-            : null;
-    }
-
-    /**
-     * @param array<string, mixed> $data
-     */
-    private function quienRecibio(array $data): ?int
-    {
-        $elegido = $data['recibido_por'] ?? null;
-
-        return is_numeric($elegido) ? (int) $elegido : null;
     }
 
     /**
