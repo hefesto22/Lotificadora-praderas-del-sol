@@ -26,15 +26,25 @@ use Illuminate\Database\Eloquent\Builder;
  * mismo en tres lugares con tres redacciones es cómo se vuelven tres reglas
  * distintas — así que la pregunta, la lista y el default se escriben una vez.
  *
- * ⚠️ El campo NO lleva `required()`, y no es un olvido. Llega preseleccionado
- * con quien abre el modal, así que en la pantalla siempre viene lleno; y si
- * igual llegara vacío, el que crea el recibo escribe `auth()->id()` —quien
- * teclea—, que es lo que el sistema hizo siempre y nunca es mentira (ver
- * `Recibo::booted()`). Ponerle `required()` fue el primer intento el 27-ago y
- * costó 38 tests en rojo: `callAction()` de Filament **no aplica los
- * `default()`**, así que todo test que cobraba llegaba con el campo en blanco.
- * No era un problema de los tests: era la pantalla exigiendo un dato que el
- * dominio ya sabe resolver.
+ * ═══ 🔴 ES OBLIGATORIO — 31-ago-2026 ═══
+ *
+ * «Quién recibió el dinero que sea obligatorio» — Mauricio, mirando el modal
+ * de la venta con el campo vacío. Y estaba vacío por una buena razón: **él es
+ * el super-admin, la única cuenta que la lista no ofrece**, así que a él no se
+ * le puede preseleccionar a nadie. Sin exigirlo, ese recibo salía a nombre
+ * suyo —lo escribe `Recibo::booted()`—, que es exactamente lo que pidió evitar
+ * el 27-ago: «Mauricio Cruz no debe de aparecer ahí».
+ *
+ * ⚠️ **Obligatorio cuando hay a quién elegir.** Una instalación recién montada
+ * —o una lotificadora que todavía no le dio `Create:Recibo` a nadie— tiene la
+ * lista vacía, y un `Select` requerido sin una sola opción es un formulario
+ * que nadie puede mandar: trabaría la venta sin ofrecer ninguna salida. Ahí el
+ * papel sigue cayendo en quien teclea, que es lo que el sistema hizo siempre.
+ *
+ * (Esto reemplaza la nota del 27-ago, que decía que el campo NO llevaba
+ * `required()`. Entonces era cierto y costó 38 tests en rojo: el valor lo
+ * ponía un `default()` que `fillForm` no aplica. Hoy el valor va adentro del
+ * `fillForm` de cada acción, así que quien puede cobrar lo recibe lleno.)
  */
 final class QuienRecibeElDinero
 {
@@ -59,6 +69,8 @@ final class QuienRecibeElDinero
         return Select::make(self::CAMPO)
             ->label('¿Quién recibió el dinero?')
             ->options(static fn (): array => self::lista())
+            // Obligatorio solo si hay a quién elegir: ver el docblock de arriba.
+            ->required(static fn (): bool => self::lista() !== [])
             ->native(false)
             ->helperText($ayuda ?? 'Viene marcado con tu nombre; cambialo si el dinero lo recibió otra persona. De acá sale el corte de caja del día.');
     }

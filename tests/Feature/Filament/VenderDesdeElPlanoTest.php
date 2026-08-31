@@ -913,21 +913,26 @@ describe('Quién recibió el dinero (R24)', function (): void {
     });
 
     /*
-    | La otra mitad, y la razón de que el campo NO sea obligatorio: si nadie
-    | elige a nadie, el recibo dice quien tecleó. Es lo que el sistema hizo
-    | siempre y nunca es mentira — lo escribe `Recibo::booted()`.
+    | 🔴 Y desde el 31-ago es OBLIGATORIO: «quién recibió el dinero que sea
+    | obligatorio» — Mauricio, mirando el campo vacío en el modal de la venta.
+    | Estaba vacío porque él es el super-admin, la única cuenta que la lista no
+    | ofrece: sin esta guarda, el recibo salía a nombre suyo.
+    |
+    | ⚠️ Este test corre como super-admin y el `beforeEach` ya creó a alguien
+    | que puede cobrar. O sea: hay a quién elegir, y por eso se exige. Con la
+    | lista vacía —una instalación sin cajeros— no se exige, porque sería un
+    | formulario que nadie puede mandar.
     */
-    test('sin elegir a nadie, el recibo dice quien tecleó', function (): void {
+    test('sin decir quién lo recibió, no se firma la venta', function (): void {
         $lote = ($this->lote)('42');
 
         ($this->vender)(
             ['cliente_id' => $this->rosa->getKey()],
             ['lote' => $lote->getKey(), 'plazo' => 12, 'precio' => '1500.00', 'prima' => '50000.00'],
-        )->assertHasNoActionErrors();
+        )->assertHasActionErrors(['recibido_por']);
 
-        $prima = Recibo::query()->where('concepto', '=', ConceptoDeRecibo::Prima->value)->firstOrFail();
-
-        expect((int) $prima->getAttribute('recibido_por'))->toBe((int) auth()->id());
+        expect(Venta::query()->count())->toBe(0)
+            ->and($lote->refresh()->getAttribute('estado'))->toBe(EstadoLote::Disponible);
     });
 });
 

@@ -321,6 +321,14 @@ class VerPlano extends Page
                             ->label('Revisé el lote, la seña y a nombre de quién queda.')
                             ->accepted()
                             ->columnSpanFull()
+                            /*
+                             * La banda ámbar/verde — 31-ago-2026. Va en el
+                             * ENVOLTORIO del campo y no en el input, que es lo
+                             * único que abarca la casilla y su texto. El CSS
+                             * vive en `filament/estilos-olympo`, con su
+                             * explicación.
+                             */
+                            ->extraFieldWrapperAttributes(['class' => 'olympo-confirmar'])
                             ->validationMessages([
                                 'accepted' => 'Falta confirmar que revisaste los datos del apartado.',
                             ]),
@@ -757,6 +765,9 @@ class VerPlano extends Page
                             ->label('Revisé el plazo, el precio y la cuota con el cliente, y están correctos.')
                             ->accepted()
                             ->columnSpanFull()
+                            // La misma banda que en apartar: mientras falta se
+                            // ve ámbar, y en cuanto se tilda se pone verde.
+                            ->extraFieldWrapperAttributes(['class' => 'olympo-confirmar'])
                             ->validationMessages([
                                 'accepted' => 'Falta confirmar que revisaste los números antes de firmar.',
                             ]),

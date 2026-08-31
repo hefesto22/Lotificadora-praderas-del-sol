@@ -119,6 +119,38 @@
     }
     .dark .olympo-total { color: #fff; border-top-color: rgba(255, 255, 255, .18); }
 
+    /* ── La casilla que hay que tildar antes de firmar ──
+
+       Es la última puerta antes de quemar un correlativo (14-ago) y hasta hoy
+       se veía como un campo más de la lista: quien scrolleaba de largo la
+       pasaba sin verla, apretaba «Firmar la venta» y recién ahí el modal le
+       contestaba con un error. La friccion existía, pero llegaba tarde.
+
+       Ahora es una BANDA: ámbar mientras falta, verde apenas se tilda. El
+       estado de la última puerta se ve sin leer una palabra, y desde arriba
+       del botón.
+
+       ⚠️ `:has()` es lo que deja pintarla por el estado del <input> sin una
+       línea de JS. Donde no exista, la banda se queda ámbar y no se pierde
+       nada: la casilla sigue funcionando igual. */
+    .olympo-confirmar {
+        padding: .75rem .875rem;
+        border: 1px solid rgba(245, 158, 11, .45);
+        border-radius: .625rem;
+        background: rgba(254, 243, 199, .55);
+        transition: background-color .15s ease, border-color .15s ease;
+    }
+    .olympo-confirmar label { font-weight: 600; color: rgb(120 53 15); }
+    .olympo-confirmar:has(input:checked) {
+        border-color: rgba(22, 163, 74, .45);
+        background: rgba(220, 252, 231, .6);
+    }
+    .olympo-confirmar:has(input:checked) label { color: rgb(21 128 61); }
+    .dark .olympo-confirmar { border-color: rgba(245, 158, 11, .35); background: rgba(245, 158, 11, .1); }
+    .dark .olympo-confirmar label { color: rgb(253 230 138); }
+    .dark .olympo-confirmar:has(input:checked) { border-color: rgba(34, 197, 94, .4); background: rgba(34, 197, 94, .12); }
+    .dark .olympo-confirmar:has(input:checked) label { color: rgb(134 239 172); }
+
     .olympo-nota { margin-top: .5rem; font-size: .75rem; line-height: 1.65; color: rgb(113 113 122); }
     .dark .olympo-nota { color: rgb(161 161 170); }
     .olympo-vacio { font-size: .875rem; color: rgb(113 113 122); }

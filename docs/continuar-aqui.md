@@ -74,14 +74,37 @@ otras dos ni lo preguntaban ni lo escribían.
 - En apartar el campo aparece **solo si hay seña que cobrar**, igual que la
   forma de pago: sin seña no hay recibo.
 
-### La casilla de confirmar YA era obligatoria
+### 🔴 Y el campo pasa a ser OBLIGATORIO
 
-«Si no se marca el revisé el plazo y precio no se pueda vender» — ya no se
-puede desde el 14-ago: las dos casillas (vender y apartar) llevan `accepted()`
-y hay dos tests que sostienen que sin tildarla **no se firma y no se aparta**
-(`VenderDesdeElPlanoTest`, «sin confirmar no se firma la venta»). No se tocó
-nada. Si alguna vez pasa una venta sin tildarla, eso es un hallazgo nuevo y hay
-que perseguirlo.
+«Quién recibió el dinero que sea obligatorio» — Mauricio, mirando el modal de
+la venta con el campo **vacío**. Y estaba vacío por una buena razón: él es el
+**super-admin**, la única cuenta que la lista no ofrece (27-ago: «Mauricio Cruz
+no debe de aparecer ahí»), así que a él no se le puede preseleccionar nadie.
+Sin exigirlo, ese recibo salía a nombre suyo — lo escribe `Recibo::booted()`.
+
+⚠️ **Obligatorio cuando hay a quién elegir.** Con la lista vacía —una
+instalación recién montada, o una lotificadora que todavía no le dio
+`Create:Recibo` a nadie— un `Select` requerido sin una sola opción es un
+formulario que nadie puede mandar. Ahí no se exige y el papel sigue cayendo en
+quien teclea.
+
+💡 Eso además es lo que deja el suite en verde: casi todos los tests corren
+como super-admin y sin cajeros creados, así que la lista está vacía. Los que sí
+crean uno actúan COMO él, y ahí `fillForm` llega con el campo lleno.
+
+### La casilla de confirmar ya era obligatoria — ahora además se ve
+
+«Si no se marca el revisé el plazo y precio no se pueda vender» — no se puede
+desde el 14-ago: las dos casillas (vender y apartar) llevan `accepted()` y hay
+dos tests que sostienen que sin tildarla **no se firma y no se aparta**. Esa
+regla no se tocó.
+
+Lo que se cambió es cómo se ve: era un campo más de la lista y quien scrolleaba
+de largo la pasaba sin verla —el modal le contestaba con un error recién al
+apretar—. Ahora es una **banda ámbar** arriba del botón que **se pone verde**
+apenas se tilda (`.olympo-confirmar` en `filament/estilos-olympo`, con `:has()`
+y sin una línea de JS). El CSS del panel entra por `renderHook`, así que **no
+hace falta compilar nada**.
 
 ### Al desplegar
 
