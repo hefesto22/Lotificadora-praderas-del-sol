@@ -168,7 +168,13 @@ describe('La cotizacion del modal', function (): void {
              * firmar con otra comparaba dos planes distintos y podia dar
              * igual de casualidad. Ahora las dos puntas parten del mismo dato.
              */
-            ->cotizar(['lote' => $lote->getKey(), 'prima' => '50000.00']);
+            /*
+             * ⚠️ Con el plazo puesto. Desde el 31-ago-2026 la prima y el
+             * descuento se escriben ADENTRO del renglón que se marca y se
+             * aplican solo a ese: sin plazo, los cuatro salen de lista y esta
+             * cuota se compararía contra un plan sin prima.
+             */
+            ->cotizar(['lote' => $lote->getKey(), 'plazo' => 12, 'prima' => '50000.00']);
 
         $doceMeses = ['cuota' => null, 'interes' => null];
 
@@ -189,6 +195,331 @@ describe('La cotizacion del modal', function (): void {
             // Y el interes que la pantalla anuncia existe de verdad: sin esto,
             // dos ceros iguales harian pasar el test sin probar nada.
             ->and($doceMeses['interes'])->not->toBeNull();
+    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | El descuento se escribe en lempiras
+    |--------------------------------------------------------------------------
+    |
+    | 31-ago-2026, pedido de Mauricio: «que no aparezca precio por vara, solo
+    | un campo de descuento y cuánto de descuento». Hasta ese día rebajar era
+    | escribir un precio por vara² NUEVO en la fila, y quien atendía tenía que
+    | hacer la división de cabeza, con el cliente enfrente, para saber cuánto
+    | le estaba bajando.
+    |
+    | 🔴 La división NO da redondo casi nunca. `compromisos.precio_vara` es
+    | DECIMAL(14,2): el sistema cobra por vara² con dos decimales y no hay
+    | dónde guardar más. Así que el descuento que se ve en pantalla tiene que
+    | ser el que RESULTA del precio redondeado —el que se firma— y no el que
+    | alguien tecleó. Estos tests cuidan esa diferencia.
+    */
+    test('el descuento en lempiras baja el precio de la vara² y el valor', function (): void {
+        // 250 v² a L 1,500.00 la vara son L 375,000.00 de lista.
+        $lote = ($this->lote)('40');
+
+        $cuadro = Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->instance()
+            ->cotizar(['lote' => $lote->getKey(), 'plazo' => 12, 'prima' => '50000.00', 'descuento' => '50000.00']);
+
+        $fila = ['precio' => null, 'precioLista' => null, 'valor' => null, 'valorLista' => null, 'descuento' => null, 'rebajado' => null];
+
+        foreach ($cuadro as $renglon) {
+            if ($renglon['meses'] === 12) {
+                $fila = $renglon;
+            }
+        }
+
+        // 50,000 ÷ 250 v² = 200 exactos. 1,500 − 200 = 1,300, con los seis
+        // decimales del factor.
+        expect($fila['precio'])->toBe('1300.000000')
+            ->and($fila['precioLista'])->toBe('1500.000000')
+            ->and($fila['valor'])->toContain('325,000.00')
+            ->and($fila['valorLista'])->toContain('375,000.00')
+            ->and($fila['descuento'])->toContain('50,000.00')
+            // Es un descuento, y la pantalla lo pinta como tal.
+            ->and($fila['rebajado'])->toBeTrue();
+    });
+
+    /*
+    | 🔴 EL DESCUENTO PEDIDO SE ALCANZA EXACTO, Y ESO NO ES CASUALIDAD.
+    |
+    | 333 v² es el caso feo a propósito: 50,000 ÷ 333 son L 150.150150…, un
+    | número que no cabe en dos decimales. Con dos, el descuento de verdad
+    | salía L 49,999.95 y la pantalla mostraba eso —correcto pero desconcertante
+    | para quien acababa de escribir 50,000.
+    |
+    | `precio_vara` lleva SEIS decimales desde el 11-ago-2026 justo para esto:
+    | la lotificadora no cobra por vara², cobra un precio por LOTE redondeado a
+    | una cifra vendible. Un rato lo redondeé a dos en el cuadro del plano y le
+    | devolví el problema; lo cachó Mauricio el 31-ago-2026 con «si pongo
+    | 300,000 cerrados el descuento fue de 44,220.12».
+    |
+    | Este test es el que no deja que vuelva a pasar.
+    */
+    test('el descuento pedido se alcanza exacto aunque el área sea fea', function (): void {
+        $lote = Lote::factory()
+            ->enBloque($this->bloque)
+            ->conMedidas('333.0000', '1400.00')
+            ->create(['numero' => '41', 'poligono' => [[0, 0], [10, 0], [10, 33], [0, 33]]]);
+
+        $cuadro = Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->instance()
+            ->cotizar(['lote' => $lote->getKey(), 'plazo' => 12, 'prima' => '50000.00', 'descuento' => '50000.00']);
+
+        $fila = ['precio' => null, 'descuento' => null, 'valor' => null];
+
+        foreach ($cuadro as $renglon) {
+            if ($renglon['meses'] === 12) {
+                $fila = $renglon;
+            }
+        }
+
+        // 1,500 − 150.150150 = 1,349.849850, y de vuelta 333 × eso son
+        // L 449,500.00: los 50,000 pedidos, al centavo.
+        expect($fila['precio'])->toBe('1349.849850')
+            ->and($fila['descuento'])->toContain('50,000.00')
+            ->and($fila['valor'])->toContain('449,500.00');
+    });
+
+    test('sin descuento no hay descuento que mostrar', function (): void {
+        $lote = ($this->lote)('42');
+
+        $cuadro = Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->instance()
+            ->cotizar(['lote' => $lote->getKey(), 'plazo' => 12, 'prima' => '50000.00']);
+
+        $fila = ['precio' => null, 'precioLista' => null, 'descuento' => null, 'rebajado' => null];
+
+        foreach ($cuadro as $renglon) {
+            if ($renglon['meses'] === 12) {
+                $fila = $renglon;
+            }
+        }
+
+        expect($fila['descuento'])->toBeNull()
+            ->and($fila['rebajado'])->toBeFalse()
+            ->and($fila['precio'])->toBe($fila['precioLista']);
+    });
+
+    test('un descuento más grande que el lote no revienta el cuadro', function (): void {
+        /*
+         * `Monto::restar()` lanza una excepción con un negativo, y acá esa
+         * excepción se llevaría puesto el cuadro ENTERO: los cuatro plazos en
+         * blanco y quien atiende sin saber por qué, con el cliente enfrente.
+         *
+         * Se topa en cero. L 0.00 se lee solo: se pasó con el descuento.
+         */
+        $lote = ($this->lote)('43');
+
+        $cuadro = Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->instance()
+            ->cotizar(['lote' => $lote->getKey(), 'plazo' => 0, 'prima' => '0', 'descuento' => '9999999.00']);
+
+        $fila = ['precio' => null, 'valor' => null];
+
+        foreach ($cuadro as $renglon) {
+            if ($renglon['meses'] === 0) {
+                $fila = $renglon;
+            }
+        }
+
+        expect($fila['precio'])->toBe('0.000000')
+            ->and($fila['valor'])->toContain('0.00');
+    });
+
+    /*
+    | 🔴 LO NEGOCIADO ES DE UN RENGLON, NO DEL CUADRO.
+    |
+    | 31-ago-2026: «según el que seleccionen, ahí se liste el cuadro de
+    | descuento y prima, en esa misma celda». Las casillas se mudaron adentro
+    | de la fila que se marca, y con ellas la cuenta: solo ESA fila lleva lo
+    | negociado. Las otras tres son la lista, que es contra lo que se compara.
+    |
+    | Si esto se rompe, el error no se ve: el cuadro muestra cuatro plazos
+    | rebajados, quien atiende le dice al cliente el número de otro renglón y
+    | el contrato sale con un tercero.
+    */
+    test('la prima y el descuento son del renglón marcado, no del cuadro', function (): void {
+        $lote = ($this->lote)('44');
+
+        $cuadro = Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->instance()
+            ->cotizar(['lote' => $lote->getKey(), 'plazo' => 12, 'prima' => '50000.00', 'descuento' => '50000.00']);
+
+        $marcado = ['descuento' => null, 'prima' => null, 'rebajado' => null, 'valor' => null];
+        $suelto = ['descuento' => null, 'prima' => null, 'rebajado' => null, 'valor' => null];
+
+        foreach ($cuadro as $renglon) {
+            if ($renglon['meses'] === 12) {
+                $marcado = $renglon;
+            }
+
+            if ($renglon['meses'] === 0) {
+                $suelto = $renglon;
+            }
+        }
+
+        expect($marcado['descuento'])->toContain('50,000.00')
+            ->and($marcado['prima'])->toContain('50,000.00')
+            ->and($marcado['rebajado'])->toBeTrue()
+            // El de contado no se marcó: sale de lista, entero y sin prima.
+            ->and($suelto['descuento'])->toBeNull()
+            ->and($suelto['prima'])->toBeNull()
+            ->and($suelto['rebajado'])->toBeFalse()
+            // 250 v² × L 1,300.00 de contado, sin un centavo de rebaja.
+            ->and($suelto['valor'])->toContain('325,000.00');
+    });
+
+    test('de contado no se pide prima aunque venga escrita', function (): void {
+        /*
+         * De contado se paga todo de una vez: no hay saldo que financiar y
+         * por lo tanto no hay prima. La casilla ni siquiera aparece en ese
+         * renglón, pero si alguien manda el dato igual —otra pestaña, un
+         * plazo que se cambió después de teclear— el cuadro lo ignora.
+         */
+        $lote = ($this->lote)('45');
+
+        $cuadro = Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->instance()
+            ->cotizar(['lote' => $lote->getKey(), 'plazo' => 0, 'prima' => '50000.00']);
+
+        $fila = ['prima' => null, 'valor' => null];
+
+        foreach ($cuadro as $renglon) {
+            if ($renglon['meses'] === 0) {
+                $fila = $renglon;
+            }
+        }
+
+        expect($fila['prima'])->toBeNull()
+            ->and($fila['valor'])->toContain('325,000.00');
+    });
+
+    /*
+    | 🔴 UNA CASILLA DE TEXTO MANDA COSAS QUE NO SON NUMEROS.
+    |
+    | El descuento y la prima se escriben con separador de miles a la vista
+    | —«1,234,567», pedido de Mauricio el 31-ago-2026— y eso obligó a que
+    | sean campos de TEXTO: un `input` numérico no deja entrar la coma.
+    |
+    | Los dos estados que rompían, y de maneras distintas:
+    |
+    |  · «42,744» con coma tumbaba el descuento EN SILENCIO: `is_numeric()`
+    |    dice que no, el controlador devolvía null, null significa «no lo
+    |    tocaron» y el lote se cotizaba a precio de lista con quien atiende
+    |    creyendo que lo había rebajado. Ese es el peor de los dos.
+    |
+    |  · «42744.» —el punto puesto y el decimal todavía no, un estado
+    |    legítimo a mitad de una tecla— tiraba un 500 y el panel se caía
+    |    mientras la persona escribía.
+    */
+    test('el descuento se entiende con comas y con el punto a medio escribir', function (): void {
+        $lote = ($this->lote)('46');
+
+        $cuadro = Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->instance()
+            ->cotizar([
+                'lote'  => $lote->getKey(),
+                'plazo' => 12,
+                // Como sale de la casilla: con coma y con el punto colgando.
+                'prima'     => '50,000.',
+                'descuento' => '50,000.00',
+            ]);
+
+        $fila = ['precio' => null, 'descuento' => null, 'prima' => null];
+
+        foreach ($cuadro as $renglon) {
+            if ($renglon['meses'] === 12) {
+                $fila = $renglon;
+            }
+        }
+
+        // Lo mismo que daría '50000': 50,000 ÷ 250 v² = 200 exactos.
+        expect($fila['precio'])->toBe('1300.000000')
+            ->and($fila['descuento'])->toContain('50,000.00')
+            ->and($fila['prima'])->toContain('50,000.00');
+    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | El total también se escribe
+    |--------------------------------------------------------------------------
+    |
+    | 31-ago-2026: «el valor del lote también que sea editable, en caso de que
+    | lo quieran dejar en un número cerrado directamente». Son dos puertas al
+    | mismo número —cuánto se le baja, o cuánto queda— y así se negocia de
+    | verdad: a veces se regatea la rebaja y a veces se cierra el total.
+    |
+    | `modo` dice cuál de las dos casillas se tecleó de último. No se adivina
+    | mirando cuál trae texto: las dos traen, porque la que no se toca se
+    | rellena sola con lo que devolvió la cotización anterior.
+    */
+    test('escribir el total da el precio por vara² que lo produce', function (): void {
+        // 250 v² a L 1,500.00 son L 375,000.00 de lista.
+        $lote = ($this->lote)('47');
+
+        $cuadro = Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->instance()
+            ->cotizar([
+                'lote'  => $lote->getKey(),
+                'plazo' => 12,
+                'prima' => '50000.00',
+                'modo'  => 'valor',
+                'valor' => '325000.00',
+                // El descuento viejo sigue en la pantalla y NO se usa: manda
+                // el modo, no cuál de los dos campos tiene texto.
+                'descuento' => '9999.00',
+            ]);
+
+        $fila = ['precio' => null, 'valor' => null, 'descuento' => null];
+
+        foreach ($cuadro as $renglon) {
+            if ($renglon['meses'] === 12) {
+                $fila = $renglon;
+            }
+        }
+
+        // 325,000 ÷ 250 v² = 1,300 exactos, y de vuelta 250 × 1,300.
+        expect($fila['precio'])->toBe('1300.000000')
+            ->and($fila['valor'])->toContain('325,000.00')
+            ->and($fila['descuento'])->toContain('50,000.00');
+    });
+
+    test('un total cerrado queda cerrado, aunque el área no divida', function (): void {
+        /*
+         * «Por si lo quieren dejar en un número cerrado». 400,000 ÷ 333 son
+         * L 1,201.201201… por vara², que solo cabe con seis decimales. Con
+         * dos daba L 399,999.60 —el peldaño de al lado— y el número cerrado
+         * dejaba de serlo justo cuando alguien lo pidió.
+         */
+        $lote = Lote::factory()
+            ->enBloque($this->bloque)
+            ->conMedidas('333.0000', '1400.00')
+            ->create(['numero' => '48', 'poligono' => [[0, 0], [10, 0], [10, 33], [0, 33]]]);
+
+        $cuadro = Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+            ->instance()
+            ->cotizar([
+                'lote'  => $lote->getKey(),
+                'plazo' => 12,
+                'prima' => '50000.00',
+                'modo'  => 'valor',
+                'valor' => '400000.00',
+            ]);
+
+        $fila = ['precio' => null, 'valor' => null, 'valorCrudo' => null];
+
+        foreach ($cuadro as $renglon) {
+            if ($renglon['meses'] === 12) {
+                $fila = $renglon;
+            }
+        }
+
+        expect($fila['precio'])->toBe('1201.201201')
+            ->and($fila['valor'])->toContain('400,000.00')
+            // El crudo es el que vuelve a la casilla, sin símbolo ni comas.
+            ->and($fila['valorCrudo'])->toBe('400000.00');
     });
 
     /*

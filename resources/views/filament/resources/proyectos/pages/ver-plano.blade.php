@@ -288,13 +288,43 @@
         .dark .plano-planes { border-top-color: rgba(255, 255, 255, .1); }
         .plano-planes-titulo { font-size: .8125rem; font-weight: 600; color: rgb(9 9 11); }
         .dark .plano-planes-titulo { color: #fff; }
-        .plano-prima { display: flex; align-items: center; gap: .5rem; margin: .75rem 0; font-size: .875rem; color: rgb(113 113 122); }
-        .plano-prima input {
-            width: 9rem; border: 1px solid rgb(228 228 231); border-radius: .5rem;
-            padding: .3125rem .5rem; font-size: .8125rem; text-align: right;
+        /* Las casillas que viven ADENTRO del renglon marcado: el descuento y
+           la prima. Angostas a proposito —van en una celda, no en un
+           formulario— y alineadas a la derecha como el resto de los numeros.
+
+           `.plano-prima` y `.plano-negociado`, que eran las casillas sueltas
+           de arriba del cuadro, se borraron el 31-ago-2026 cuando lo
+           negociado se mudo al renglon. */
+        .plano-campo {
+            width: 6.5rem; border: 1px solid rgb(228 228 231); border-radius: .375rem;
+            padding: .25rem .4375rem; font: inherit; font-size: .8125rem; text-align: right;
             font-variant-numeric: tabular-nums; background: #fff; color: rgb(9 9 11);
         }
-        .dark .plano-prima input { border-color: rgba(255, 255, 255, .15); background: rgba(255, 255, 255, .05); color: #fff; }
+        .dark .plano-campo { border-color: rgba(255, 255, 255, .15); background: rgba(255, 255, 255, .05); color: #fff; }
+
+        /* Con algo escrito se ve distinta: el mismo ambar que marca un valor
+           rebajado en la columna de al lado. */
+        .plano-campo.tocado { border-color: #d97706; color: #b45309; font-weight: 600; }
+        .dark .plano-campo.tocado { color: #fbbf24; }
+
+        /* La cuenta del descuento, debajo del cuadro. */
+        .plano-rebaja {
+            margin: .75rem 0 0; padding: .625rem .75rem; border-radius: .5rem;
+            background: rgb(250 250 250); font-size: .8125rem;
+            font-variant-numeric: tabular-nums;
+        }
+        .dark .plano-rebaja { background: rgba(255, 255, 255, .04); }
+        .plano-rebaja div { display: flex; justify-content: space-between; gap: 1rem; padding: .1875rem 0; }
+        .plano-rebaja dt { color: rgb(113 113 122); }
+        .dark .plano-rebaja dt { color: rgb(161 161 170); }
+        .plano-rebaja dd { margin: 0; color: rgb(9 9 11); }
+        .dark .plano-rebaja dd { color: #fff; }
+        .plano-rebaja .baja dd { color: #b45309; }
+        .dark .plano-rebaja .baja dd { color: #fbbf24; }
+        .plano-rebaja .total { margin-top: .1875rem; padding-top: .375rem; border-top: 1px solid rgb(228 228 231); }
+        .dark .plano-rebaja .total { border-top-color: rgba(255, 255, 255, .12); }
+        .plano-rebaja .total dt, .plano-rebaja .total dd { font-weight: 600; }
+        .plano-rebaja small { display: block; margin-top: .5rem; font-size: .6875rem; line-height: 1.5; color: rgb(161 161 170); }
         .plano-tabla { width: 100%; border-collapse: collapse; font-size: .875rem; font-variant-numeric: tabular-nums; }
         .plano-tabla th {
             text-align: right; font-weight: 500; color: rgb(113 113 122);
@@ -303,7 +333,21 @@
         }
         .dark .plano-tabla th { color: rgb(161 161 170); border-bottom-color: rgba(255, 255, 255, .1); }
         .plano-tabla th:first-child, .plano-tabla td:first-child { text-align: left; }
-        .plano-tabla td { padding: .5rem .375rem; border-bottom: 1px solid rgb(250 250 250); text-align: right; color: rgb(9 9 11); white-space: nowrap; }
+        .plano-tabla td { padding: .625rem .375rem; border-bottom: 1px solid rgb(250 250 250); text-align: right; color: rgb(9 9 11); white-space: nowrap; }
+
+        /* La celda del plazo: el marcador y el nombre, juntos y a la
+           izquierda. `width: 45%` le da al nombre el lugar que necesita y
+           empuja el valor y la cuota contra el borde derecho, que es donde
+           se comparan dos numeros de siete cifras. */
+        .plano-tabla td.plazo, .plano-tabla th:first-child { width: 26%; }
+
+        /* Las celdas con casilla van mas ajustadas: la casilla ya trae su
+           propio alto y sumarle el del renglon estiraba el cuadro. */
+        .plano-tabla td.campo { padding-top: .3125rem; padding-bottom: .3125rem; }
+        .plano-tabla td.campo .vacio { color: rgb(212 212 216); }
+        .dark .plano-tabla td.campo .vacio { color: rgb(82 82 91); }
+        .plano-tabla td.plazo input { vertical-align: middle; margin: 0 .5rem 0 0; }
+        .plano-tabla td.plazo span { vertical-align: middle; font-weight: 500; }
         .dark .plano-tabla td { border-bottom-color: rgba(255, 255, 255, .06); color: rgb(228 228 231); }
         .plano-tabla td.cuota { font-weight: 600; }
         .plano-tabla td.cuota small {
@@ -379,13 +423,14 @@
         .dark .plano-fila-plan:hover td { background: rgba(255, 255, 255, .04); }
         .plano-fila-plan.elegido td { background: rgb(239 246 255); }
         .dark .plano-fila-plan.elegido td { background: rgba(59, 130, 246, .12); }
-        .plano-precio {
-            width: 6.75rem; border: 1px solid rgb(228 228 231); border-radius: .375rem;
-            padding: .3125rem .5rem; font-size: .875rem; text-align: right;
-            font-variant-numeric: tabular-nums; background: #fff; color: rgb(9 9 11);
-        }
-        .plano-precio.tocado { border-color: #d97706; color: #b45309; font-weight: 600; }
-        .dark .plano-precio { border-color: rgba(255, 255, 255, .15); background: rgba(255, 255, 255, .05); color: #fff; }
+        /* El valor de una fila rebajada, en ambar: se ve de un vistazo cual
+           lleva descuento sin tener que compararla contra la lista.
+
+           `.plano-precio` —la casilla del precio por vara² de cada fila— se
+           borro el 31-ago-2026 junto con la columna: ahora se escribe un
+           descuento en lempiras y el precio lo calcula el servidor. */
+        .plano-tabla td.tocado { color: #b45309; font-weight: 600; }
+        .dark .plano-tabla td.tocado { color: #fbbf24; }
 
         /* La barra del contrato en armado. Flota abajo a la derecha del
            lienzo: no tapa el centro —que es donde estan los lotes— y se lee
@@ -521,10 +566,33 @@
                 },
 
                 /* Lo que se cotiza en el modal viaja al formulario de venta:
-                   el plazo elegido y, si se toco, el precio de esa fila. */
+                   el plazo elegido y, si se puso, el descuento.
+
+                   ═══ POR QUE UN DESCUENTO Y NO UN PRECIO POR VARA² ═══
+
+                   Lo pidio Mauricio el 31-ago-2026. Hasta ese dia cada fila
+                   traia una casilla con el precio de la vara² y rebajar era
+                   escribir un precio NUEVO: quien atiende tenia que hacer la
+                   division de cabeza, con el cliente enfrente, para saber
+                   cuanto le estaba bajando. Ahora escribe lo que le baja y el
+                   sistema hace la cuenta.
+
+                   Se guarda lo TECLEADO, en lempiras. El precio por vara² que
+                   sale de ahi lo calcula el servidor —es una division de
+                   dinero— y vuelve en `filas`. Ver `VerPlano::conDescuento()`. */
                 plazoElegido: null,
-                preciosTocados: {},
-                tasasTocadas: {},
+                descuento: '',
+
+                /* El total al que se quiere dejar el lote, y cual de las dos
+                   casillas se tecleo de ultimo. Ver `cotizar()` en el PHP.
+
+                   ⚠️ `modoPrecio` y no `modo`: `modo` ya es de la pestaña
+                   Vender/Apartar. Al pisarlo con «descuento» el `x-if` de la
+                   pestaña dejaba de dar verdadero y desaparecia medio panel
+                   —el cuadro de plazos incluido— sin un solo error en la
+                   consola. Paso el 31-ago-2026. */
+                valorMeta: '',
+                modoPrecio: 'descuento',
 
                 /* El cuadro de plazos, tal como lo devolvio el servidor.
                    Ya no se calcula aca: ver el comentario de recalcular(). */
@@ -734,12 +802,13 @@
 
                     this.plazoElegido = marcado ? marcado.plazo : null;
                     this.prima = marcado ? marcado.prima : '';
-                    this.preciosTocados = marcado && marcado.precio !== null
-                        ? { [marcado.plazo]: marcado.precio }
-                        : {};
-                    this.tasasTocadas = marcado && marcado.tasa
-                        ? { [marcado.plazo]: marcado.tasa }
-                        : {};
+                    /* El descuento TECLEADO, no despejado del precio: dividir
+                       para atras da un numero con decimales que nadie escribio
+                       y, al volver a cotizar, correria el precio unos centavos
+                       cada vez que se abre el lote. */
+                    this.descuento = marcado ? (marcado.descuento || '') : '';
+                    this.valorMeta = marcado ? (marcado.valorMeta || '') : '';
+                    this.modoPrecio = marcado ? (marcado.modoPrecio || 'descuento') : 'descuento';
 
                     this.filas = [];
                     this.recalcular();
@@ -761,7 +830,7 @@
 
                 /* Sumar o quitar el lote abierto. Cierra el modal: el gesto
                    siguiente es marcar otro lote, no quedarse mirando este. */
-                alternarCarrito() {
+                async alternarCarrito() {
                     const lote = this.seleccionado;
 
                     if (! lote) return;
@@ -779,7 +848,18 @@
                        cinturon. */
                     if (! this.hayPlan) return;
 
+                    /* Se espera una cotizacion FRESCA antes de guardar.
+
+                       El precio por vara² ya no se lee de una casilla de esta
+                       pantalla: lo calcula el servidor a partir del descuento
+                       y llega en `filas`. Sin este `await`, escribir el
+                       descuento y apretar «sumar» en menos de los 350 ms del
+                       rebote guardaria el precio ANTERIOR — y ese precio es el
+                       que se firma. */
+                    await this.recalcular();
+
                     const plan = this.planes.find((p) => p.meses === this.plazoElegido);
+                    const fila = this.filas.find((f) => f.meses === this.plazoElegido);
 
                     this.carrito.push({
                         id: lote.id,
@@ -787,11 +867,14 @@
                         area: Number(String(lote.areaVaras).replace(/,/g, '')) || 0,
                         plazo: this.plazoElegido,
                         etiqueta: plan ? (plan.etiqueta || (plan.meses > 0 ? `${plan.meses} meses` : 'Contado')) : '—',
-                        precio: plan ? this.precioDe(plan).toFixed(2) : null,
-                        /* Vacio es «la del plan»: se guarda solo lo que se
-                           negocio, no lo que ya estaba. */
-                        tasa: plan ? this.tasaDe(plan) : '',
-                        prima: this.prima || '',
+                        precio: fila ? fila.precio : null,
+                        /* Vacio es «la del plan»: la tasa ya no se negocia
+                           desde este cuadro. */
+                        tasa: '',
+                        descuento: this.numeroLimpio(this.descuento),
+                        valorMeta: this.numeroLimpio(this.valorMeta),
+                        modoPrecio: this.modoPrecio,
+                        prima: this.numeroLimpio(this.prima),
                     });
 
                     this.abierto = false;
@@ -1118,6 +1201,52 @@
 
                         if ((mx - cx) * nx + (my - cy) * ny < 0) { nx = -nx; ny = -ny }
 
+                        /*
+                           🔴 LA COTA ES UNA PARALELA AL LADO, NO LA CUERDA
+                           TRASLADADA.
+
+                           Hasta acá la linea roja iba del primer vertice del
+                           tramo al ultimo, corrida por la normal. En un
+                           lindero recto eso ES el lindero y sale bien. En uno
+                           con curvatura no: la cuerda entre las puntas NO es
+                           paralela al lado, asi que al trasladarla una punta
+                           queda afuera y la otra adentro, y la cota cruza el
+                           terreno. Se vio el 31-ago-2026 en RAL-D-027 (arco
+                           entero) y despues, ya con la flecha puesta, en
+                           RAL-L-001, RAL-G-014, RAL-H-007 y RAL-E-017 —recta
+                           con una esquina redondeada al final—.
+
+                           La flecha sola no alcanzaba porque corrige la
+                           DISTANCIA y el problema era la INCLINACION.
+
+                           Ahora la cota se construye sobre la tangente del
+                           medio del desarrollo (ux, uy), que es la direccion
+                           del lado: una paralela de verdad. Se extiende de t0
+                           a t1 —la proyeccion de los vertices sobre esa
+                           direccion, o sea todo lo que el tramo abarca— y se
+                           corre por la normal la FLECHA, que ahora se mide
+                           desde esa misma recta y no desde un vertice. Asi no
+                           puede cruzar el lote: es paralela y esta por fuera
+                           del vertice que mas sobresale.
+                        */
+                        const ux = dx / tangente;
+                        const uy = dy / tangente;
+
+                        let flecha = 0;
+                        let t0 = Infinity;
+                        let t1 = -Infinity;
+                        let v0 = tramo.vertices[0];
+                        let v1 = tramo.vertices[0];
+
+                        for (const v of tramo.vertices) {
+                            flecha = Math.max(flecha, (v[0] - mx) * nx + (v[1] - my) * ny);
+
+                            const t = (v[0] - mx) * ux + (v[1] - my) * uy;
+
+                            if (t < t0) { t0 = t; v0 = v }
+                            if (t > t1) { t1 = t; v1 = v }
+                        }
+
                         // El texto se lee siempre de izquierda a derecha:
                         // pasados los 90 grados se voltea media vuelta.
                         let angulo = Math.atan2(dy, dx) * 180 / Math.PI;
@@ -1126,14 +1255,20 @@
                         if (angulo < -90) angulo += 180;
 
                         lados.push({
-                            a: tramo.vertices[0],
-                            b: tramo.vertices[tramo.vertices.length - 1],
+                            // Las puntas del tramo, para amarrar las patitas.
+                            a: v0,
+                            b: v1,
                             mx,
                             my,
                             nx,
                             ny,
+                            ux,
+                            uy,
+                            t0,
+                            t1,
                             largo: tramo.largo,
                             angulo,
+                            flecha,
                             extra: 0,
                             texto: this.cota(tramo.largo),
                         });
@@ -1153,7 +1288,7 @@
                        MAS CORTO, que es la que menos lugar propio tiene.
                     */
                     const muestrasDe = (lado) => {
-                        const distancia = separacion + fuente * 0.85 + lado.extra;
+                        const distancia = separacion + lado.flecha + fuente * 0.85 + lado.extra;
                         const x = lado.mx + lado.nx * distancia;
                         const y = lado.my + lado.ny * distancia;
 
@@ -1208,7 +1343,7 @@
                         if (! choco) break;
                     }
 
-                    const empujado = Math.max(0, ...lados.map((l) => l.extra));
+                    const empujado = Math.max(0, ...lados.map((l) => l.extra + l.flecha));
                     const margen = separacion + fuente * 2.6 + empujado;
 
                     return {
@@ -1255,36 +1390,65 @@
                     if (! figura) return;
 
                     for (const lado of figura.lados) {
-                        // `extra` mueve la cota ENTERA —linea, patitas y
-                        // texto— para que el numero nunca quede flotando
-                        // lejos de la linea que esta acotando.
-                        const sep = figura.separacion + lado.extra;
+                        /*
+                           `extra` mueve la cota ENTERA —linea, patitas y
+                           texto— para que el numero nunca quede flotando
+                           lejos de la linea que esta acotando. `flecha` la
+                           saca por fuera de un lado curvo.
+
+                           ⚠️ El texto sumaba `extra` DOS veces —una aca
+                           dentro de `sep` y otra abajo— asi que en un lote
+                           con cotas apretadas el numero se iba al doble de
+                           lejos que su propia linea, y la deteccion de
+                           choques media una posicion que no era la que se
+                           dibujaba. Va una sola vez.
+                        */
+                        const sep = figura.separacion + lado.flecha + lado.extra;
+
+                        /*
+                           Los dos extremos de la cota, sobre la PARALELA al
+                           lado: se parte del medio, se camina por la tangente
+                           hasta donde llega el tramo y recien ahi se corre
+                           por la normal. Trasladar la cuerda de punta a punta
+                           es lo que dejaba la linea cruzando el lote.
+                        */
+                        const p0x = lado.mx + lado.ux * lado.t0 + lado.nx * sep;
+                        const p0y = lado.my + lado.uy * lado.t0 + lado.ny * sep;
+                        const p1x = lado.mx + lado.ux * lado.t1 + lado.nx * sep;
+                        const p1y = lado.my + lado.uy * lado.t1 + lado.ny * sep;
 
                         const linea = document.createElementNS(NS, 'line');
-                        linea.setAttribute('x1', lado.a[0] + lado.nx * sep);
-                        linea.setAttribute('y1', lado.a[1] + lado.ny * sep);
-                        linea.setAttribute('x2', lado.b[0] + lado.nx * sep);
-                        linea.setAttribute('y2', lado.b[1] + lado.ny * sep);
+                        linea.setAttribute('x1', p0x);
+                        linea.setAttribute('y1', p0y);
+                        linea.setAttribute('x2', p1x);
+                        linea.setAttribute('y2', p1y);
                         linea.setAttribute('stroke', '#dc2626');
                         linea.setAttribute('stroke-width', '1.2');
                         linea.setAttribute('vector-effect', 'non-scaling-stroke');
                         g.appendChild(linea);
 
-                        // Las dos patitas que amarran la cota al vertice.
-                        for (const punta of [lado.a, lado.b]) {
+                        /*
+                           Las dos patitas que amarran la cota al lote. Van
+                           del vertice a SU extremo de la cota -no derecho por
+                           la normal- porque con el lado corrido esa recta ya
+                           no pasa por encima del vertice. El 1.15 las deja
+                           asomar un poco, como en un plano de verdad.
+                        */
+                        for (const punta of [[lado.a, p0x, p0y], [lado.b, p1x, p1y]]) {
+                            const [vertice, hx, hy] = punta;
                             const pata = document.createElementNS(NS, 'line');
-                            pata.setAttribute('x1', punta[0]);
-                            pata.setAttribute('y1', punta[1]);
-                            pata.setAttribute('x2', punta[0] + lado.nx * sep * 1.25);
-                            pata.setAttribute('y2', punta[1] + lado.ny * sep * 1.25);
+                            pata.setAttribute('x1', vertice[0]);
+                            pata.setAttribute('y1', vertice[1]);
+                            pata.setAttribute('x2', vertice[0] + (hx - vertice[0]) * 1.15);
+                            pata.setAttribute('y2', vertice[1] + (hy - vertice[1]) * 1.15);
                             pata.setAttribute('stroke', '#fca5a5');
                             pata.setAttribute('stroke-width', '1');
                             pata.setAttribute('vector-effect', 'non-scaling-stroke');
                             g.appendChild(pata);
                         }
 
-                        const tx = lado.mx + lado.nx * (sep + figura.fuente * 0.85 + lado.extra);
-                        const ty = lado.my + lado.ny * (sep + figura.fuente * 0.85 + lado.extra);
+                        const tx = lado.mx + lado.nx * (sep + figura.fuente * 0.85);
+                        const ty = lado.my + lado.ny * (sep + figura.fuente * 0.85);
 
                         const texto = document.createElementNS(NS, 'text');
                         texto.setAttribute('x', tx);
@@ -1333,9 +1497,13 @@
                     try {
                         const filas = await $wire.cotizar({
                             lote: this.seleccionado.id,
-                            prima: this.prima,
-                            precios: this.preciosTocados,
-                            tasas: this.tasasTocadas,
+                            /* El plazo marcado: la prima y el descuento se
+                               aplican SOLO a su renglon. Ver `cotizar()`. */
+                            plazo: this.plazoElegido,
+                            prima: this.numeroLimpio(this.prima),
+                            descuento: this.numeroLimpio(this.descuento),
+                            valor: this.numeroLimpio(this.valorMeta),
+                            modo: this.modoPrecio,
                         });
 
                         if (mio === this.pedido) { this.filas = filas; }
@@ -1378,29 +1546,30 @@
                     };
                 },
 
-                /* El precio que manda para un plan: el que se tecleo en la
-                   fila, o el de la lista si no se toco ninguno. */
-                precioDe(plan) {
-                    const tocado = Number(this.preciosTocados[plan.meses]);
+                /* La fila cotizada del plazo elegido, o null.
 
-                    return Number.isFinite(tocado) && tocado > 0 ? tocado : Number(plan.precioVara);
+                   De aca sale TODO lo que se muestra y lo que se firma: el
+                   valor, la cuota, el descuento de verdad y el precio por
+                   vara². Ninguno se recalcula en el navegador. */
+                get filaElegida() {
+                    return this.filas.find((f) => f.meses === this.plazoElegido) ?? null;
                 },
 
                 /* Lo que se le pasa a la accion de vender. El formulario llega
                    con esto puesto y de ahi se puede seguir cambiando: el
                    servidor vuelve a validar todo, esto es solo el arranque. */
                 get cotizacion() {
-                    const plan = this.planes.find((p) => p.meses === this.plazoElegido);
                     const prima = Number(this.prima);
-                    const precio = plan ? this.precioDe(plan).toFixed(2) : null;
+                    const fila = this.filaElegida;
+                    const precio = fila ? fila.precio : null;
                     const enMano = Number.isFinite(prima) && prima > 0 ? prima.toFixed(2) : '0.00';
 
-                    /* La tasa NEGOCIADA, o vacio si no se toco. Vacio
-                       significa «la del plan»: mandar la de lista igual
+                    /* Vacio significa «la tasa del plan». Desde el 31-ago-2026
+                       este cuadro no la negocia, y mandar la de lista igual
                        serviria, pero el dia que la administracion la cambie
-                       entre cotizar y firmar, el formulario llegaria con la
+                       entre cotizar y firmar el formulario llegaria con la
                        vieja y sin que nadie lo pidiera. */
-                    const tasa = plan ? this.tasaDe(plan) : '';
+                    const tasa = '';
 
                     return {
                         lote: this.seleccionado.id,
@@ -1418,29 +1587,151 @@
                     };
                 },
 
-                /* Lo que se tecleo en la fila de la tasa, o vacio. */
-                tasaDe(plan) {
-                    const tocada = String(this.tasasTocadas[plan.meses] ?? '').trim();
+                /* ¿Se le está bajando algo a ESTE lote?
 
-                    return tocada !== '' && Number.isFinite(Number(tocada)) ? tocada : '';
+                   Mira el descuento que devolvió el servidor y no el que se
+                   tecleó: son distintos. Sobre 285.63 v² una rebaja de
+                   L 37,130.60 no da un precio por vara² redondo, y lo que se
+                   firma es el precio redondeado — así que el descuento de
+                   verdad queda a unos centavos del tecleado. El que se muestra
+                   es el de verdad. */
+                get hayDescuento() {
+                    return this.filaElegida !== null && this.filaElegida.descuento !== null;
                 },
 
-                /* ¿Hay algo que cobrar en concepto de interés?
+                /*
+                 * ═══════════════════════════════════════════════════════════
+                 * LAS COMAS MIENTRAS SE ESCRIBE
+                 * ═══════════════════════════════════════════════════════════
+                 *
+                 * Lo pidio Mauricio el 31-ago-2026: «500, 1,000, 10,000,
+                 * 100,000». No es adorno. Un descuento se teclea de corrido y
+                 * «42744.97» sin comas se lee mal a la primera: hay que
+                 * contar cifras con el dedo en la pantalla, con el cliente
+                 * enfrente, para saber si son cuarenta y dos mil o
+                 * cuatrocientos veintisiete mil. Un cero de mas en un
+                 * descuento es plata regalada.
+                 *
+                 * ⚠️ POR ESO LAS CASILLAS SON DE TEXTO Y NO NUMERICAS:
+                 * un campo `number` RECHAZA la coma —el navegador no la deja
+                 * entrar— asi que con el esto es imposible. A cambio hay que
+                 * limpiar a mano lo que se teclea, que es lo que hace
+                 * `soloNumero`, y el `inputmode` decimal se encarga de que en
+                 * un telefono siga saliendo el teclado de numeros.
+                 *
+                 * 🔴 Y OJO CON LAS COMILLAS DOBLES ACA ADENTRO: todo este
+                 * bloque vive dentro de un atributo `x-data` del HTML. Una
+                 * comilla doble —aunque sea en un comentario— cierra el
+                 * atributo, y el navegador escupe el resto del programa como
+                 * texto arriba del plano. Paso el 31-ago-2026 por escribir el
+                 * nombre de un tipo de campo entre comillas.
+                 *
+                 * Lo que se GUARDA es el numero pelado, sin comas: el
+                 * servidor lo lee con `is_numeric()` y «42,744.97» no lo es
+                 * —seria descartado en silencio y el descuento no se
+                 * aplicaria—. Las comas viven solo en la pantalla.
+                 */
+                soloNumero(texto) {
+                    var limpio = String(texto ?? '').replace(/[^\d.]/g, '');
+                    var punto = limpio.indexOf('.');
 
-                   Praderas vende hoy los cinco plazos sin interés, y una columna con
-                   cinco ceros no es información: es una casilla vacía que el vendedor
-                   tiene que descartar con la vista cada vez que abre el cuadro, con el
-                   cliente enfrente. Si ningún plazo cobra, la columna no está.
+                    if (punto === -1) { return limpio; }
 
-                   No se pierde nada: la columna existe para NEGOCIAR HACIA ABAJO, y
-                   desde cero no hay para dónde bajar. El día que la administración le
-                   ponga tasa a un plan, la columna vuelve sola.
+                    /* Un solo punto, y dos decimales: es dinero. */
+                    return limpio.slice(0, punto + 1)
+                        + limpio.slice(punto + 1).replace(/\./g, '').slice(0, 2);
+                },
 
-                   Se miran las dos tasas —la de lista y la tecleada— y no solo la de
-                   lista: un lote que ya está en el carrito con una tasa pactada la
-                   restaura al reabrirlo, y esa tasa hay que poder verla. */
-get hayInteres() {
-                    return this.filas.some((f) => Number(f.tasa) > 0 || Number(f.tasaLista) > 0);
+                conComas(texto) {
+                    var limpio = this.soloNumero(texto);
+
+                    if (limpio === '') { return ''; }
+
+                    var partes = limpio.split('.');
+                    partes[0] = partes[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+                    return partes.join('.');
+                },
+
+                /*
+                 * Escribe con comas y deja el cursor donde estaba.
+                 *
+                 * Se cuentan los DIGITOS que hay a la izquierda del cursor
+                 * antes de formatear y se lo vuelve a poner despues del mismo
+                 * digito. Sin esto, cada coma que aparece empuja el cursor al
+                 * final: corregir el segundo digito de «1,000,000» se vuelve
+                 * imposible y hay que borrar todo y escribirlo de nuevo.
+                 */
+                formatear(campo, casilla) {
+                    /* Se cuentan digitos Y el punto —no solo digitos—: al
+                       apretar el punto en «42744.» el cursor tiene que quedar
+                       DESPUES de el, listo para los centavos. Contando solo
+                       digitos volvia al 4 de antes y los decimales se escribian
+                       al reves. */
+                    var antes = this.significativos(
+                        casilla.value.slice(0, casilla.selectionStart ?? casilla.value.length)
+                    );
+
+                    this[campo] = this.soloNumero(casilla.value);
+                    casilla.value = this.conComas(this[campo]);
+
+                    var donde = 0;
+                    var vistos = 0;
+
+                    while (donde < casilla.value.length && vistos < antes) {
+                        if (casilla.value[donde] !== ',') { vistos++; }
+                        donde++;
+                    }
+
+                    casilla.setSelectionRange(donde, donde);
+                },
+
+                /* Todo lo que no es coma: los digitos y el punto decimal. La
+                   coma la pone el formato, no la persona. */
+                significativos(texto) {
+                    return String(texto).replace(/,/g, '').length;
+                },
+
+                /*
+                 * Lo que viaja al servidor: sin comas y sin el punto colgando.
+                 *
+                 * «42744.» es un estado legitimo mientras se escribe —el punto
+                 * ya esta y el decimal todavia no— pero no es un numero:
+                 * `Monto` lo rechaza. El servidor tambien lo limpia, y por eso
+                 * mismo esta en los dos lados: una casilla de texto puede
+                 * mandar cualquier cosa, y el dinero no se defiende una sola
+                 * vez.
+                 */
+                numeroLimpio(texto) {
+                    var limpio = this.soloNumero(texto);
+
+                    return limpio.slice(-1) === '.' ? limpio.slice(0, -1) : limpio;
+                },
+
+                /*
+                 * Al salir de una casilla queda el numero ALCANZADO, no el
+                 * tecleado.
+                 *
+                 * Se pide la cotizacion SIN esperar el rebote de 350 ms: quien
+                 * escribe y se va enseguida —un tabulador, un clic en el boton
+                 * de vender— dejaba a la vista lo que tecleo mientras el
+                 * resumen de abajo ya decia otra cosa. La fila anunciaba
+                 * «1,000,000» y el contrato iba a decir «999,999.16».
+                 *
+                 * El rebote pendiente se cancela: sin eso salen dos consultas
+                 * por cada salida de casilla, con 301 lotes y una persona
+                 * atendiendo.
+                 */
+                async alSalir(cual, casilla) {
+                    clearTimeout(this.reloj);
+
+                    await this.recalcular();
+
+                    if (! this.filaElegida) { return; }
+
+                    casilla.value = this.conComas(cual === 'valor'
+                        ? this.filaElegida.valorCrudo
+                        : (this.filaElegida.descuentoCrudo ?? ''));
                 },
 
                 get areaFormateada() {
@@ -1459,15 +1750,16 @@ get hayInteres() {
                     return `${(enVaras * this.medidas.factor).toFixed(2)} ${this.medidas.unidad}`;
                 },
 
-                /* El area con las DOS unidades cuando el proyecto se
-                   cobra en varas² y el plano viene acotado en metros,
-                   igual que la rotula el topografo (A=320.19m2 /
-                   459.22v2). La unidad con la que se VENDE nunca
-                   desaparece.
+                /* El area, SIEMPRE en una sola unidad: la que el
+                   proyecto cobra.
 
-                   En un proyecto que ya trabaja en metros², `dosUnidades`
-                   viene en false: poner los m² al lado seria escribir el
-                   mismo numero dos veces. */
+                   Aca se ponian los m² al lado de las varas², igual que
+                   los rotula el topografo (A=320.19m2 / 459.22v2).
+                   Mauricio lo pidio al reves el 31-ago-2026: «si pongo
+                   varas no debe salirme metros en ningun lugar del
+                   proyecto». `dosUnidades` ya llega siempre en false, asi
+                   que la rama de abajo no se toma nunca; se conserva
+                   mientras el dato siga viajando. */
                 get areaConUnidades() {
                     const propia = `${this.areaFormateada} ${this.medidas.areaCorta}`;
                     const metros = this.seleccionado?.areaMetros;
@@ -1952,25 +2244,31 @@ get hayInteres() {
 
                                                 <template x-if="hayPrecio">
                                                     <div>
-                                                        <label class="plano-prima">
-                                                            Prima
-                                                            <input type="number" min="0" step="0.01" placeholder="0.00"
-                                                                   x-model="prima" x-on:input="recalcularPronto()">
-                                                            L
-                                                        </label>
+                                                        {{-- ═══ LO NEGOCIADO VIVE EN EL RENGLÓN ═══
 
-                                                        {{-- El plazo se ELIGE acá y el precio se puede tocar
-                                                             acá: lo que quede marcado viaja al formulario de
-                                                             venta ya puesto. El servidor lo revalida igual —
-                                                             esto es el arranque, no la última palabra. --}}
+                                                             Lo pidió Mauricio el 31-ago-2026: «según el que
+                                                             seleccionen, ahí se liste el cuadro de descuento y
+                                                             prima, en esa misma celda».
+
+                                                             Y tiene razón de sobra: la prima y el descuento son
+                                                             de la OFERTA que se está armando, no de la pantalla.
+                                                             Arriba, sueltas, parecían un ajuste general y bajaban
+                                                             los cuatro plazos a la vez; adentro del renglón se lee
+                                                             lo que de verdad se está ofreciendo —este plazo, con
+                                                             esta prima y este descuento, sale esta cuota— y los
+                                                             otros tres quedan de lista, que es contra lo que se
+                                                             compara. --}}
+                                                        {{-- El plazo se ELIGE acá: lo que quede marcado viaja al
+                                                             formulario de venta ya puesto. El servidor lo
+                                                             revalida igual — esto es el arranque, no la última
+                                                             palabra. --}}
                                                         <table class="plano-tabla" :style="cotizando ? 'opacity:.55' : ''">
                                                             <thead>
                                                                 <tr>
-                                                                    <th></th>
                                                                     <th>Plazo</th>
-                                                                    <th>Precio <span x-text="medidas.areaCorta"></span></th>
-                                                                    <th x-show="hayInteres">Interés</th>
                                                                     <th>Valor</th>
+                                                                    <th>Descuento</th>
+                                                                    <th>Prima</th>
                                                                     <th>Cuota</th>
                                                                 </tr>
                                                             </thead>
@@ -1979,51 +2277,107 @@ get hayInteres() {
                                                                     <tr
                                                                         class="plano-fila-plan"
                                                                         :class="fila.meses === plazoElegido ? 'elegido' : ''"
-                                                                        x-on:click="plazoElegido = fila.meses"
+                                                                        x-on:click="plazoElegido = fila.meses; recalcularPronto()"
                                                                     >
-                                                                        <td>
+                                                                        {{-- El marcador va DENTRO de la celda del plazo.
+
+                                                                             En su propia columna quedaba una cabecera
+                                                                             vacía y medio dedo de aire entre el punto y
+                                                                             la palabra que nombra: se veía como una
+                                                                             tabla a la que le faltaba algo. --}}
+                                                                        <td class="plazo">
                                                                             <input
                                                                                 type="radio"
                                                                                 :value="fila.meses"
                                                                                 :checked="fila.meses === plazoElegido"
-                                                                                x-on:change="plazoElegido = fila.meses"
+                                                                                x-on:change="plazoElegido = fila.meses; recalcularPronto()"
                                                                             >
+                                                                            <span x-text="fila.etiqueta"></span>
                                                                         </td>
-                                                                        <td x-text="fila.etiqueta"></td>
-                                                                        <td>
-                                                                            <input
-                                                                                type="number"
-                                                                                min="0"
-                                                                                step="0.01"
-                                                                                class="plano-precio"
-                                                                                :class="fila.rebajado ? 'tocado' : ''"
-                                                                                :placeholder="fila.precioLista"
-                                                                                :value="preciosTocados[fila.meses] ?? ''"
-                                                                                x-on:click.stop
-                                                                                x-on:input="preciosTocados[fila.meses] = $event.target.value; recalcularPronto()"
-                                                                            >
-                                                                        </td>
-                                                                        {{-- El precio del DINERO, editable igual que el del
-                                                                             terreno. De contado no hay interés que cobrar. --}}
-                                                                        <td x-show="hayInteres">
-                                                                            <template x-if="fila.meses > 0">
-                                                                                <input
-                                                                                    type="number"
-                                                                                    min="0"
-                                                                                    step="0.001"
-                                                                                    class="plano-precio"
-                                                                                    :class="fila.rebajada ? 'tocado' : ''"
-                                                                                    :placeholder="fila.tasaLista"
-                                                                                    :value="tasasTocadas[fila.meses] ?? ''"
-                                                                                    x-on:click.stop
-                                                                                    x-on:input="tasasTocadas[fila.meses] = $event.target.value; recalcularPronto()"
-                                                                                >
+                                                                        {{-- ═══ EL VALOR TAMBIEN SE ESCRIBE ═══
+
+                                                                             «Por si lo quieren dejar en un numero
+                                                                             cerrado». Se teclea el descuento o se
+                                                                             teclea el total: la otra casilla se
+                                                                             completa sola con lo que devuelve el
+                                                                             servidor.
+
+                                                                             `x-effect` reescribe la casilla SOLO
+                                                                             cuando no la estan usando. Sin ese
+                                                                             guardia, escribir en una le pisaria las
+                                                                             teclas a la otra en cuanto vuelve la
+                                                                             cotizacion.
+
+                                                                             🔴 Y `blur` ADEMAS del efecto, que no es
+                                                                             de mas: el efecto corre cuando llega la
+                                                                             cotizacion, y en ese momento la casilla
+                                                                             todavia tiene el foco, asi que se saltea.
+                                                                             Despues no vuelve a correr —nada cambio—
+                                                                             y quedaba el numero TECLEADO a la vista
+                                                                             contra el ALCANZADO en el resumen: la
+                                                                             fila decia 300,000 y abajo 299,999.31.
+                                                                             Lo vio Mauricio el 31-ago-2026. Al salir
+                                                                             de la casilla se escribe el de verdad,
+                                                                             que es el que se firma. --}}
+                                                                        <td class="campo">
+                                                                            <template x-if="fila.meses === plazoElegido">
+                                                                                <input type="text" inputmode="decimal"
+                                                                                       class="plano-campo"
+                                                                                       :class="fila.rebajado ? 'tocado' : ''"
+                                                                                       x-init="$el.value = conComas(fila.valorCrudo)"
+                                                                                       x-effect="if (filaElegida && document.activeElement !== $el) { $el.value = conComas(filaElegida.valorCrudo); }"
+                                                                                       x-on:blur="alSalir('valor', $event.target)"
+                                                                                       x-on:click.stop
+                                                                                       x-on:input="modoPrecio = 'valor'; formatear('valorMeta', $event.target); recalcularPronto()">
                                                                             </template>
-                                                                            <template x-if="fila.meses === 0">
-                                                                                <span style="color:rgb(161 161 170)">—</span>
+                                                                            <template x-if="fila.meses !== plazoElegido">
+                                                                                <span x-text="fila.valor"></span>
                                                                             </template>
                                                                         </td>
-                                                                        <td x-text="fila.valor"></td>
+
+                                                                        {{-- Las casillas solo existen en el renglón
+                                                                             marcado. En los otros tres una raya: no hay
+                                                                             nada que escribirles porque no son la oferta.
+
+                                                                             `click.stop` para que tocar adentro de la
+                                                                             casilla no vuelva a disparar la selección de
+                                                                             la fila y le robe el foco al cursor. --}}
+                                                                        <td class="campo">
+                                                                            {{-- `x-init` en vez de `:value`: la casilla se
+                                                                                 pinta una vez al aparecer y de ahi la maneja
+                                                                                 `formatear()`. Con un `:value` reactivo,
+                                                                                 Alpine reescribiria el campo en cada tecla y
+                                                                                 le pelearia el cursor al formateo. --}}
+                                                                            <template x-if="fila.meses === plazoElegido">
+                                                                                <input type="text" inputmode="decimal" placeholder="0.00"
+                                                                                       class="plano-campo"
+                                                                                       :class="hayDescuento ? 'tocado' : ''"
+                                                                                       x-init="$el.value = conComas(fila.descuentoCrudo ?? '')"
+                                                                                       x-effect="if (filaElegida && document.activeElement !== $el) { $el.value = conComas(filaElegida.descuentoCrudo ?? ''); }"
+                                                                                       x-on:blur="alSalir('descuento', $event.target)"
+                                                                                       x-on:click.stop
+                                                                                       x-on:input="modoPrecio = 'descuento'; formatear('descuento', $event.target); recalcularPronto()">
+                                                                            </template>
+                                                                            <template x-if="fila.meses !== plazoElegido">
+                                                                                <span class="vacio">—</span>
+                                                                            </template>
+                                                                        </td>
+
+                                                                        {{-- De contado no hay prima que dar: se paga todo
+                                                                             de una vez, así que ni casilla aparece. --}}
+                                                                        <td class="campo">
+                                                                            <template x-if="fila.meses === plazoElegido && fila.meses > 0">
+                                                                                <input type="text" inputmode="decimal" placeholder="0.00"
+                                                                                       class="plano-campo"
+                                                                                       :class="fila.prima ? 'tocado' : ''"
+                                                                                       x-init="$el.value = conComas(prima)"
+                                                                                       x-on:click.stop
+                                                                                       x-on:input="formatear('prima', $event.target); recalcularPronto()">
+                                                                            </template>
+                                                                            <template x-if="! (fila.meses === plazoElegido && fila.meses > 0)">
+                                                                                <span class="vacio">—</span>
+                                                                            </template>
+                                                                        </td>
                                                                         <td class="cuota">
                                                                             <span x-text="fila.cuota ?? '—'"></span>
                                                                             {{-- El desglose del interés NO va acá, y no es un olvido.
@@ -2042,16 +2396,40 @@ get hayInteres() {
                                                             </tbody>
                                                         </table>
 
+                                                        {{-- Cuánto se le está bajando, de verdad.
+
+                                                             El monto que sale acá NO es el que se tecleó: es el
+                                                             que resulta del precio por vara² con el que se
+                                                             firma, ya redondeado. El sistema cobra por vara², y
+                                                             L 37,130.60 sobre 285.63 v² no da un precio redondo,
+                                                             así que los dos números pueden separarse por
+                                                             centavos. El que vale es este — es el que va impreso. --}}
+                                                        <template x-if="hayDescuento">
+                                                            <dl class="plano-rebaja">
+                                                                <div>
+                                                                    <dt>Precio de lista</dt>
+                                                                    <dd x-text="filaElegida.valorLista"></dd>
+                                                                </div>
+                                                                <div class="baja">
+                                                                    <dt>Descuento</dt>
+                                                                    <dd x-text="'− ' + filaElegida.descuento"></dd>
+                                                                </div>
+                                                                <div class="total">
+                                                                    <dt>Valor</dt>
+                                                                    <dd x-text="filaElegida.valor"></dd>
+                                                                </div>
+
+                                                            </dl>
+                                                        </template>
+
+                                                        {{-- Corta a propósito. Antes eran cinco renglones de gris
+                                                             que nadie leía y que hacían ver el cuadro cargado; lo
+                                                             que hay que saber es que un descuento pide motivo al
+                                                             firmar. Lo demás se explica solo, y el detalle del
+                                                             redondeo aparece recién cuando hay un descuento. --}}
                                                         <p class="plano-planes-nota">
-                                                            Marcá el plazo con el que se va a vender.
-                                                            <span x-show="hayInteres">El precio y el interés se pueden cambiar
-                                                                acá mismo; vacío es lo que ofrece el plan, y si bajás alguno de
-                                                                los dos el sistema va a pedir el motivo por escrito.</span>
-                                                            <span x-show="! hayInteres">El precio se puede cambiar acá mismo;
-                                                                vacío es lo que ofrece el plan, y si lo bajás el sistema va a
-                                                                pedir el motivo por escrito.</span>
-                                                            La cuota sale del mismo motor que firma el contrato: es la que va a
-                                                            salir impresa.
+                                                            Marcá el plazo con el que se va a vender. Un descuento
+                                                            pide el motivo por escrito al firmar.
                                                         </p>
                                                     </div>
                                                 </template>

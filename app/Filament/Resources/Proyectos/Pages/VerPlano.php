@@ -541,9 +541,28 @@ class VerPlano extends Page
                             ->content(fn (Get $get): string => $this->cuenta($get, 'aviso')),
                     ]),
 
+                /*
+                 * ═══ DOS COLUMNAS Y NO TRES (31-ago-2026) ═══
+                 *
+                 * Lo dijo Mauricio mirando el modal: «que use mejor el
+                 * espacio, se ve feo». Y era cierto, aunque el motivo no se
+                 * ve hasta contar los campos.
+                 *
+                 * Despues de cotizar quedan CUATRO campos a la vista —dia de
+                 * pago, fecha, como entra la prima y quien la recibio— y
+                 * cuatro no llenan una grilla de tres: dejaban un tercio en
+                 * blanco en cada fila, con los campos angostos y los textos de
+                 * ayuda partidos en tres renglones. De a dos, esos cuatro son
+                 * dos filas al ras.
+                 *
+                 * El camino manual —el que teclea plazo, precio, prima y
+                 * tasa— tambien cierra parejo, y por eso la tasa subio al lado
+                 * de la prima: los cuatro numeros del negocio juntos, arriba,
+                 * y las fechas y el dinero abajo.
+                 */
                 Section::make('Condiciones')
                     ->icon(Heroicon::OutlinedBanknotes)
-                    ->columns(3)
+                    ->columns(2)
                     ->schema([
                         /*
                          * ╔══ dehydratedWhenHidden() NO ES DECORACION ══╗
@@ -610,6 +629,24 @@ class VerPlano extends Page
                                 : 'Se paga completa al firmar (R5), y no puede ser cero.'),
 
                         /*
+                         * El precio del DINERO, al lado del precio del
+                         * terreno y con la misma regla. Vive fuera del cuadro
+                         * cotizado por lo mismo que `motivo_descuento`: es uno
+                         * por contrato, y el Service lo aplica a cada renglon.
+                         */
+                        TextInput::make('tasa_interes_anual')
+                            ->label('Interés anual')
+                            ->numeric()
+                            ->minValue(0)
+                            ->maxValue(TasaDeInteres::MAXIMA)
+                            ->step('0.001')
+                            ->suffix('%')
+                            ->live(onBlur: true)
+                            ->visible(fn (Get $get): bool => ! $get('cotizado'))
+                            ->dehydratedWhenHidden()
+                            ->helperText('Vacío o 0 es sin interés. Si baja de la del plan, hay que escribir por qué.'),
+
+                        /*
                          * Sin cuotas no hay dia de pago. Lo pidio Mauricio el
                          * 14-ago-2026 viendo el modal de una venta de contado:
                          * preguntar «¿que dia paga?» cuando no va a pagar
@@ -640,40 +677,6 @@ class VerPlano extends Page
                             ->displayFormat('d/m/Y'),
 
                         /*
-                         * El precio del DINERO, al lado del precio del
-                         * terreno y con la misma regla. Vive fuera del cuadro
-                         * cotizado por lo mismo que `motivo_descuento`: es uno
-                         * por contrato, y el Service lo aplica a cada renglon.
-                         */
-                        TextInput::make('tasa_interes_anual')
-                            ->label('Interés anual')
-                            ->numeric()
-                            ->minValue(0)
-                            ->maxValue(TasaDeInteres::MAXIMA)
-                            ->step('0.001')
-                            ->suffix('%')
-                            ->live(onBlur: true)
-                            ->visible(fn (Get $get): bool => ! $get('cotizado'))
-                            ->dehydratedWhenHidden()
-                            ->helperText('Vacío o 0 es sin interés. Si baja de la del plan, hay que escribir por qué.'),
-
-                        TextInput::make('motivo_tasa')
-                            ->label('Motivo de la tasa')
-                            ->maxLength(200)
-                            ->columnSpanFull()
-                            ->visible(fn (Get $get): bool => $this->hayRebajaDeTasa($get))
-                            ->required(fn (Get $get): bool => $this->hayRebajaDeTasa($get))
-                            ->helperText('El interés va por debajo del que ofrece el plan. R4: queda con tu usuario y la fecha.'),
-
-                        TextInput::make('motivo_descuento')
-                            ->label('Motivo del descuento')
-                            ->maxLength(200)
-                            ->columnSpanFull()
-                            ->visible(fn (Get $get): bool => $this->hayDescuento($get))
-                            ->required(fn (Get $get): bool => $this->hayDescuento($get))
-                            ->helperText('El precio va por debajo del de lista. R4: queda con tu usuario y la fecha.'),
-
-                        /*
                          * La prima se paga completa al firmar (R5), asi que
                          * al firmar hay dinero entrando y sale su recibo. Lo
                          * que se cobra hoy es la prima MENOS lo que ya se
@@ -697,7 +700,7 @@ class VerPlano extends Page
                          * del dia la sumaba bajo «Sin usuario».
                          */
                         QuienRecibeElDinero::campo(
-                            'Viene marcado con tu nombre; cambialo si la prima la recibió otra persona. De acá sale el corte de caja del día.'
+                            'Viene con tu nombre. Cambialo si la recibió otra persona: de acá sale el corte de caja del día.'
                         ),
 
                         TextInput::make('referencia_prima')
@@ -706,6 +709,30 @@ class VerPlano extends Page
                             ->visible(fn (Get $get): bool => $this->exigeReferenciaDeLaPrima($get))
                             ->required(fn (Get $get): bool => $this->exigeReferenciaDeLaPrima($get))
                             ->helperText('Es lo unico que despues permite encontrar ese movimiento en el estado de cuenta del banco (R11).'),
+
+                        /*
+                         * Los dos motivos van AL FINAL y a lo ancho, y no
+                         * intercalados entre los campos cortos: son frases, no
+                         * datos, y aparecen solo cuando alguien bajo un
+                         * numero. Puestos en el medio partian una fila de dos
+                         * al ras y dejaban media pantalla en blanco arriba de
+                         * la prima (31-ago-2026, mirando el modal).
+                         */
+                        TextInput::make('motivo_tasa')
+                            ->label('Motivo de la tasa')
+                            ->maxLength(200)
+                            ->columnSpanFull()
+                            ->visible(fn (Get $get): bool => $this->hayRebajaDeTasa($get))
+                            ->required(fn (Get $get): bool => $this->hayRebajaDeTasa($get))
+                            ->helperText('El interés va por debajo del que ofrece el plan. R4: queda con tu usuario y la fecha.'),
+
+                        TextInput::make('motivo_descuento')
+                            ->label('Motivo del descuento')
+                            ->maxLength(200)
+                            ->columnSpanFull()
+                            ->visible(fn (Get $get): bool => $this->hayDescuento($get))
+                            ->required(fn (Get $get): bool => $this->hayDescuento($get))
+                            ->helperText('El precio va por debajo del de lista. R4: queda con tu usuario y la fecha.'),
 
                         Textarea::make('observaciones')
                             ->label('Observaciones')
@@ -1226,33 +1253,162 @@ class VerPlano extends Page
             return [];
         }
 
-        $precios = is_array($datos['precios'] ?? null) ? $datos['precios'] : [];
-        $tasas = is_array($datos['tasas'] ?? null) ? $datos['tasas'] : [];
+        $areaVaras = (string) $lote->getAttribute('area_varas');
+
+        /*
+         * ═══ LO NEGOCIADO ES DEL RENGLON MARCADO ═══
+         *
+         * La prima y el descuento se escriben ADENTRO de la fila del plazo
+         * que se esta armando, y por eso se aplican SOLO a esa fila. Las
+         * otras tres quedan en lista: son con lo que se compara.
+         *
+         * Sin plazo marcado no hay nada negociado y las cuatro salen de
+         * lista, que es lo correcto: todavia no se eligio la oferta.
+         */
+        $elegido = $this->plazoDe($datos['plazo'] ?? null);
+        $descuento = $this->montoTecleado($datos['descuento'] ?? null) ?? Monto::cero();
+        $prima = $this->montoTecleado($datos['prima'] ?? null) ?? Monto::cero();
+
+        /*
+         * ═══ DOS PUERTAS AL MISMO NUMERO ═══
+         *
+         * El precio del lote se puede escribir de dos maneras: cuanto se le
+         * baja, o cuanto queda. Lo pidio Mauricio el 31-ago-2026 —«por si lo
+         * quieren dejar en un numero cerrado»— y es como se negocia de
+         * verdad: a veces se regatea la rebaja y a veces se cierra el total.
+         *
+         * `modo` dice cual de las dos casillas se tecleo de ultimo. No se
+         * adivina mirando cual trae texto: las dos traen, porque la que no se
+         * toca se rellena sola con lo que devolvio esta misma funcion.
+         */
+        $porValor = ($datos['modo'] ?? '') === 'valor';
+        $valorMeta = $porValor ? $this->montoTecleado($datos['valor'] ?? null) : null;
 
         $planes = [];
 
         foreach ($this->planesVigentes() as $plan) {
             $meses = (int) $plan->getAttribute('meses');
+            $suyo = $elegido !== null && $meses === $elegido;
             $precioLista = $plan->montoPrecioVara();
             $tasaLista = $plan->tasaDeInteres();
 
             $planes[] = [
-                'meses'       => $meses,
-                'etiqueta'    => $plan->nombre(),
-                'precio'      => $this->montoTecleado($precios[$meses] ?? null) ?? $precioLista,
+                'meses'    => $meses,
+                'etiqueta' => $plan->nombre(),
+                'precio'   => match (true) {
+                    ! $suyo                     => $precioLista,
+                    $valorMeta instanceof Monto => $this->precioParaValor($valorMeta, $areaVaras),
+                    default                     => $this->conDescuento($precioLista, $descuento, $areaVaras),
+                },
                 'precioLista' => $precioLista,
-                'tasa'        => $this->tasaTecleada($tasas[$meses] ?? null) ?? $tasaLista,
-                'tasaLista'   => $tasaLista,
+                // De contado no hay prima: se paga todo de una vez.
+                'prima' => $suyo && $meses > 0 ? $prima : Monto::cero(),
+                /*
+                 * La tasa es la del plan y no se negocia desde acá. Se sacó
+                 * el 31-ago-2026 a pedido de Mauricio junto con la columna
+                 * del precio por vara²: el cuadro quedó en «cuánto vale,
+                 * cuánto le bajo y cuánto de prima». El formulario de venta
+                 * la sigue teniendo.
+                 */
+                'tasa'      => $tasaLista,
+                'tasaLista' => $tasaLista,
             ];
         }
 
         return new CotizacionDelLote()->para(
-            (string) $lote->getAttribute('area_varas'),
-            $this->montoTecleado($datos['prima'] ?? null) ?? Monto::cero(),
+            $areaVaras,
             $planes,
             CarbonImmutable::parse(today()->toDateString()),
             $this->configEntero('lotificadora.ventas.dia_pago_default', 5),
         );
+    }
+
+    /**
+     * El plazo marcado, como entero.
+     *
+     * ⚠️ Livewire hidrata los numeros del navegador como float, no como int
+     * —la misma trampa que documenta `comoTexto()` mas abajo—, asi que un
+     * `is_int()` a secas devolveria null para el 24 que se acaba de marcar y
+     * la fila saldria de lista sin que nadie se entere.
+     */
+    private function plazoDe(mixed $valor): ?int
+    {
+        if (is_int($valor)) {
+            return $valor;
+        }
+
+        if (is_float($valor) && $valor === floor($valor)) {
+            return (int) $valor;
+        }
+
+        return is_string($valor) && $valor !== '' && ctype_digit($valor) ? (int) $valor : null;
+    }
+
+    /**
+     * El precio por vara² que queda después de un descuento EN LEMPIRAS.
+     *
+     * ═══ POR QUÉ ACÁ Y NO EN EL NAVEGADOR ═══
+     *
+     * Porque es una división de dinero, y el §8.3.1 no deja hacerla en
+     * `float`. El sistema cobra por vara²: un descuento de L 37,130.60 sobre
+     * 285.62 v² son L 130.000000 por vara, y sobre 285.63 no da redondo.
+     *
+     * ═══ POR QUÉ SE REDONDEA ACÁ, Y A SEIS ═══
+     *
+     * Porque este es el número que se FIRMA: viaja al formulario de venta y
+     * el servidor recalcula el valor del lote a partir de él. Si acá quedara
+     * la división con doce decimales, el cuadro mostraría un valor y el
+     * contrato diría otro.
+     *
+     * 🔴 Y a SEIS y no a dos. `precio_vara` lleva seis decimales desde el
+     * 11-ago-2026 —ver la migración `precio_vara_con_seis_decimales`— y la
+     * razón es exactamente esta: la lotificadora no cobra por vara², cobra un
+     * precio por LOTE redondeado a una cifra vendible, y con dos decimales
+     * ese precio NO SE PUEDE ESCRIBIR. Un rato lo redondeé a dos y pedir
+     * «300,000 cerrados» daba 299,999.31. Lo cachó Mauricio el 31-ago-2026.
+     *
+     * El dinero sigue con dos decimales; lo que gana precisión es el factor.
+     */
+    private function conDescuento(Monto $precioLista, Monto $descuento, string $areaVaras): Monto
+    {
+        if ($descuento->esCero() || ! is_numeric($areaVaras) || (float) $areaVaras <= 0.0) {
+            return $precioLista;
+        }
+
+        $porVara = $descuento->dividirPor($areaVaras);
+
+        /*
+         * Un descuento más grande que el lote entero dejaría el precio en
+         * negativo, y `Monto::restar()` lo rechaza con una excepción que
+         * tumbaría el cuadro completo. Se topa en cero: quien atiende ve
+         * «L 0.00» y entiende solo que se pasó.
+         */
+        if (! $porVara->menorQue($precioLista)) {
+            return Monto::cero();
+        }
+
+        return new Monto($precioLista->restar($porVara)->redondeado(Lote::DECIMALES_DEL_PRECIO));
+    }
+
+    /**
+     * El precio por vara² para que el lote valga un total dado.
+     *
+     * ⚠️ EL TOTAL PEDIDO CASI NUNCA SE ALCANZA EXACTO, y no es un defecto de
+     * esta cuenta: `compromisos.precio_vara` es DECIMAL(14,2), asi que el
+     * valor del lote solo puede caer en los multiplos de un centavo de vara.
+     * En un lote de 839.04 v² eso es un escalon de L 8.39: pedir «un millon
+     * redondo» da L 999,999.16, que es el punto de la escalera mas cercano.
+     *
+     * La pantalla muestra el valor ALCANZADO —el que se firma— apenas se sale
+     * de la casilla, para que nadie le diga un numero al cliente y firme otro.
+     */
+    private function precioParaValor(Monto $valor, string $areaVaras): Monto
+    {
+        if (! is_numeric($areaVaras) || (float) $areaVaras <= 0.0) {
+            return Monto::cero();
+        }
+
+        return new Monto($valor->dividirPor($areaVaras)->redondeado(Lote::DECIMALES_DEL_PRECIO));
     }
 
     /**
@@ -1278,7 +1434,31 @@ class VerPlano extends Page
     private function comoTexto(mixed $valor, int $decimales): ?string
     {
         if (is_string($valor)) {
-            $texto = trim($valor);
+            /*
+             * ═══ 🔴 LO QUE MANDA UNA CASILLA DE TEXTO, NO UNA NUMERICA ═══
+             *
+             * Desde el 31-ago-2026 el descuento y la prima se escriben con
+             * separador de miles a la vista —«1,234,567»— y eso obligo a que
+             * sean campos de texto: un `input` numerico no deja entrar la
+             * coma. Con texto, lo que llega ya no es siempre un numero.
+             *
+             * Dos estados rompian de maneras distintas:
+             *
+             *  · «42,744» con coma: `is_numeric` dice que NO, asi que volvia
+             *    null y null significa «no lo tocaron». El descuento se
+             *    descartaba EN SILENCIO y el lote se cotizaba a precio de
+             *    lista con quien atiende creyendo que lo habia rebajado.
+             *
+             *  · «42744.» con el punto puesto y el decimal todavia no —un
+             *    estado legitimo a mitad de una tecla—: `is_numeric` dice que
+             *    SI y `Monto` dice que no, asi que llegaba a `new Monto()` y
+             *    tumbaba el panel con un 500 mientras la persona escribia.
+             *
+             * Se limpian los dos acá, en la puerta. La coma en un campo de
+             * dinero es separador de miles y no significa otra cosa; el punto
+             * colgando no es un decimal, es una tecla a medio camino.
+             */
+            $texto = rtrim(str_replace(',', '', trim($valor)), '.');
 
             return $texto === '' || ! is_numeric($texto) ? null : $texto;
         }
@@ -1852,7 +2032,40 @@ class VerPlano extends Page
             $error = '';
 
             try {
-                $plan = PlanDeCuotas::nuevo($valor, $prima, $condicion['plazo'], $diaPago, $fecha);
+                /*
+                 * ═══ 🔴 LA TASA. NO SE PUEDE OMITIR ═══
+                 *
+                 * `PlanDeCuotas::nuevo()` la recibe de ultima y por defecto es
+                 * null, que significa SIN INTERES. Omitirla acá hacía que este
+                 * cuadro —«Lo que se va a firmar»— dividiera el saldo entre los
+                 * meses y mostrara esa cuota.
+                 *
+                 * Con los planes al 0 % nadie lo vio. El 31-ago-2026 Mauricio
+                 * puso los cuatro planes de Altamira al 12 % y el error salio a
+                 * la luz en la misma pantalla: el plano cotizaba L 21,323.71 y
+                 * dos clics despues el cuadro de la firma decia L 20,000.00
+                 * —240,000 entre 12, sin un centavo de interes—.
+                 *
+                 * La venta de verdad nunca estuvo mal: `PrecioPactado` manda la
+                 * tasa en null y `RegistroDeVentas` la resuelve como la del plan
+                 * (ver su linea 661). O sea que el contrato SI salia con el
+                 * 12 %: lo que mentia era el numero que el vendedor le lee al
+                 * cliente antes de firmar. Es el mismo pecado que documenta
+                 * `CotizacionDelLote` y por el que ese cuadro se calcula en el
+                 * servidor.
+                 *
+                 * `null` acá significa «la que ofrece el plan de ese plazo», y
+                 * se resuelve con la MISMA regla que el Service para que los dos
+                 * numeros no puedan separarse nunca mas.
+                 */
+                $plan = PlanDeCuotas::nuevo(
+                    $valor,
+                    $prima,
+                    $condicion['plazo'],
+                    $diaPago,
+                    $fecha,
+                    $this->tasaTecleada($condicion['tasa'] ?? null) ?? $this->tasaDelPlazo($condicion['plazo']),
+                );
             } catch (GrupoOlympoException $problema) {
                 // El mensaje del dominio ya esta escrito para quien atiende;
                 // lo que falta es de que lote esta hablando.

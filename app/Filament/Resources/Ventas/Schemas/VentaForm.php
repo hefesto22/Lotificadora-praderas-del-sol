@@ -10,6 +10,7 @@ use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\ListaDePrecios;
 use App\Domain\Ventas\PlanDeCuotas;
+use App\Domain\Ventas\TasaDeInteres;
 use App\Filament\Schemas\Components\DNIField;
 use App\Filament\Schemas\Components\MayusculasField;
 use App\Filament\Schemas\Components\MontoField;
@@ -18,6 +19,7 @@ use App\Filament\Schemas\Components\TelefonoHondurasField;
 use App\Filament\Support\Unidades;
 use App\Models\Cliente;
 use App\Models\Lote;
+use App\Models\PlanDePago;
 use App\Models\Proyecto;
 use App\Models\Vendedor;
 use Carbon\CarbonImmutable;
@@ -395,6 +397,28 @@ class VentaForm
     }
 
     /**
+     * La tasa que ofrece el plan de ese plazo, o cero si no hay plan.
+     *
+     * Es la misma regla que aplica `RegistroDeVentas` cuando el acuerdo llega
+     * sin tasa (su línea 661): null significa «la del plan». Escrita dos veces
+     * a propósito —una acá para la pantalla y otra allá para el contrato— pero
+     * dando siempre lo mismo, que es lo único que importa.
+     */
+    private static function tasaDelPlan(mixed $proyectoId, int $plazo): TasaDeInteres
+    {
+        if (! is_numeric($proyectoId)) {
+            return TasaDeInteres::cero();
+        }
+
+        $plan = PlanDePago::query()
+            ->where('proyecto_id', (int) $proyectoId)
+            ->where('meses', $plazo)
+            ->first();
+
+        return $plan instanceof PlanDePago ? $plan->tasaDeInteres() : TasaDeInteres::cero();
+    }
+
+    /**
      * @return array<string, string>
      */
     private static function resumen(Get $get): array
@@ -412,7 +436,32 @@ class VentaForm
         $fecha = self::fecha($get('fecha_contrato'));
 
         try {
-            $plan = PlanDeCuotas::nuevo($valor, $prima, $plazo, $diaPago, $fecha);
+            /*
+             * ═══ 🔴 LA TASA. NO SE PUEDE OMITIR ═══
+             *
+             * `PlanDeCuotas::nuevo()` la recibe de última y por defecto es
+             * null, que significa SIN INTERÉS. Este resumen la omitía, así que
+             * dividía el saldo entre los meses y mostraba esa cuota.
+             *
+             * El contrato NUNCA salió mal: `CreateVenta::precios()` manda la
+             * tasa en null y `RegistroDeVentas` la resuelve como la del plan
+             * de ese plazo. Lo que mentía era el número que quien atiende lee
+             * en pantalla antes de firmar — y ese es el que se dice en voz
+             * alta, con el cliente enfrente.
+             *
+             * Con los planes al 0 % nadie lo vio nunca. El 31-ago-2026
+             * Mauricio puso Altamira al 12 % y el mismo error salió a la luz
+             * en el cuadro del plano; este es su gemelo, en el formulario de
+             * ventas. Se resuelve con la MISMA regla que el Service.
+             */
+            $plan = PlanDeCuotas::nuevo(
+                $valor,
+                $prima,
+                $plazo,
+                $diaPago,
+                $fecha,
+                self::tasaDelPlan($get('proyecto_id'), $plazo),
+            );
         } catch (GrupoOlympoException $e) {
             // El mensaje del dominio ya está escrito para quien atiende.
             return ['error' => $e->getMessage()];
