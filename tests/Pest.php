@@ -142,6 +142,9 @@ function sembrarPermisosDeShield(): void
         'DevolverSenia:Compromiso',
         // R12: anular un recibo mal emitido. Solo la administradora.
         'Anular:Recibo',
+        // Corregir lo que no es dinero de un recibo (4-sep-2026). No es un
+        // Update: el monto, el concepto y la fecha siguen cerrados.
+        'Corregir:Recibo',
         // Perdonar la mora de un atraso: plata que se deja de cobrar.
         'CondonarMora:Recibo',
         // Los prospectos del plano publico. Sin Create ni Delete: nacen en

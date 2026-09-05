@@ -1,7 +1,90 @@
-# Continuar acá — 31-ago-2026
+# Continuar acá — 4-sep-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 🔴 4-sep — «Corregir»: editar un recibo sin poder tocar el dinero
+
+**Salió de producción.** El recibo **RPS-00000022** —una PRIMA del 29-ago, de
+EVELYN JANETH CRUZ MOLINA— quedó con `recibido_por` en **NULL**: nació antes de
+que la prima preguntara quién recibía el dinero (ver 31-ago, más abajo), así que
+el corte de caja lo sumaba bajo «Sin usuario». Hubo que entrar por SSH a
+producción y arreglarlo a mano con `artisan tinker`.
+
+⚠️ **El tinker de `www-data` no arranca solo.** `HOME=/var/www` no es
+escribible, psysh intenta escribir `/var/www/.config/psysh`, avisa y **muere sin
+ejecutar nada** — parece que corrió y no corrió. Va con `env` adelante:
+
+    sudo -u www-data env HOME=/tmp XDG_CONFIG_HOME=/tmp /usr/bin/php8.5 artisan tinker --execute="..."
+
+**Y de ahí el pedido:** «que pueda editar los recibos la administradora, solo
+los recibos» — Mauricio.
+
+### La decisión: editar un recibo son DOS cosas, y solo una es peligrosa
+
+`ReciboPolicy::update()` **sigue devolviendo `false`**, y eso no es una
+contradicción. El `Update` genérico de Filament abre el formulario entero —el
+monto, el concepto, la fecha—, y ahí está el desastre: el papel que el cliente
+ya se llevó diría una cosa y la base otra, y si el recibo se aplicó a cuotas
+queda descuadrado el plan (es lo que `olympo:cuadrar-recibos` busca desde el
+27-ago). Para un error de plata sigue estando **anular + reemitir**.
+
+`Corregir:Recibo` abre **cuatro campos que no mueven un centavo**:
+
+| Se corrige | No se toca |
+|---|---|
+| quién recibió el dinero · forma de pago · referencia · observaciones | monto · concepto · **fecha** · correlativo · cliente |
+
+La fecha quedó afuera a propósito: decide en qué corte de caja cae el dinero,
+así que moverla cambia el cierre de **dos** días.
+
+La lista vive en `CorreccionDeRecibo::CAMPOS` y **es la regla, no una
+comodidad**: agregarle un nombre es una decisión de negocio. Hay un test que se
+pone rojo si alguien mete `monto` ahí.
+
+### Lo que entró
+
+1. **`App\Domain\Pagos\CorreccionDeRecibo`** — relee con `lockForUpdate()`
+   como `anular()`, exige motivo, y deja **UN** asiento en la bitácora: apaga
+   el log automático (`disableLogging()`) para que no queden dos filas por un
+   mismo cambio —la automática con nombres de columna y sin el porqué, y la
+   buena—. El asiento va con `withChanges()` (§ lo de siempre: `properties` es
+   donde nadie lo pinta) y con las **etiquetas de la pantalla**, no las
+   columnas: lo va a leer la administradora, no un programador.
+2. **`ReciboPolicy::corregir()`** con `Corregir:Recibo`, nombrado uno por uno
+   (§9.E3). **El receptor NO lo hereda**: a nombre de quién quedó un cobro es
+   justo lo que quien cobró no debería poder cambiar solo. Y no se corrige un
+   recibo **anulado**.
+3. **`App\Filament\Support\CorregirRecibo`** — el modal, al lado de
+   `ImprimirRecibo` porque va en **dos** pantallas: la lista y la ficha.
+4. **Motivo obligatorio**, como en Anular. No se guarda en el recibo —el papel
+   del cliente no cambia—: queda en Registros de actividad con el antes, el
+   después y el usuario.
+
+🔴 **La referencia NO se exige, y no es un olvido.** El cobro dejó de exigirla
+el 27-ago (llega la transferencia y el número todavía no lo tiene nadie).
+Exigirla acá haría **imposible corregir justo los recibos que salieron sin
+referencia**, que son los que más falta hace corregir. Esta pantalla es
+precisamente donde se teclea ese número.
+
+### Qué mirar en pruebas
+
+`Recibos` → abrir cualquiera → botón **Corregir** (ámbar, al lado de Imprimir).
+Cambiar «quién recibió el dinero», guardar con motivo, y verlo en
+**Registros de actividad**: un solo asiento, con el antes y el después.
+Después entrar como **receptor**: el botón no tiene que estar.
+
+### 🔴 Al desplegar
+
+    sudo -u www-data /usr/bin/php8.5 artisan olympo:sembrar-permisos
+
+Sin eso `Corregir:Recibo` no existe en la base y **el botón no se dibuja**: es
+exactamente el caso que hizo nacer ese comando.
+
+### Queda pendiente
+
+- **El manual de la administradora** (`docs/manuales/*.pdf`) no menciona
+  Corregir. El PDF no tiene fuente en el repo, así que se actualiza aparte.
 
 ## 🔴 31-ago — El recibo de la prima: sin lote, sin saldo, y con el nombre equivocado
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Recibos\Pages;
 
 use App\Filament\Resources\Recibos\ReciboResource;
+use App\Filament\Support\CorregirRecibo;
 use App\Filament\Support\ImprimirRecibo;
 use Filament\Actions\Action;
 use Filament\Resources\Pages\ViewRecord;
@@ -28,6 +29,6 @@ class ViewRecibo extends ViewRecord
     #[Override]
     protected function getHeaderActions(): array
     {
-        return [ImprimirRecibo::accion()];
+        return [CorregirRecibo::accion(), ImprimirRecibo::accion()];
     }
 }

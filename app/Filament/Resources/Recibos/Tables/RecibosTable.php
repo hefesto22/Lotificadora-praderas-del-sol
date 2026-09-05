@@ -9,6 +9,7 @@ use App\Domain\Enums\FormaDePago;
 use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\Pagos\RegistroDePagos;
 use App\Filament\Support\BuscarNombre;
+use App\Filament\Support\CorregirRecibo;
 use App\Filament\Support\ImprimirRecibo;
 use App\Models\Recibo;
 use Filament\Actions\Action;
@@ -230,6 +231,7 @@ class RecibosTable
                 ActionGroup::make([
                     ViewAction::make(),
                     ImprimirRecibo::accion(),
+                    CorregirRecibo::accion(),
                     self::anular(),
                 ]),
             ])

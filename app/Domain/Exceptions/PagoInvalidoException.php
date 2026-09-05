@@ -364,4 +364,46 @@ final class PagoInvalidoException extends GrupoOlympoException
             'plan, no a la mora.'
         );
     }
+
+    /**
+     * Corregir un recibo sin decir por qué.
+     *
+     * El motivo pesa lo mismo que en la anulación: el papel que el cliente
+     * tiene en la mano dejó de coincidir con la base, y alguien va a querer
+     * saber quién lo decidió y con qué razón.
+     */
+    public static function porFaltarElMotivoDeLaCorreccion(): self
+    {
+        return new self(
+            'Corregir un recibo cambia lo que dice la base sobre un papel que ya se entregó, así '.
+            'que hace falta escribir por qué. Alcanza con una línea: «la referencia de la '.
+            'transferencia se tecleó mal», «el dinero lo recibió don Elder, no doña Rosa».'
+        );
+    }
+
+    /**
+     * Un recibo anulado ya no se corrige: se corrige el que lo reemplazó.
+     */
+    public static function porCorregirUnReciboAnulado(string $folio): self
+    {
+        return new self(
+            "El recibo {$folio} está anulado, así que ya no hay nada que corregirle. Si el papel ".
+            'bueno es el que lo reemplazó, corregí ese.'
+        );
+    }
+
+    /**
+     * El usuario elegido ya no existe.
+     *
+     * Pasa si alguien deja el modal abierto y mientras tanto se borra a esa
+     * persona. Sin esto la caída sería un error de llave foránea de Postgres,
+     * que no le dice nada a quien está en la pantalla.
+     */
+    public static function porQuienRecibioQueNoExiste(): self
+    {
+        return new self(
+            'La persona que elegiste como quien recibió el dinero ya no existe en el sistema. '.
+            'Recargá la página y elegí de la lista nueva.'
+        );
+    }
 }

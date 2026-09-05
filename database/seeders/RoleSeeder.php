@@ -196,7 +196,20 @@ class RoleSeeder extends Seeder
          * quien no debería poder decidirlo solo. Va con motivo escrito, y
          * queda en el recibo con el nombre de quien lo autorizó.
          */
-        $permisos = [...$permisos, ...$this->permisos(['Anular', 'CondonarMora'], ['Recibo'])];
+        /*
+         * `Corregir` entra al lado de los otros dos el 4-sep-2026, y NO es un
+         * `Update` con otro nombre: abre cuatro campos que no mueven dinero
+         * —quién recibió, forma de pago, referencia, observaciones— mientras
+         * `ReciboPolicy::update()` sigue devolviendo false para el monto, el
+         * concepto y la fecha. Lo pidió Mauricio después de arreglar a mano
+         * por SSH un recibo que salió sin «recibido_por». La lista de campos
+         * es `CorreccionDeRecibo::CAMPOS`.
+         *
+         * Tampoco lo hereda el receptor, por la misma razón que Anular: a
+         * nombre de quién quedó un cobro es lo que quien cobró no debería
+         * poder cambiar solo.
+         */
+        $permisos = [...$permisos, ...$this->permisos(['Anular', 'CondonarMora', 'Corregir'], ['Recibo'])];
 
         /*
          * Los prospectos del plano público: nombre y teléfono de gente que
