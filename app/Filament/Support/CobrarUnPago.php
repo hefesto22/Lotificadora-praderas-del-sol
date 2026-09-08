@@ -29,7 +29,6 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
-use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -510,11 +509,17 @@ final readonly class CobrarUnPago
     private function valoresIniciales(ModoDeCobro $porDefecto): array
     {
         $datos = [
-            'modo'          => $porDefecto->value,
-            'fecha'         => today()->toDateString(),
-            'forma_pago'    => FormaDePago::Efectivo->value,
-            'compromiso_id' => $this->primerLoteConSaldo()?->getKey(),
-            'modalidad'     => ModalidadDeReprogramacion::AcortarPlazo->value,
+            'modo'       => $porDefecto->value,
+            'fecha'      => today()->toDateString(),
+            'forma_pago' => FormaDePago::Efectivo->value,
+            /*
+             * 🔴 «Ambas» arranca como arrancaba antes del 8-sep-2026: el primer
+             * lote con saldo marcado y el sobrante entero para él. Con un solo
+             * lote marcado, «partes iguales» le da todo a ese — así que quien ya
+             * usaba esta pantalla no tiene que hacer NADA distinto, y quien
+             * necesita repartir solo marca el segundo.
+             */
+            'reparto_sobrante' => 'iguales',
             /*
              * ⚠️ Acá y NO en un `->default()` del campo: la acción llena el
              * formulario con `fillForm()`, y ese arreglo ES el estado inicial —
@@ -553,6 +558,23 @@ final readonly class CobrarUnPago
              */
             $datos["saldar_{$id}"] = count($lotes) === 1;
             $datos["descuento_{$id}"] = null;
+
+            /*
+             * ── El sobrante de «Ambas» (8-sep-2026) ────────────────────
+             *
+             * 🔴 Acá y NO en un `->default()` del campo, por lo de arriba:
+             * `fillForm()` ES el estado inicial y los `default()` no se aplican.
+             * Sin esta línea el modal abre con la modalidad vacía y el botón de
+             * guardar no hace nada visible.
+             *
+             * Viene marcado SOLO el primer lote con saldo, que con «partes
+             * iguales» se lleva todo el sobrante: es exactamente lo que hacía el
+             * Select `compromiso_id` hasta hoy. Quien ya usaba esta pantalla no
+             * tiene que aprender nada; quien necesita repartir marca el segundo.
+             */
+            $datos["capital_{$id}"] = $lote === $lotes[0];
+            $datos["capital_monto_{$id}"] = null;
+            $datos["capital_modalidad_{$id}"] = ModalidadDeReprogramacion::AcortarPlazo->value;
         }
 
         return $datos;
@@ -640,7 +662,7 @@ final readonly class CobrarUnPago
              * antes el que va a construir y bajar la cuota del otro.
              */
             Section::make('¿A qué lotes abona?')
-                ->description('El monto de cada lote lo escribís vos: el sistema no reparte nada solo (R21). Un lote con cuotas vencidas no se puede abonar: primero se pone al día.')
+                ->description('El monto de cada lote lo escribís vos: el sistema no reparte nada solo (R21). En cada uno elegís qué gana el cliente: seguir pagando la misma cuota y terminar antes, o terminar el mismo mes pagando menos. Un lote con cuotas vencidas no se puede abonar: primero se pone al día.')
                 ->visible(fn (Get $get): bool => $this->modoDeLaPantalla($get) === ModoDeCobro::Abono)
                 ->schema($this->renglonesDeAbono()),
 
@@ -658,29 +680,22 @@ final readonly class CobrarUnPago
                 ->schema($this->renglonesDeProntoPago()),
 
             /*
-             * ── «Ambas» sigue contra UN lote ───────────────────────────
+             * ── «Ambas» reparte el sobrante — 8-sep-2026 ───────────────
              *
-             * Y es una decisión, no una simplificación pendiente: «Ambas»
-             * resuelve una cuota pagada a medias, que es un caso puntual de un
-             * lote concreto. Repartir además la raya cuota/abono en cada lote
-             * convertiría el modal en una planilla.
+             * Acá decía que ir contra UN lote era «una decisión, no una
+             * simplificación pendiente». **Lo pidió la dueña**: con dos lotes en
+             * el mismo contrato, mandar todo el sobrante a uno la obligaba a
+             * partir el pago en dos recibos para bajarle capital a los dos.
+             *
+             * Son los MISMOS renglones de «Abono a capital» —marcar, elegir
+             * modalidad— porque es el mismo gesto de mostrador y quien atiende ya
+             * lo conoce. Mandar todo a un lote es marcar uno solo, que es como
+             * arranca el formulario.
              */
-            Select::make('compromiso_id')
-                ->label('¿A qué lote va el sobrante?')
-                ->options(fn (): array => $this->lotesConSaldo())
-                ->required()
-                ->live()
-                ->native(false)
+            Section::make('¿A qué lotes va el sobrante?')
+                ->description('Lo que sobre después de las cuotas baja el capital de los lotes que marqués. En cada uno elegís qué gana el cliente: seguir pagando la misma cuota y terminar antes, o terminar el mismo mes pagando menos (R21).')
                 ->visible(fn (Get $get): bool => $this->modoDeLaPantalla($get) === ModoDeCobro::Ambas)
-                ->helperText('Lo que sobre después de las cuotas baja el capital de este lote (R21).'),
-
-            Radio::make('modalidad')
-                ->label('¿Qué hacemos con lo que falta?')
-                ->options(fn (): array => $this->modalidades())
-                ->required()
-                ->live()
-                ->visible(fn (Get $get): bool => $this->modoDeLaPantalla($get) === ModoDeCobro::Ambas)
-                ->helperText('Lo elige el cliente, no el sistema: los dos caminos son correctos (R21).'),
+                ->schema($this->renglonesDelSobrante()),
 
             // ── Lo que vale para los tres ──────────────────────────────
             Select::make('forma_pago')
@@ -884,11 +899,7 @@ final readonly class CobrarUnPago
 
             $renglones[] = Grid::make(12)->schema([
                 Checkbox::make("cobrar_{$id}")
-                    ->label(sprintf(
-                        '%s — debe %s',
-                        (string) $lote->lote?->getAttribute('codigo'),
-                        $this->saldoDe($lote)->formateado(),
-                    ))
+                    ->label($this->etiquetaDelLote($lote, $this->cuotaSugerida($lote)))
                     ->helperText($this->lasVencidasDe($lote))
                     ->live()
                     ->columnSpan(7),
@@ -958,11 +969,7 @@ final readonly class CobrarUnPago
 
             $renglones[] = Grid::make(12)->schema([
                 Checkbox::make("abonar_{$id}")
-                    ->label(sprintf(
-                        '%s — debe %s',
-                        (string) $lote->lote?->getAttribute('codigo'),
-                        $this->saldoDe($lote)->formateado(),
-                    ))
+                    ->label($this->etiquetaDelLote($lote))
                     ->live()
                     ->columnSpan(7),
 
@@ -973,12 +980,16 @@ final readonly class CobrarUnPago
                     ->visible(fn (Get $get): bool => $get("abonar_{$id}") === true)
                     ->columnSpan(5),
 
-                Radio::make("modalidad_{$id}")
-                    ->hiddenLabel()
+                // El mismo control corto que en «Ambas»: es la misma pregunta,
+                // repetida una vez por lote, y la explicación ya está arriba.
+                ToggleButtons::make("modalidad_{$id}")
+                    ->label('Con lo que abone')
                     ->options(fn (): array => $this->modalidades())
+                    ->inline()
                     ->live()
                     ->required(fn (Get $get): bool => $get("abonar_{$id}") === true)
                     ->visible(fn (Get $get): bool => $get("abonar_{$id}") === true)
+                    ->extraAttributes(['class' => 'olympo-modo olympo-modo-fino'])
                     ->columnSpanFull(),
             ]);
         }
@@ -1073,11 +1084,7 @@ final readonly class CobrarUnPago
 
             $renglones[] = Grid::make(12)->schema([
                 Checkbox::make("saldar_{$id}")
-                    ->label(sprintf(
-                        '%s — debe %s',
-                        (string) $lote->lote?->getAttribute('codigo'),
-                        $this->saldoDe($lote)->formateado(),
-                    ))
+                    ->label($this->etiquetaDelLote($lote))
                     ->live()
                     ->columnSpan(7),
 
@@ -1173,6 +1180,31 @@ final readonly class CobrarUnPago
             return;
         }
 
+        /*
+         * 🔴 EL PAPEL TIENE QUE DECIR LO QUE EL CLIENTE ENTREGO — 8-sep-2026
+         *
+         * El recibo se emite por lo que se aplicó, no por el «Monto total
+         * recibido». Un reparto manual que no suma el sobrante entero sacaría un
+         * papel por menos de lo que hay sobre el mostrador, y **nadie se
+         * enteraría**: el recibo cuadra consigo mismo, así que
+         * `olympo:cuadrar-recibos` no lo ve. El porqué largo está en
+         * `elRepartoQueNoCuadra()`.
+         */
+        if ($modo === ModoDeCobro::Ambas) {
+            $problema = $this->elRepartoQueNoCuadra($data);
+
+            if ($problema !== null) {
+                Notification::make()
+                    ->title('El reparto no cuadra')
+                    ->body($problema)
+                    ->danger()
+                    ->persistent()
+                    ->send();
+
+                return;
+            }
+        }
+
         try {
             $recibos = match ($modo) {
                 ModoDeCobro::Cuota      => $this->soloLaCuota($data),
@@ -1195,8 +1227,8 @@ final readonly class CobrarUnPago
          * lleva el suyo. Cada notificación trae su propio botón de imprimir —
          * que es lo único que evita que alguien se vaya sin su papel.
          *
-         * En «Ambas» el abono cae en UN solo recibo, el del lote elegido; los
-         * demás son cuotas y se avisan como cuotas. Se identifica por el
+         * En «Ambas» el abono cae en los recibos de los lotes que lo reciben;
+         * los demás son cuotas y se avisan como cuotas. Se identifica por el
          * código del lote y no por el concepto: un abono que no alcanzó a
          * reprogramar nada también se emite como `cuota`.
          */
@@ -1210,13 +1242,17 @@ final readonly class CobrarUnPago
             return;
         }
 
-        $codigoDelAbono = $modo === ModoDeCobro::Ambas
-            ? (string) $this->loteElegido($data)->lote()->value('codigo')
-            : null;
+        $codigosDelAbono = [];
+
+        if ($modo === ModoDeCobro::Ambas) {
+            foreach ($this->renglonesDelSobranteTecleados($data) as $renglon) {
+                $codigosDelAbono[] = (string) $renglon['lote']->lote?->getAttribute('codigo');
+            }
+        }
 
         foreach ($recibos as $recibo) {
             $llevaElAbono = $modo === ModoDeCobro::Abono
-                || ($codigoDelAbono !== null && in_array($codigoDelAbono, $recibo->codigosDeLotes(), true));
+                || array_intersect($codigosDelAbono, $recibo->codigosDeLotes()) !== [];
 
             if ($llevaElAbono) {
                 $this->avisarDelAbono($recibo, conCuotas: $modo === ModoDeCobro::Ambas);
@@ -1303,9 +1339,7 @@ final readonly class CobrarUnPago
                 venta: $this->venta,
                 cliente: $this->quienPaga(),
                 cuotas: $this->renglonesTecleados($data),
-                loteDelAbono: $this->loteElegido($data),
-                aCapital: $this->sobranteTecleado($data),
-                modalidad: ModalidadDeReprogramacion::from((string) $data['modalidad']),
+                abonos: $this->renglonesDelSobranteTecleados($data),
                 motivo: is_string($data['motivo'] ?? null) ? $data['motivo'] : '',
                 forma: FormaDePago::from((string) $data['forma_pago']),
                 referencia: is_string($data['referencia'] ?? null) ? $data['referencia'] : null,
@@ -1343,16 +1377,310 @@ final readonly class CobrarUnPago
     }
 
     /**
-     * `whereKey()->firstOrFail()` y no `findOrFail()`: el segundo acepta
-     * también un arreglo de ids, así que Larastan lo tipa
-     * `Compromiso|Collection` y toda llamada posterior es «método indefinido en
-     * Collection».
+     * Los renglones del sobrante — a qué lotes va, cuánto y con qué modalidad.
+     *
+     * 🔴 UNA SOLA CUENTA PARA LA PANTALLA Y PARA EL DOMINIO. La
+     * previsualización y el envío pasan los dos por acá, con el mismo arreglo
+     * crudo. Dos versiones del reparto —una que dibuja y otra que guarda— es la
+     * forma más segura de que la pantalla prometa un número y la base escriba
+     * otro, que es exactamente lo que costó el recibo RPS-00000005.
+     *
+     * Si el reparto manual está a medio llenar devuelve vacío: el formulario ya
+     * lo bloquea con `required()`, y esto es el cinturón.
+     *
+     * @param array<string, mixed> $crudo
+     *
+     * @return list<array{lote: Compromiso, monto: Monto, modalidad: ModalidadDeReprogramacion}>
+     */
+    private function repartoDelSobrante(array $crudo, Monto $sobrante): array
+    {
+        $marcados = [];
+
+        foreach ($this->lotesQueDeben() as $lote) {
+            $id = (int) $lote->getKey();
+
+            if (($crudo["capital_{$id}"] ?? false) !== true) {
+                continue;
+            }
+
+            $elegida = $crudo["capital_modalidad_{$id}"] ?? null;
+            $modalidad = is_string($elegida) ? ModalidadDeReprogramacion::tryFrom($elegida) : null;
+
+            if (! $modalidad instanceof ModalidadDeReprogramacion) {
+                continue;
+            }
+
+            $marcados[] = ['lote' => $lote, 'id' => $id, 'modalidad' => $modalidad];
+        }
+
+        if ($marcados === []) {
+            return [];
+        }
+
+        $enPartesIguales = ($crudo['reparto_sobrante'] ?? 'iguales') !== 'manual';
+
+        /** @var list<int> $ids */
+        $ids = array_map(static fn (array $marcado): int => $marcado['id'], $marcados);
+        $partes = $enPartesIguales ? $this->partesIguales($sobrante, $ids) : [];
+
+        $renglones = [];
+
+        foreach ($marcados as $marcado) {
+            $monto = $enPartesIguales
+                ? ($partes[$marcado['id']] ?? Monto::cero())
+                : $this->montoDelValor($crudo["capital_monto_{$marcado['id']}"] ?? null);
+
+            if (! $monto instanceof Monto) {
+                return [];
+            }
+
+            $renglones[] = [
+                'lote'      => $marcado['lote'],
+                'monto'     => $monto,
+                'modalidad' => $marcado['modalidad'],
+            ];
+        }
+
+        return $renglones;
+    }
+
+    /**
+     * El sobrante partido en tantas partes como lotes marcados.
+     *
+     * ═══ 🔴 EN CENTAVOS, Y EL RESIDUO TIENE DUEÑO ═══
+     *
+     * Se parte `enCentavos()` con `intdiv()` y el resto se reparte de a un
+     * centavo entre los primeros. Así la suma de las partes es EXACTAMENTE el
+     * sobrante: dividir tres veces L 10,000.00 y redondear deja un centavo
+     * suelto, y un centavo suelto es un recibo que cobró más de lo que aplicó.
+     *
+     * ⚠️ Y el orden **se escribe**: por id ascendente, el mismo con el que el
+     * dominio toma los candados. Dejarlo al orden en que vinieron los lotes
+     * haría que el centavo cayera en un lote distinto según de qué pantalla se
+     * cobró — es la lección del `FOR UPDATE` sin `ORDER BY` del 27-ago, donde
+     * el planificador de Postgres decidía a quién le tocaba el residuo.
+     *
+     * @param list<int> $ids
+     *
+     * @return array<int, Monto>
+     */
+    private function partesIguales(Monto $sobrante, array $ids): array
+    {
+        sort($ids);
+
+        $cuantos = count($ids);
+
+        if ($cuantos === 0) {
+            return [];
+        }
+
+        $centavos = $sobrante->enCentavos();
+        $cadaUno = intdiv($centavos, $cuantos);
+        $resto = $centavos - ($cadaUno * $cuantos);
+
+        $partes = [];
+
+        foreach ($ids as $puesto => $id) {
+            $partes[$id] = Monto::deCentavos($cadaUno + ($puesto < $resto ? 1 : 0));
+        }
+
+        return $partes;
+    }
+
+    /**
+     * Un `Monto` de lo que sea que traiga el campo, o NULL si no es un número.
+     *
+     * Es `montoTecleado()` leyendo de un arreglo en vez de un `Get`: la
+     * previsualización tiene el `Get` y el envío tiene el `$data`, y el reparto
+     * del sobrante corre por los dos.
+     */
+    private function montoDelValor(mixed $valor): ?Monto
+    {
+        if (! is_string($valor) || preg_match('/^\d+(\.\d{1,2})?$/', trim($valor)) !== 1) {
+            return null;
+        }
+
+        $monto = new Monto(trim($valor));
+
+        return $monto->esCero() ? null : $monto;
+    }
+
+    /**
+     * Lo que la pantalla tiene tecleado del sobrante, con la forma que espera
+     * `repartoDelSobrante()`.
+     *
+     * @return array<string, mixed>
+     */
+    private function crudoDelSobrante(Get $get): array
+    {
+        $crudo = ['reparto_sobrante' => $get('reparto_sobrante')];
+
+        foreach ($this->lotesQueDeben() as $lote) {
+            $id = (int) $lote->getKey();
+
+            $crudo["capital_{$id}"] = $get("capital_{$id}");
+            $crudo["capital_monto_{$id}"] = $get("capital_monto_{$id}");
+            $crudo["capital_modalidad_{$id}"] = $get("capital_modalidad_{$id}");
+        }
+
+        return $crudo;
+    }
+
+    /**
+     * Los renglones del sobrante que se mandan al dominio.
+     *
+     * @param array<string, mixed> $data
+     *
+     * @return list<array{lote: Compromiso, monto: Monto, modalidad: ModalidadDeReprogramacion}>
+     */
+    private function renglonesDelSobranteTecleados(array $data): array
+    {
+        return $this->repartoDelSobrante($data, $this->sobranteTecleado($data));
+    }
+
+    /**
+     * Lo que falta (o sobra) por repartir, o NULL si el reparto cuadra.
+     *
+     * ═══ 🔴 POR QUE ESTO EXISTE ═══
+     *
+     * El recibo se emite por lo que de verdad se aplicó —las cuotas más los
+     * abonos—, no por el «Monto total recibido» que se tecleó arriba. Si el
+     * reparto manual no suma el sobrante entero, el papel saldría por MENOS de
+     * lo que el cliente puso sobre el mostrador, y nadie se enteraría: no hay
+     * ninguna fila descuadrada que `olympo:cuadrar-recibos` pueda encontrar,
+     * porque el recibo cuadra consigo mismo.
+     *
+     * Por eso se corta acá y no en el dominio: el dominio no sabe cuánto
+     * entregó el cliente, solo cuánto se le pidió aplicar. El único lugar donde
+     * están los dos números es esta pantalla.
+     *
+     * ⚠️ Devuelve el MENSAJE y no la diferencia: `Monto::restar()` lanza
+     * excepción con negativo, así que quien compare tiene que saber de antemano
+     * cuál de los dos números es mayor. Decidirlo acá, una vez, es más barato
+     * que acordarse de decidirlo en cada lugar que lo llame.
      *
      * @param array<string, mixed> $data
      */
-    private function loteElegido(array $data): Compromiso
+    private function elRepartoQueNoCuadra(array $data): ?string
     {
-        return Compromiso::query()->whereKey($data['compromiso_id'] ?? null)->firstOrFail();
+        $sobrante = $this->sobranteTecleado($data);
+        $repartido = Monto::cero();
+
+        foreach ($this->renglonesDelSobranteTecleados($data) as $renglon) {
+            $repartido = $repartido->sumar($renglon['monto']);
+        }
+
+        if ($repartido->igualA($sobrante)) {
+            return null;
+        }
+
+        if ($repartido->esCero()) {
+            return 'Marcá al menos un lote para el sobrante y decidí qué pasa con lo que falta en cada uno.';
+        }
+
+        return $repartido->mayorQue($sobrante)
+            ? sprintf(
+                'Lo que le pusiste a los lotes se pasa del sobrante por %s. El recibo tiene que salir por lo que el cliente entregó.',
+                $repartido->restar($sobrante)->formateado(),
+            )
+            : sprintf(
+                'Lo que le pusiste a los lotes no suma el sobrante: falta repartir %s. El recibo tiene que salir por lo que el cliente entregó.',
+                $sobrante->restar($repartido)->formateado(),
+            );
+    }
+
+    /**
+     * Los renglones de «¿A qué lotes va el sobrante?».
+     *
+     * Es el mismo widget que `renglonesDeAbono()` y a propósito: marcar, elegir
+     * qué pasa con lo que falta, y —solo si se reparte a mano— escribir cuánto.
+     *
+     * ⚠️ Acá NO se filtra por `porQueNoPuedeAbonar()`, y esa es la diferencia
+     * con «Abono a capital». Un lote atrasado no puede recibir un abono suelto,
+     * pero en «Ambas» puede quedar al día con las cuotas de ESTE MISMO recibo —
+     * que es la razón de ser del modo. Si aun así no alcanza, lo dice la
+     * previsualización antes de confirmar y lo rechaza el dominio después.
+     *
+     * @return array<int, Component>
+     */
+    private function renglonesDelSobrante(): array
+    {
+        $lotes = $this->lotesQueDeben();
+
+        if ($lotes === []) {
+            return [
+                Placeholder::make('sin_saldo_sobrante')
+                    ->hiddenLabel()
+                    ->content('Este expediente no debe nada: no hay capital que bajar.'),
+            ];
+        }
+
+        $renglones = [
+            /*
+             * Con un solo lote no hay nada que repartir y el interruptor sería
+             * una pregunta con una sola respuesta: se esconde, y «partes
+             * iguales» le da todo a ese lote — que es lo que hacía el Select
+             * hasta el 8-sep-2026.
+             */
+            ToggleButtons::make('reparto_sobrante')
+                ->label('¿Cómo se reparte?')
+                ->options([
+                    'iguales' => 'Partes iguales',
+                    'manual'  => 'Yo escribo cuánto',
+                ])
+                ->inline()
+                ->required()
+                ->live()
+                ->extraAttributes(['class' => 'olympo-modo'])
+                ->visible(fn (): bool => count($this->lotesQueDeben()) > 1)
+                ->helperText('Abajo, en «cómo queda», sale cuánto le toca a cada lote antes de confirmar.'),
+        ];
+
+        foreach ($lotes as $lote) {
+            $id = (int) $lote->getKey();
+
+            $renglones[] = Grid::make(12)->schema([
+                /*
+                 * Solo el código, sin el saldo: en «Ambas» este mismo lote ya
+                 * aparece tres centímetros más arriba, en «¿qué viene a pagar?»,
+                 * con su cuota y su saldo. Repetir la cifra hacía que el ojo la
+                 * leyera dos veces para descubrir que era la misma.
+                 */
+                Checkbox::make("capital_{$id}")
+                    ->label(new HtmlString(sprintf(
+                        '<span class="olympo-renglon-lote">%s</span>',
+                        e((string) $lote->lote?->getAttribute('codigo')),
+                    )))
+                    ->live()
+                    ->columnSpan(7),
+
+                MontoField::make("capital_monto_{$id}", 'Monto')
+                    ->hiddenLabel()
+                    ->live(onBlur: true)
+                    ->required(fn (Get $get): bool => $get("capital_{$id}") === true && $get('reparto_sobrante') === 'manual')
+                    ->visible(fn (Get $get): bool => $get("capital_{$id}") === true && $get('reparto_sobrante') === 'manual')
+                    ->columnSpan(5),
+
+                /*
+                 * 🔴 SEGMENTADO Y CORTO, NO UN `Radio` (8-sep-2026). Con dos
+                 * lotes, el radio de dos opciones largas ponía catorce líneas
+                 * de texto repetido en el modal —«se ve muy engorroso a la
+                 * vista»—. La explicación va una sola vez en la descripción de
+                 * la sección; acá quedan las dos pastillas.
+                 */
+                ToggleButtons::make("capital_modalidad_{$id}")
+                    ->label('Con lo que abone')
+                    ->options(fn (): array => $this->modalidades())
+                    ->inline()
+                    ->live()
+                    ->required(fn (Get $get): bool => $get("capital_{$id}") === true)
+                    ->visible(fn (Get $get): bool => $get("capital_{$id}") === true)
+                    ->extraAttributes(['class' => 'olympo-modo olympo-modo-fino'])
+                    ->columnSpanFull(),
+            ]);
+        }
+
+        return $renglones;
     }
 
     private function quienPaga(): Cliente
@@ -1733,7 +2061,10 @@ final readonly class CobrarUnPago
      *
      * Es la previsualización que más trabajo hace, porque el número que el
      * cliente mira —cuánto le baja el capital— no está tecleado en ningún lado:
-     * sale de restarle a lo que entregó las cuotas que se marcaron.
+     * sale de restarle a lo que entregó las cuotas que se marcaron. Y desde el
+     * 8-sep-2026 además se reparte, así que muestra **cuánto le toca a cada
+     * lote** antes de confirmar: en partes iguales el número no lo escribió
+     * nadie, y un reparto que no se ve es un reparto que nadie revisó.
      *
      * ⚠️ La mora va en cero, igual que en las otras previsualizaciones de esta
      * pantalla: se calcula adentro de la transacción, con las cuotas bloqueadas
@@ -1742,17 +2073,14 @@ final readonly class CobrarUnPago
      */
     private function efectoDeAmbas(Get $get): HtmlString
     {
-        $lote = Compromiso::query()->whereKey($get('compromiso_id'))->first();
         $total = $this->montoTecleado($get, 'monto_total');
-        $elegida = $get('modalidad');
-        $modalidad = is_string($elegida) ? ModalidadDeReprogramacion::tryFrom($elegida) : null;
 
-        if (! $lote instanceof Compromiso || ! $total instanceof Monto || ! $modalidad instanceof ModalidadDeReprogramacion) {
-            return new HtmlString('<p class="olympo-vacio">Escribí el total recibido, marcá las cuotas y elegí a qué lote va el sobrante.</p>');
+        if (! $total instanceof Monto) {
+            return new HtmlString('<p class="olympo-vacio">Escribí el total recibido, marcá las cuotas y elegí a qué lotes va el sobrante.</p>');
         }
 
         $enCuotas = Monto::cero();
-        $suCuota = Monto::cero();
+        $suCuota = [];
 
         foreach ($this->lotesQueDeben() as $renglon) {
             $id = (int) $renglon->getKey();
@@ -1769,11 +2097,9 @@ final readonly class CobrarUnPago
 
             $enCuotas = $enCuotas->sumar($monto);
 
-            // Lo que se le cobra AL LOTE DEL ABONO, que es lo que cambia su plan
-            // antes de que el sobrante lo toque.
-            if ($id === (int) $lote->getKey()) {
-                $suCuota = $monto;
-            }
+            // Lo que se le cobra A CADA LOTE, que es lo que cambia su plan antes
+            // de que el sobrante lo toque.
+            $suCuota[$id] = $monto;
         }
 
         if (! $total->mayorQue($enCuotas)) {
@@ -1784,54 +2110,117 @@ final readonly class CobrarUnPago
         }
 
         $sobrante = $total->restar($enCuotas);
-        $codigo = (string) $lote->lote?->getAttribute('codigo');
+        $renglones = $this->repartoDelSobrante($this->crudoDelSobrante($get), $sobrante);
 
-        $raya = sprintf(
-            '<ul class="olympo-escalera">'
-            .'<li><span class="meses">A cuotas</span><span class="monto">%s</span></li>'
-            .'<li><span class="meses">Baja el capital de %s</span><span class="monto">%s</span></li>'
-            .'</ul>',
+        if ($renglones === []) {
+            return new HtmlString('<p class="olympo-vacio">Sobran '.e($sobrante->formateado())
+                .'. Marcá a qué lotes van y decidí qué pasa con lo que falta en cada uno.</p>');
+        }
+
+        $lineas = sprintf(
+            '<li><span class="meses">A cuotas</span><span class="monto">%s</span></li>',
             e($enCuotas->formateado()),
-            e($codigo),
-            e($sobrante->formateado()),
         );
 
+        $repartido = Monto::cero();
+
+        foreach ($renglones as $renglon) {
+            $lineas .= sprintf(
+                '<li><span class="meses">Baja el capital de %s</span><span class="monto">%s</span></li>',
+                e((string) $renglon['lote']->lote?->getAttribute('codigo')),
+                e($renglon['monto']->formateado()),
+            );
+
+            $repartido = $repartido->sumar($renglon['monto']);
+        }
+
+        $raya = '<ul class="olympo-escalera">'.$lineas.'</ul>';
+
+        /*
+         * 🔴 El aviso sale ACA y no solo al guardar: quien atiende tiene al
+         * cliente enfrente, y descubrir que el reparto no cuadra recién al
+         * apretar el botón es hacerle rehacer la cuenta con público.
+         */
+        if (! $repartido->igualA($sobrante)) {
+            return new HtmlString($raya.'<p class="olympo-nota">El sobrante es '.e($sobrante->formateado())
+                .' y lo repartido suma '.e($repartido->formateado()).'. <strong>Así no se va a poder guardar</strong>: '
+                .'el recibo tiene que salir por lo que el cliente entregó.</p>');
+        }
+
+        $html = $raya;
+        $varios = count($renglones) > 1;
+
+        foreach ($renglones as $renglon) {
+            $codigo = (string) $renglon['lote']->lote?->getAttribute('codigo');
+
+            // Con un solo lote el rótulo repetiría lo que ya dice la raya.
+            if ($varios) {
+                $html .= '<p class="olympo-lote">'.e($codigo).'</p>';
+            }
+
+            $html .= $this->elSobranteEnUnLote(
+                $renglon['lote'],
+                $suCuota[(int) $renglon['lote']->getKey()] ?? Monto::cero(),
+                $renglon['monto'],
+                $renglon['modalidad'],
+            );
+        }
+
+        return new HtmlString($html);
+    }
+
+    /**
+     * Qué le hace al plan de UN lote la parte del sobrante que le tocó.
+     *
+     * Sale de `efectoDeAmbas()` porque con el sobrante repartido esto se
+     * pregunta una vez por lote, y porque los cuatro motivos por los que el
+     * dominio va a rechazar el abono se explican igual para todos.
+     *
+     * Devuelve HTML ya escapado: quien lo llama lo concatena.
+     */
+    private function elSobranteEnUnLote(
+        Compromiso $lote,
+        Monto $suCuota,
+        Monto $leToca,
+        ModalidadDeReprogramacion $modalidad,
+    ): string {
+        $codigo = (string) $lote->lote?->getAttribute('codigo');
         $proyectadas = $this->comoQuedanTrasCobrar($lote, $suCuota);
 
         if ($proyectadas === []) {
-            return new HtmlString($raya.'<p class="olympo-nota">Con las cuotas marcadas, el lote '.e($codigo)
-                .' queda sin pendientes: no hay plan que reescribir y el sobrante se va a rechazar.</p>');
+            return '<p class="olympo-nota">Con las cuotas marcadas, el lote '.e($codigo)
+                .' queda sin pendientes: no hay plan que reescribir y su parte del sobrante se va a rechazar.</p>';
         }
 
         $efecto = EfectoDelAbono::calcular(
             $proyectadas,
-            $sobrante,
+            $leToca,
             $modalidad,
             (int) $this->venta->getAttribute('dia_pago'),
         );
 
-        if ($sobrante->mayorQue($efecto->saldoDelLote)) {
-            return new HtmlString($raya.'<p class="olympo-nota">El sobrante supera lo que le quedaría debiendo el lote ('
-                .e($efecto->saldoDelLote->formateado()).'). Se va a rechazar.</p>');
+        if ($leToca->mayorQue($efecto->saldoDelLote)) {
+            return '<p class="olympo-nota">Al lote '.e($codigo).' le tocan '.e($leToca->formateado())
+                .', más de lo que le quedaría debiendo ('.e($efecto->saldoDelLote->formateado()).'). Se va a rechazar.</p>';
         }
 
         if ($efecto->esPagoNormal) {
-            return new HtmlString($raya.'<p class="olympo-nota">Al lote '.e($codigo).' le quedarían '
-                .e($efecto->ponerAlDia->formateado()).' vencidos y el sobrante no los cubre, así que '
-                .'<strong>no bajaría capital</strong>. Sumale esa diferencia a la cuota de ese lote.</p>');
+            return '<p class="olympo-nota">Al lote '.e($codigo).' le quedarían '
+                .e($efecto->ponerAlDia->formateado()).' vencidos y su parte del sobrante no los cubre, así que '
+                .'<strong>no bajaría capital</strong>. Sumale esa diferencia a la cuota de ese lote.</p>';
         }
 
         if ($efecto->superaElTope) {
-            return new HtmlString($raya.'<p class="olympo-nota">Sobre ese lote se puede abonar hasta '
+            return '<p class="olympo-nota">Sobre el lote '.e($codigo).' se puede abonar hasta '
                 .e($efecto->tope->formateado()).'. La diferencia es lo que le falta a una cuota pagada a '
-                .'medias: marcala arriba para que entre en el cobro.</p>');
+                .'medias: marcala arriba para que entre en el cobro.</p>';
         }
 
         if ($efecto->problema !== null) {
-            return new HtmlString($raya.'<p class="olympo-nota">'.e($efecto->problema).'</p>');
+            return '<p class="olympo-nota">'.e($efecto->problema).'</p>';
         }
 
-        return new HtmlString($raya.$this->antesYDespues($efecto).$this->notaDelAbono($efecto));
+        return $this->antesYDespues($efecto).$this->notaDelAbono($efecto);
     }
 
     /**
@@ -1975,6 +2364,30 @@ final readonly class CobrarUnPago
             );
         }
 
+        /*
+         * 🔴 SIN MESES AHORRADOS, LA NOTA DEPENDE DE LA MODALIDAD — 8-sep-2026
+         *
+         * Lo cazó Mauricio mirando el modal: la fila de arriba decía
+         * «Cuota L 5,000.00 → L 5,000.00» y esta nota, dos renglones más
+         * abajo, prometía «pagando menos cada mes». La pantalla se
+         * contradecía sola.
+         *
+         * Por qué pasaba: `mesesAhorrados()` da cero cuando el abono no
+         * alcanza a quitar un mes entero —L 1,000.00 contra una cuota de
+         * L 5,000.00—, y este `return` era el caso por defecto de las DOS
+         * modalidades. Pero `AcortarPlazo` arma el plan con
+         * `porCuotaFija()`: la cuota NO baja nunca, lo abonado se descuenta
+         * del final del plan. La frase era la promesa de la otra modalidad.
+         *
+         * ⚠️ Se ve mucho más seguido desde que el sobrante se reparte: a
+         * cada lote le toca una fracción, así que quitar un mes entero es
+         * más difícil.
+         */
+        if ($efecto->modalidad === ModalidadDeReprogramacion::AcortarPlazo) {
+            return '<p class="olympo-nota">El abono no alcanza a quitar un mes entero: la cuota sigue '
+                .'igual y lo abonado se descuenta del final del plan.</p>';
+        }
+
         return '<p class="olympo-nota">Termina el mismo mes que tenía pactado, pagando menos cada mes.</p>';
     }
 
@@ -1986,9 +2399,10 @@ final readonly class CobrarUnPago
      * `compromisos` no trae `orderBy`, asi que Postgres los devuelve en el
      * orden fisico de la tabla — y ese orden CAMBIA en cuanto una fila se
      * actualiza, porque Postgres reescribe la fila al final del heap. En un
-     * modal de cobro eso es peor que feo: `primerLoteConSaldo()` decide a
-     * QUE LOTE se le propone el pago, asi que despues de cobrar una vez el
-     * monto sugerido podia caer en otro lote sin que nadie moviera nada.
+     * modal de cobro eso es peor que feo: el PRIMERO de esta lista decide a
+     * QUE LOTE se le propone el pago —y desde el 8-sep-2026, cual viene
+     * marcado para el sobrante de «Ambas»—, asi que despues de cobrar una vez
+     * el monto sugerido podia caer en otro lote sin que nadie moviera nada.
      *
      * Se descubrio el 13-ago-2026 por un test que fallaba salteado en
      * `EstadoDeCuenta`, que tenia el mismo agujero.
@@ -2014,36 +2428,12 @@ final readonly class CobrarUnPago
     }
 
     /**
-     * Los lotes del contrato que todavía deben, con cuánto.
-     *
-     * @return array<int, string>
-     */
-    private function lotesConSaldo(): array
-    {
-        $opciones = [];
-
-        foreach ($this->compromisosEnOrden() as $renglon) {
-            $saldo = $this->saldoDe($renglon);
-
-            if ($saldo->esCero()) {
-                continue;
-            }
-
-            $opciones[(int) $renglon->getKey()] = sprintf(
-                '%s — debe %s',
-                (string) $renglon->lote?->getAttribute('codigo'),
-                $saldo->formateado(),
-            );
-        }
-
-        return $opciones;
-    }
-
-    /**
      * Los lotes del contrato que todavía deben algo, como objetos.
      *
-     * `lotesConSaldo()` devuelve lo mismo armado para el Select del abono;
-     * esto devuelve los renglones, que es lo que necesita un cobro de varios.
+     * Es la lista con la que se dibujan TODOS los renglones del modal —cuotas,
+     * abonos, pronto pago y el sobrante de «Ambas»— y de la que sale el estado
+     * inicial del formulario. Su orden es el de `compromisosEnOrden()`, y ese
+     * orden importa: ver su docblock.
      *
      * @return list<Compromiso>
      */
@@ -2058,17 +2448,6 @@ final readonly class CobrarUnPago
         }
 
         return $lotes;
-    }
-
-    private function primerLoteConSaldo(): ?Compromiso
-    {
-        foreach ($this->compromisosEnOrden() as $renglon) {
-            if (! $this->saldoDe($renglon)->esCero()) {
-                return $renglon;
-            }
-        }
-
-        return null;
     }
 
     /**
@@ -2118,6 +2497,42 @@ final readonly class CobrarUnPago
         }
 
         return $renglones;
+    }
+
+    /**
+     * El renglón de un lote: el código arriba, los números abajo y en chico.
+     *
+     * ═══ POR QUE NO ES UNA SOLA LINEA (8-sep-2026) ═══
+     *
+     * Era `RPS-D-003 — debe L. 230,000.00`, todo del mismo peso. Dos problemas.
+     *
+     * El primero es que **el saldo total no es el número que se usa**: quien
+     * atiende necesita saber cuánto es la cuota del mes, que es lo que va a
+     * teclear. El saldo es contexto, no la respuesta.
+     *
+     * El segundo es que el CODIGO es lo que identifica el renglón y estaba
+     * compitiendo con una cifra de seis dígitos. Con dos lotes marcados, el ojo
+     * tenía que leer para distinguirlos.
+     *
+     * Ahora el código va solo y en negrita, y debajo, en gris y chico, lo que
+     * hace falta para decidir. Las cuotas vencidas siguen yendo por
+     * `helperText()`: eso es una alarma y merece su propio renglón.
+     */
+    private function etiquetaDelLote(Compromiso $lote, ?Monto $cuota = null): HtmlString
+    {
+        $datos = [];
+
+        if ($cuota instanceof Monto) {
+            $datos[] = 'cuota '.$cuota->formateado();
+        }
+
+        $datos[] = 'saldo '.$this->saldoDe($lote)->formateado();
+
+        return new HtmlString(sprintf(
+            '<span class="olympo-renglon-lote">%s</span><span class="olympo-renglon-dato">%s</span>',
+            e((string) $lote->lote?->getAttribute('codigo')),
+            e(implode(' · ', $datos)),
+        ));
     }
 
     /**
@@ -2324,6 +2739,18 @@ final readonly class CobrarUnPago
     }
 
     /**
+     * Los dos caminos de R21, con la etiqueta sola — 8-sep-2026.
+     *
+     * Antes esto devolvía «etiqueta — explicación», y como la modalidad se
+     * pregunta UNA VEZ POR LOTE, la explicación se repetía palabra por palabra
+     * en cada renglón: siete líneas de texto por lote. No cambia entre lotes,
+     * así que se dice una sola vez arriba —en la descripción de la sección— y
+     * el renglón se queda con el control.
+     *
+     * ⚠️ Sale de `etiqueta()` y no de una lista escrita acá: el vocabulario del
+     * negocio vive en el enum, no en la pantalla. El día que cambie una de las
+     * dos, cambia sola en los dos modales.
+     *
      * @return array<string, string>
      */
     private function modalidades(): array
@@ -2331,7 +2758,7 @@ final readonly class CobrarUnPago
         $opciones = [];
 
         foreach (ModalidadDeReprogramacion::cases() as $modalidad) {
-            $opciones[$modalidad->value] = $modalidad->etiqueta().' — '.$modalidad->explicacion();
+            $opciones[$modalidad->value] = $modalidad->etiqueta();
         }
 
         return $opciones;

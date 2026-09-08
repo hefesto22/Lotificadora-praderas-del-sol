@@ -145,11 +145,23 @@ class ReciboInfolist
     {
         $filas = '';
 
-        foreach ($record->aplicaciones()->with('cuota')->get() as $aplicacion) {
+        /*
+         * 🔴 EL CODIGO DEL LOTE ADELANTE, COMO EN EL PAPEL — 8-sep-2026.
+         *
+         * Cada plan numera sus cuotas desde 1, así que en un recibo de dos
+         * lotes esta tabla mostraba «Cuota 3» dos veces y no había forma de
+         * saber cuál era cuál. El papel impreso ya lo resolvía así; la ficha
+         * decía menos que el recibo que el cliente se llevó.
+         */
+        $variosLotes = $record->nombraVariosLotes();
+
+        foreach ($record->aplicaciones()->with('cuota.compromiso.lote')->get() as $aplicacion) {
             $cuota = $aplicacion->cuota;
+            $codigo = (string) ($cuota?->compromiso?->lote?->getAttribute('codigo') ?? '');
 
             $filas .= sprintf(
-                '<tr><td class="lote">Cuota %s</td><td>%s</td><td class="fuerte">%s</td></tr>',
+                '<tr><td class="lote">%sCuota %s</td><td>%s</td><td class="fuerte">%s</td></tr>',
+                $variosLotes && $codigo !== '' ? e($codigo).' · ' : '',
                 e((string) ($cuota?->getAttribute('numero') ?? '—')),
                 e($cuota?->getAttribute('fecha_vencimiento')?->format('d/m/Y') ?? '—'),
                 e($aplicacion->montoAplicado()->formateado()),
@@ -159,10 +171,27 @@ class ReciboInfolist
         $aCapital = $record->montoACapital();
 
         if (! $aCapital->esCero()) {
-            $filas .= sprintf(
-                '<tr><td class="lote">Abono a capital</td><td class="apagado">reprogramó el plan</td><td class="fuerte">%s</td></tr>',
-                e($aCapital->formateado()),
-            );
+            /*
+             * 🔴 UN RENGLON POR LOTE, igual que en el papel: desde que el
+             * sobrante de «Ambas» se reparte, «Abono a capital L 2,000.00»
+             * esconde justo la decisión que se acaba de tomar. Viene vacío
+             * cuando el desglose no suma el renglón —ver
+             * `Recibo::capitalPorLote()`— y ahí se muestra como se mostraba.
+             */
+            $porLote = $record->capitalPorLote();
+
+            if ($porLote === []) {
+                $porLote = [['codigo' => '', 'monto' => $aCapital]];
+            }
+
+            foreach ($porLote as $renglon) {
+                $filas .= sprintf(
+                    '<tr><td class="lote">%s%s</td><td class="apagado">reprogramó el plan</td><td class="fuerte">%s</td></tr>',
+                    $variosLotes && $renglon['codigo'] !== '' ? e($renglon['codigo']).' · ' : '',
+                    e($record->rotuloDelSobrante()),
+                    e($renglon['monto']->formateado()),
+                );
+            }
         }
 
         /*

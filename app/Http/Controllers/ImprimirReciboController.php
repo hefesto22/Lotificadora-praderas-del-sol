@@ -75,6 +75,8 @@ final readonly class ImprimirReciboController
         $recibo->load([
             'cliente', 'venta', 'venta.compromisos.lote', 'compromiso.lote',
             'aplicaciones.cuota.compromiso.lote', 'facturacion', 'recibidoPor', 'createdBy',
+            // El desglose del capital por lote sale de las constancias.
+            'reprogramaciones.compromiso.lote',
         ]);
 
         $saldos = $this->saldosPorLote($recibo);
@@ -89,6 +91,7 @@ final readonly class ImprimirReciboController
             'emisor'          => $this->emisorDe($recibo, $this->proyectoDe($recibo)),
             'enLetras'        => MontoEnLetras::de($recibo->montoTotal()),
             'aCapital'        => $recibo->montoACapital(),
+            'capitalPorLote'  => $recibo->capitalPorLote(),
             'variosLotes'     => $recibo->nombraVariosLotes(),
             'recibio'         => $recibo->nombreDeQuienRecibio(),
             'saldos'          => $saldos,

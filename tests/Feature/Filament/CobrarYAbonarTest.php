@@ -99,8 +99,8 @@ beforeEach(function (): void {
      * Los dos modos que reprograman llenan campos DISTINTOS, y este archivo
      * los usa a los dos:
      *
-     *   - «Ambas» → `monto_total`, las cuotas marcadas, y `compromiso_id`
-     *              + `modalidad` para el lote que recibe el sobrante
+     *   - «Ambas» → `monto_total`, las cuotas marcadas, y `capital_N` +
+     *              `capital_modalidad_N` para los lotes que reciben el sobrante
      *   - «Abono» va por renglones   → `abonar_N`, `abono_N`, `modalidad_N`
      *
      * Se mandan los dos juegos siempre: Filament no deshidrata los campos que
@@ -111,12 +111,13 @@ beforeEach(function (): void {
         $id = $this->renglon->getKey();
 
         return array_merge([
-            'modo'          => ModoDeCobro::Ambas->value,
-            'monto_total'   => '87500.00',
-            "cobrar_{$id}"  => true,
-            "monto_{$id}"   => '12500.00',
-            'compromiso_id' => $id,
-            'modalidad'     => ModalidadDeReprogramacion::AcortarPlazo->value,
+            'modo'                    => ModoDeCobro::Ambas->value,
+            'monto_total'             => '87500.00',
+            "cobrar_{$id}"            => true,
+            "monto_{$id}"             => '12500.00',
+            'reparto_sobrante'        => 'iguales',
+            "capital_{$id}"           => true,
+            "capital_modalidad_{$id}" => ModalidadDeReprogramacion::AcortarPlazo->value,
 
             "abonar_{$id}"    => true,
             "abono_{$id}"     => '87500.00',

@@ -66,9 +66,7 @@ beforeEach(function (): void {
         venta: $this->venta,
         cliente: $this->cliente,
         cuotas: [['lote' => $this->renglon, 'monto' => new Monto('25000.00')]],
-        loteDelAbono: $this->renglon,
-        aCapital: new Monto('35000.00'),
-        modalidad: ModalidadDeReprogramacion::AcortarPlazo,
+        abonos: [['lote' => $this->renglon, 'monto' => new Monto('35000.00'), 'modalidad' => ModalidadDeReprogramacion::AcortarPlazo]],
         motivo: 'Abono a capital solicitado por el cliente',
         forma: FormaDePago::Efectivo,
     );

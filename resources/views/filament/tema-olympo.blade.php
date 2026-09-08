@@ -411,6 +411,87 @@
     }
 
     /*
+       ── 12-bis. El mismo riel, en chico y a la izquierda (8-sep-2026) ──
+
+       «Un mejor diseño que sea más entendible, más elegante y profesional,
+       ya que se ve muy engorroso a la vista» — Mauricio, mirando el modal
+       de «Ambas» con el sobrante repartido entre dos lotes.
+
+       ═══ QUE LO VOLVIA ENGORROSO ═══
+
+       La modalidad se pregunta UNA VEZ POR LOTE. Con el `Radio` de dos
+       opciones largas —rótulo, etiqueta y explicación, cada una en dos
+       renglones— eso son SIETE líneas de texto por lote, repetidas
+       palabra por palabra. Con dos lotes el modal se volvía una escalera
+       de párrafos donde no se distinguía dónde terminaba un lote y
+       empezaba el otro.
+
+       La explicación de los dos caminos no cambia entre lotes, así que se
+       dice UNA vez —en la descripción de la sección— y cada renglón se
+       queda con el control: dos pastillas cortas.
+
+       ═══ POR QUE UN MODIFICADOR Y NO OTRA CLASE ═══
+
+       La pastilla ya está resuelta arriba y es la misma señal. Esto solo
+       la achica y la corre a la izquierda, que es donde está el resto del
+       renglón: el control principal —«¿cómo se reparte?»— sigue centrado
+       y grande, y así el ojo distingue la pregunta de arriba de las dos
+       de abajo sin tener que leerlas.
+
+       ⚠️ Va DESPUES del bloque de arriba a propósito: un elemento con las
+       dos clases empareja los dos selectores y la especificidad es la
+       misma, así que decide el ORDEN. Moverlo arriba lo apaga.
+    */
+    .fi-fo-toggle-buttons-wrp:has(.olympo-modo-fino) .fi-fo-field-label-col,
+    .fi-fo-toggle-buttons-wrp:has(.olympo-modo-fino) .fi-fo-field-content-col { justify-items: start; }
+
+    .fi-fo-toggle-buttons-wrp:has(.olympo-modo-fino) .fi-sc-text { text-align: left; }
+
+    .olympo-modo-fino .fi-btn {
+        padding: .3125rem .8125rem;
+        font-size: .75rem;
+    }
+
+    /*
+       ── 12-ter. El renglón de un lote (8-sep-2026) ────────────────────
+
+       «Eso de "qué viene a pagar" también mejorémosle el diseño» — Mauricio.
+
+       Era `RPS-D-003 — debe L. 230,000.00`, todo del mismo peso tipográfico.
+       Dos problemas, y el segundo es el caro:
+
+       1. El saldo total NO es el número que se usa. Quien atiende necesita
+          la cuota del mes, que es lo que va a teclear; el saldo es contexto.
+       2. El CODIGO es lo que identifica el renglón, y estaba compitiendo con
+          una cifra de seis dígitos. Con dos lotes marcados el ojo tenia que
+          LEER para distinguirlos, en vez de reconocerlos.
+
+       Ahora el código va solo y en negrita —una sola cosa por línea— y
+       debajo, chico y gris, lo que hace falta para decidir. Es la misma
+       jerarquía que ya usa la escalera del efecto del abono.
+
+       ⚠️ Las cuotas vencidas NO entran acá: siguen por `helperText()`, que
+       es donde vive `.olympo-vencidas`. Una alarma no es un dato de
+       contexto y no debe leerse con el mismo gris.
+    */
+    .olympo-renglon-lote {
+        display: block;
+        font-weight: 600;
+        letter-spacing: .01em;
+    }
+
+    .olympo-renglon-dato {
+        display: block;
+        margin-top: .0625rem;
+        font-size: .75rem;
+        font-weight: 400;
+        line-height: 1.35;
+        color: rgb(107 114 128);
+    }
+
+    .dark .olympo-renglon-dato { color: rgb(148 154 165); }
+
+    /*
        ── 13. La barra de la izquierda ──────────────────────────────────
 
        Lo pidió Mauricio el 11-ago-2026: «mejoremos el navbar, que sea más

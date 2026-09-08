@@ -1,7 +1,107 @@
-# Continuar acá — 4-sep-2026
+# Continuar acá — 8-sep-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 🔴 8-sep — «Ambas»: el sobrante se reparte entre los lotes
+
+«En "a qué lote va el sobrante" agreguemos que se pueda elegir cuánto va a cada
+lote o repartir en partes iguales, **ya que es algo que la dueña dijo que sí
+necesitaba**» — Mauricio.
+
+Hasta hoy el sobrante de «Ambas» iba contra UN lote, elegido en un Select. Con
+dos lotes en el mismo contrato eso obligaba a partir el pago en dos recibos para
+bajarle capital a los dos.
+
+⚠️ **Había una decisión escrita en contra**, en `CobrarUnPago` y en
+`docs/dominio.md`: «Ambas sigue contra UN lote… no es una simplificación
+pendiente». La pidió la contratante, así que se cambió y se anotó por qué en los
+dos lugares.
+
+### Lo que cambió
+
+1. **El Select murió.** En su lugar van los MISMOS renglones de «Abono a
+   capital» —marcar, elegir qué pasa con lo que falta, y (solo a mano) escribir
+   cuánto—. Mandar todo a un lote es marcar uno solo, **que es como abre el
+   formulario**: quien ya usaba la pantalla no tiene que aprender nada.
+2. **Un interruptor «Partes iguales» / «Yo escribo cuánto a cada uno»**, que se
+   esconde cuando el contrato tiene un solo lote.
+3. **La modalidad es por lote**, como en «Abono a capital» (R21: los dos caminos
+   los elige el cliente).
+4. **El dominio**: `cobrarYAbonar()` y `cobrarYAbonarEnUnMismoNombre()` reciben
+   `$abonos` —una lista de `{lote, monto, modalidad}`— en vez de
+   `$loteDelAbono` + `$aCapital` + `$modalidad`. Cada abono se relee bloqueado
+   **después** del cobro, uno por uno y en orden de id. Si el tercero no llega a
+   bajar capital, la transacción se cae y **los dos primeros tampoco se abonan**.
+
+### 🔴 Los dos bordes que hay que entender antes de tocar esto
+
+**El recibo sale por lo aplicado, no por el «Monto total recibido».** Un reparto
+manual que no suma el sobrante entero sacaría un papel más chico que el billete,
+y **nadie se enteraría**: el recibo cuadra consigo mismo, así que
+`olympo:cuadrar-recibos` no lo ve. Por eso `elRepartoQueNoCuadra()` lo corta
+antes de guardar, con el número que falta, y la previsualización ya lo avisa
+mientras se teclea. El corte vive en la pantalla porque **es el único lugar donde
+están los dos números**: el dominio no sabe cuánto entregó el cliente.
+
+**El centavo del residuo tiene dueño.** «Partes iguales» divide `enCentavos()`
+con `intdiv()` y reparte el resto de a un centavo entre los primeros **por id
+ascendente** —el mismo orden con el que el dominio toma los candados—. Dividir y
+redondear perdería el centavo, que es un recibo que cobró de más en chiquito. Es
+la lección del `FOR UPDATE` sin `ORDER BY` del 27-ago.
+
+### Lo que salió de mirarlo en pantalla, el mismo día
+
+**1. El modal era un muro** («se ve muy engorroso a la vista»). La modalidad
+se pregunta una vez POR LOTE, y con el `Radio` de dos opciones largas eran
+siete líneas de texto repetido por lote. Pasa a un segmentado corto
+—`.olympo-modo-fino`, el mismo riel del toggle de arriba en chico y a la
+izquierda— y la explicación se dice UNA vez en la descripción de la sección.
+Lo mismo en «Abono a capital», que tenía el mismo muro.
+
+**2. El renglón de un lote gana jerarquía.** Era `RPS-D-003 — debe L. 230,000.00`,
+todo del mismo peso. Ahora el código va solo y en negrita, y debajo en gris
+`cuota X · saldo Y`: el saldo total no es el número que se usa —quien atiende
+necesita la cuota del mes— y el código estaba compitiendo con una cifra de seis
+dígitos. En «Ambas» el renglón del sobrante ya no repite el saldo, porque ese
+lote aparece tres centímetros más arriba.
+
+⚠️ El CSS vive en `tema-olympo.blade.php` y entra por `renderHook`: **no lleva
+build**.
+
+**3. 🔴 La nota del abono se contradecía con su propia tabla.** `notaDelAbono()`
+caía a «termina el mismo mes, pagando menos cada mes» siempre que
+`mesesAhorrados()` daba cero. Pero `AcortarPlazo` arma el plan con
+`porCuotaFija()`: **la cuota no baja nunca**. La pantalla decía
+«Cuota L 5,000.00 → L 5,000.00» y dos renglones abajo prometía pagar menos.
+Ahora se ramifica por modalidad. Es un bug viejo, pero repartir el sobrante lo
+hace mucho más frecuente: a cada lote le toca una fracción, así que quitar un
+mes entero es más difícil.
+
+**4. El recibo dice cuánto a qué lote.** `Recibo::capitalPorLote()` sale de las
+CONSTANCIAS —una fila por lote con lo que se le abonó—, no de una cuenta. El
+papel imprime un renglón por lote (`RPS-D-003 · Abono a capital`) en vez de uno
+solo, y la ficha del panel usa el mismo criterio; de paso la ficha pone el
+código adelante de cada cuota, porque cada plan numera desde 1 y «Cuota 3» dos
+veces no decía nada.
+
+🔴 `capitalPorLote()` devuelve **vacío** si no cuadra contra `montoACapital()`
+—que es una resta sobre el total del papel, otra fuente— y ahí el recibo vuelve
+al renglón único. Es preferible menos detalle que partes que no sumen el total
+impreso abajo: un cliente que suma con el dedo y no le da tiene razón en
+desconfiar del papel entero.
+
+### Qué mirar en pruebas
+
+Un expediente de **dos lotes** → «Registrar un pago» → **Ambas**. Escribí un
+total que sobre, marcá las cuotas, y abajo marcá los dos lotes: la
+previsualización tiene que decir «Baja el capital de RPS-…» **una línea por
+lote**, con la mitad cada una. Después pasá a «Yo escribo cuánto», poné números
+que NO sumen el sobrante y mirá el aviso; guardar tiene que estar bloqueado.
+Y por último dejá marcado un solo lote: es el comportamiento de siempre.
+
+Después **imprimí el recibo**: tiene que traer un renglón `CÓDIGO · Abono a
+capital` por cada lote, con su monto, y los cuatro sumando el total recibido.
 
 ## 🔴 4-sep — «Corregir»: editar un recibo sin poder tocar el dinero
 

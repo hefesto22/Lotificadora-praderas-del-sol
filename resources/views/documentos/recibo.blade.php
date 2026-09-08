@@ -372,15 +372,45 @@
                         papel entero y este renglón salía llamándole «abono a
                         capital» a una prima. Ver `Recibo::rotuloDelSobrante()`.
                     --}}
-                    <tr class="capital">
-                        <td>{{ $recibo->rotuloDelSobrante() }}</td>
-                        <td>—</td>
-                        @if ($recibo->esFactura())
-                            <td>1</td>
+                    {{--
+                        🔴 UN RENGLON POR LOTE — 8-sep-2026. «Debería
+                        especificar abono a capital cuánto a qué lote, o sea
+                        que se vea más información detallada» — Mauricio,
+                        mirando un papel que decía «Abono a capital
+                        L 2,000.00» sin decir que eran mil a cada uno.
+
+                        Desde que el sobrante de «Ambas» se reparte, el
+                        renglón único esconde justamente la decisión que se
+                        acaba de tomar — y es la que el cliente va a querer
+                        revisar dentro de un año.
+
+                        `capitalPorLote()` viene vacío cuando el desglose no
+                        suma el total del renglón (una prima, una seña, un
+                        abono que no reprogramó nada), y ahí el papel sale
+                        como salía. Ver su docblock: partes que no suman es
+                        peor que ningún detalle.
+                    --}}
+                    @forelse ($capitalPorLote as $renglonDeCapital)
+                        <tr class="capital">
+                            <td>@if ($variosLotes){{ $renglonDeCapital['codigo'] }} · @endif {{ $recibo->rotuloDelSobrante() }}</td>
+                            <td>—</td>
+                            @if ($recibo->esFactura())
+                                <td>1</td>
+                                <td>{{ $renglonDeCapital['monto']->formateado() }}</td>
+                            @endif
+                            <td>{{ $renglonDeCapital['monto']->formateado() }}</td>
+                        </tr>
+                    @empty
+                        <tr class="capital">
+                            <td>{{ $recibo->rotuloDelSobrante() }}</td>
+                            <td>—</td>
+                            @if ($recibo->esFactura())
+                                <td>1</td>
+                                <td>{{ $aCapital->formateado() }}</td>
+                            @endif
                             <td>{{ $aCapital->formateado() }}</td>
-                        @endif
-                        <td>{{ $aCapital->formateado() }}</td>
-                    </tr>
+                        </tr>
+                    @endforelse
                 @endunless
 
                 @if ($recibo->esFactura() && $recibo->aplicaciones->isEmpty() && $aCapital->esCero())

@@ -30,11 +30,12 @@ use Livewire\Livewire;
 | capital a un lote seleccionable».
 |
 | O sea: se teclea UNA vez el total recibido, se marcan las cuotas que cubre, y
-| el sobrante baja el capital de UN lote elegido.
+| el sobrante baja el capital de un lote.
 |
-| 🔴 Este camino respeta la letra de R21 —el abono sigue yendo contra un solo
-| lote—, así que no necesita la enmienda R21-bis. Esa es solo para el modo
-| «Abono a capital», que sí reparte.
+| ⚠️ Desde el 8-sep-2026 el sobrante puede ir a VARIOS lotes —lo pidió la dueña,
+| ver `SobranteRepartidoTest`—, así que este camino también necesita la enmienda
+| R21-bis. Estos tests siguen valiendo y son el caso de UN lote: marcar uno solo
+| tiene que hacer exactamente lo que hacía el Select.
 |
 | Dos lotes de 250 vr² a L 1,400.00: L 350,000.00 cada uno, L 50,000.00 de
 | prima. El primero a 12 meses da cuotas de L 25,000.00; el segundo a 24 da
@@ -91,8 +92,12 @@ beforeEach(function (): void {
         'cobrar_'.$this->segundoLote->getKey() => true,
         'monto_'.$this->segundoLote->getKey()  => '12500.00',
 
-        'compromiso_id' => $this->primerLote->getKey(),
-        'modalidad'     => ModalidadDeReprogramacion::AcortarPlazo->value,
+        // El sobrante, entero para el primero: marcado solo el, que es como
+        // arranca el formulario (8-sep-2026, antes era `compromiso_id`).
+        'reparto_sobrante'                               => 'iguales',
+        'capital_'.$this->primerLote->getKey()           => true,
+        'capital_modalidad_'.$this->primerLote->getKey() => ModalidadDeReprogramacion::AcortarPlazo->value,
+        'capital_'.$this->segundoLote->getKey()          => false,
 
         'forma_pago' => FormaDePago::Efectivo->value,
         'fecha'      => today()->toDateString(),

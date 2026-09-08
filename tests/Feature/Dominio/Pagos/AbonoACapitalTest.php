@@ -456,9 +456,7 @@ test('el saldo baja exactamente lo que entró, en cualquier combinación', funct
             venta: $this->venta,
             cliente: $this->cliente,
             cuotas: [['lote' => $this->renglon, 'monto' => new Monto('50000.00')]],
-            loteDelAbono: $this->renglon,
-            aCapital: new Monto($monto)->restar(new Monto('50000.00')),
-            modalidad: ModalidadDeReprogramacion::from($modalidad),
+            abonos: [['lote' => $this->renglon, 'monto' => new Monto($monto)->restar(new Monto('50000.00')), 'modalidad' => ModalidadDeReprogramacion::from($modalidad)]],
             motivo: 'Abono a capital solicitado por el cliente',
             forma: FormaDePago::Efectivo,
         );
@@ -507,9 +505,7 @@ test('con dos vencidas y una sola marcada, el sobrante pone al día y el recibo 
         venta: $this->venta,
         cliente: $this->cliente,
         cuotas: [['lote' => $this->renglon, 'monto' => new Monto('25000.00')]],
-        loteDelAbono: $this->renglon,
-        aCapital: new Monto('35000.00'),
-        modalidad: ModalidadDeReprogramacion::AcortarPlazo,
+        abonos: [['lote' => $this->renglon, 'monto' => new Monto('35000.00'), 'modalidad' => ModalidadDeReprogramacion::AcortarPlazo]],
         motivo: 'Abono a capital solicitado por el cliente',
         forma: FormaDePago::Efectivo,
     );

@@ -234,9 +234,7 @@ test('el recibo de un abono imprime sus dos renglones', function (): void {
         venta: $this->venta,
         cliente: $this->cliente,
         cuotas: [['lote' => $this->renglon, 'monto' => new Monto('40000.00')]],
-        loteDelAbono: $this->renglon,
-        aCapital: new Monto('60000.00'),
-        modalidad: ModalidadDeReprogramacion::AcortarPlazo,
+        abonos: [['lote' => $this->renglon, 'monto' => new Monto('60000.00'), 'modalidad' => ModalidadDeReprogramacion::AcortarPlazo]],
         motivo: 'El cliente quiere terminar antes',
         forma: FormaDePago::Efectivo,
     );

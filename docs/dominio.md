@@ -417,10 +417,17 @@ que el **sistema** reparta solo. Acá no reparte nadie:
 | La constancia | **Una por lote**, cada una con su modalidad, su saldo anterior y el plan viejo completo. No se suman: el CHECK `reprogramaciones_saldo_cuadra_chk` verifica por fila, y «¿en qué quedó el lote 2?» necesita los números del lote 2 |
 | Si un lote se pasa del tope | **No se abona ninguno.** Un abono no se puede anular —reescribió un plan— así que la única defensa es que medio recibo nunca llegue a escribirse |
 | Si a un lote no le alcanza para lo vencido | Ese se registra como **pago normal** y no reprograma; los demás siguen. El dinero ya está sobre el mostrador |
-| «Ambas» (cuota + abono) | **Sigue contra UN lote.** Resuelve una cuota pagada a medias, que es un caso puntual de un lote concreto |
+| «Ambas» (cuota + abono) | **También reparte, desde el 8-sep-2026.** Hasta entonces iba contra UN lote y estaba escrito que era una decisión y no una simplificación pendiente. Lo pidió **la dueña**: con dos lotes en el contrato, mandar todo el sobrante a uno la obligaba a partir el pago en dos recibos. Mismos renglones, misma garantía —el monto y la modalidad son por lote— más un reparto **en partes iguales** que el sistema calcula solo **porque alguien se lo pidió en la pantalla**, con los números a la vista antes de confirmar |
 
 **Sin migración:** `reprogramaciones.recibo_id` nunca tuvo un unique y `modalidad` ya era una
 columna por fila desde el 6-ago.
+
+**🔴 Lo que agrega el 8-sep-2026, y hay que incluir en la enmienda.** Esta regla ahora cubre
+**los dos** caminos que abonan, no solo «Abono a capital». Y agrega un matiz que R21 no
+contempla: **«partes iguales»**. Ahí el sistema sí divide un número — pero lo divide **cuando
+se lo piden**, no por su cuenta, muestra cuánto le toca a cada lote antes de confirmar, y la
+suma de las partes es exactamente el sobrante (se parte en centavos; el residuo va al lote de
+menor id). Un reparto que no cuadra con lo que el cliente entregó **no se puede guardar**.
 
 > ⚠️ **Falta la confirmación por escrito de la contratante.** Está construido porque el
 > comportamiento es más conservador que el que ella rechazó —el sistema no decide nada— pero

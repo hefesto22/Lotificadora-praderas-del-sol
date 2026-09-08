@@ -688,6 +688,55 @@ class Recibo extends Model
     }
 
     /**
+     * El capital que bajó, lote por lote — 8-sep-2026.
+     *
+     * «Acá en el recibo debería especificar abono a capital cuánto a qué lote,
+     * o sea que se vea más información detallada» — Mauricio, mirando el
+     * RPS-00000002: decía «Abono a capital … L 2,000.00» y no que eran mil a
+     * cada uno de los dos lotes. Desde que el sobrante de «Ambas» se reparte,
+     * ese renglón único esconde justamente la decisión que se acaba de tomar.
+     *
+     * Sale de las CONSTANCIAS y no de una cuenta: `reprogramaciones` tiene una
+     * fila por lote con lo que se le abonó, que es exactamente lo que quedó
+     * escrito en la base.
+     *
+     * ═══ 🔴 VACIO SI NO CUADRA CONTRA `montoACapital()` ═══
+     *
+     * Son dos fuentes distintas: `montoACapital()` es una RESTA sobre el total
+     * del papel, y las constancias son filas propias. Mientras las dos digan lo
+     * mismo, el desglose es fiel al renglón. Cuando no —una prima, una seña, un
+     * abono que no reprogramó nada, o un descuadre de verdad— el papel vuelve
+     * al renglón único.
+     *
+     * Es preferible menos detalle que un detalle **cuyas partes no sumen el
+     * total impreso tres centímetros más abajo**: un cliente que suma con el
+     * dedo y no le da tiene razón en desconfiar del papel entero.
+     *
+     * @return list<array{codigo: string, monto: Monto}>
+     */
+    public function capitalPorLote(): array
+    {
+        if (! $this->capitalReprogramado()->igualA($this->montoACapital())) {
+            return [];
+        }
+
+        $porLote = [];
+
+        foreach ($this->reprogramaciones as $constancia) {
+            $porLote[] = [
+                'codigo' => (string) ($constancia->compromiso?->lote?->getAttribute('codigo') ?? '—'),
+                'monto'  => $constancia->montoAbonado(),
+            ];
+        }
+
+        // Por código, el orden del contrato: es el mismo con el que salen los
+        // renglones de cuota, así que el papel se lee de arriba abajo sin saltos.
+        usort($porLote, static fn (array $uno, array $otro): int => strcmp($uno['codigo'], $otro['codigo']));
+
+        return $porLote;
+    }
+
+    /**
      * ═══ 🔴 EL CUADRE: LO QUE DICE EL PAPEL CONTRA LO QUE HIZO ═══
      *
      * Todo lempira de un recibo tiene que haber ido a una cuota o haber bajado
