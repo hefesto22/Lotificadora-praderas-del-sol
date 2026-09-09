@@ -492,6 +492,66 @@
     .dark .olympo-renglon-dato { color: rgb(148 154 165); }
 
     /*
+       ── 12-quater. A nombre de quién sale ESE lote (9-sep-2026) ───────
+
+       «Que aparezca a qué titular de recibo sale, para que se tenga en
+       cuenta al pagar (…) lo importante que diga quién es el titular de
+       cada lote para que sepa que se está pagando» — Mauricio.
+
+       ═══ POR QUE UNA PASTILLA Y NO UN TERCER RENGLON GRIS ═══
+
+       Porque la pregunta que se contesta acá no es «cuánto», es «¿son la
+       misma persona o no?». Y esa se contesta COMPARANDO cinco renglones
+       de un vistazo, no leyéndolos. Una pastilla con borde se reconoce
+       por su forma antes de leerse: dos iguales se ven iguales, y una
+       distinta salta sin tener que deletrear el nombre.
+
+       Con el mismo gris de `.olympo-renglon-dato` habría quedado pegada a
+       la cuota y al saldo, que son de otra naturaleza —números que se
+       teclean— y ahí sí habría hecho falta leer para separarlas.
+
+       ⚠️ No es rojo ni ámbar: no es una alarma. Que dos lotes tengan
+       titulares distintos es lo normal en un contrato de representante —
+       lo que estaba mal era no decirlo. La alarma sigue siendo
+       `.olympo-vencidas`, y tiene que seguir siendo la única.
+
+       Solo aparece cuando el contrato tiene MAS DE UN titular: con uno
+       solo el dato no decide nada. La regla vive en
+       `CobrarUnPago::aQuienSaleElPapel()`.
+    */
+    .olympo-renglon-titular {
+        display: inline-flex;
+        align-items: baseline;
+        gap: .25rem;
+        margin-top: .25rem;
+        padding: .09375rem .4375rem;
+        border: 1px solid rgb(226 228 233);
+        border-radius: 9999px;
+        background: rgb(250 250 251);
+        font-size: .6875rem;
+        font-weight: 400;
+        line-height: 1.45;
+        color: rgb(107 114 128);
+        white-space: nowrap;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .olympo-renglon-titular .quien {
+        font-weight: 600;
+        color: rgb(55 65 81);
+    }
+
+    .dark .olympo-renglon-titular {
+        border-color: rgba(255, 255, 255, .1);
+        background: rgba(255, 255, 255, .04);
+        color: rgb(148 154 165);
+    }
+
+    .dark .olympo-renglon-titular .quien { color: rgb(228 230 235); }
+
+    /*
        ── 13. La barra de la izquierda ──────────────────────────────────
 
        Lo pidió Mauricio el 11-ago-2026: «mejoremos el navbar, que sea más

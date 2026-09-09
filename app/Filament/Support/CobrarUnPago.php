@@ -185,7 +185,18 @@ final readonly class CobrarUnPago
                     return [];
                 }
 
-                return [...self::avisoDelPapel($venta), ...self::avisoDelTalonario($venta), ...self::avisoDelContrato($venta), ...new self($venta)->campos()];
+                // Una sola instancia para los dos avisos y los campos: no
+                // porque guarde nada —la clase es readonly— sino porque así
+                // el aviso del contrato y los renglones leen exactamente los
+                // mismos lotes. Ver el docblock de `cuotasDe()`.
+                $cobro = new self($venta);
+
+                return [
+                    ...self::avisoDelPapel($venta),
+                    ...self::avisoDelTalonario($venta),
+                    ...$cobro->avisoDelContrato(),
+                    ...$cobro->campos(),
+                ];
             })
             ->action(static function (array $arguments, array $data) use ($porDefecto): void {
                 $venta = self::ventaDelLote($arguments);
@@ -380,26 +391,29 @@ final readonly class CobrarUnPago
      * 🔴 «Este contrato lleva tres lotes», dicho antes de cobrar.
      *
      * El aviso que hace que esto se pueda abrir desde un lote sin mentir.
-     * El recibo es del CONTRATO —un contrato de varios lotes se cobra en
-     * uno solo, y por eso `Recibo::compromiso_id` queda vacío a
-     * propósito—, así que quien entró haciendo clic en RPS-C-009 tiene que
-     * enterarse de que el papel que va a imprimir también cubre C-010 y
-     * C-011. Sin esta línea, el mismo gesto significa dos cosas distintas
-     * según por dónde se haya entrado.
+     * El recibo es del CONTRATO y no del lote —por eso `Recibo::compromiso_id`
+     * queda vacío a propósito—, así que quien entró haciendo clic en RPS-C-009
+     * tiene que enterarse de que el papel que va a imprimir también cubre
+     * C-010 y C-011. Sin esta línea, el mismo gesto significa dos cosas
+     * distintas según por dónde se haya entrado.
+     *
+     * ⚠️ Cuántos papeles salen NO lo dice esta línea: lo contesta
+     * `cuantosPapelesSalen()`, porque un contrato con titulares de recibo
+     * distintos emite uno por titular. Hasta el 9-sep-2026 acá decía «El
+     * recibo los cubre a todos», que en ese caso era falso.
      *
      * En un contrato de un solo lote —la mayoría— no aparece nada: no hay
      * nada que aclarar y una advertencia de más se deja de leer.
      *
      * @return list<Component>
      */
-    private static function avisoDelContrato(Venta $venta): array
+    private function avisoDelContrato(): array
     {
-        $codigos = $venta->compromisos()
-            ->with('lote')
-            ->get()
-            // Los rescindidos afuera: nombrarlos aca diria que el contrato
-            // lleva tres lotes cuando ya lleva dos.
-            ->reject(static fn (Compromiso $compromiso): bool => $compromiso->getAttribute('estado') === EstadoCompromiso::Rescindido)
+        // Los rescindidos ya quedaron afuera en `compromisosEnOrden()`:
+        // nombrarlos acá diría que el contrato lleva tres lotes cuando ya
+        // lleva dos. Desde el 9-sep-2026 sale de ahí y no de una consulta
+        // propia — es la misma lista con la que se dibujan los renglones.
+        $codigos = $this->compromisosEnOrden()
             ->map(static fn (Compromiso $compromiso): string => (string) $compromiso->lote?->getAttribute('codigo'))
             ->filter()
             ->values()
@@ -412,8 +426,37 @@ final readonly class CobrarUnPago
         return [
             Placeholder::make('lotes_del_contrato')
                 ->label('Ojo: este contrato lleva '.count($codigos).' lotes')
-                ->content(implode(' · ', $codigos).'. El recibo los cubre a todos.'),
+                ->content(implode(' · ', $codigos).'. '.$this->cuantosPapelesSalen()),
         ];
+    }
+
+    /**
+     * 🔴 Cuántos papeles salen de este cobro — corregido el 9-sep-2026.
+     *
+     * Decía «El recibo los cubre a todos», en singular y sin condiciones. Es
+     * verdad en el caso común y MENTIRA justo en el caso que este aviso
+     * existe para cubrir: `RegistroDePagos::agruparPorNombre()` parte el
+     * cobro en un recibo por titular, así que un contrato con dos titulares
+     * de recibo emite dos papeles, con dos correlativos, por el mismo pago.
+     *
+     * Nadie lo había notado porque la pantalla no se contradecía en ninguna
+     * parte: las notificaciones de después sí mostraban dos, pero para
+     * entonces los papeles ya estaban emitidos.
+     */
+    private function cuantosPapelesSalen(): string
+    {
+        $cuantos = count($this->titularesDelContrato());
+
+        if ($cuantos < 2) {
+            return 'El recibo los cubre a todos.';
+        }
+
+        return sprintf(
+            'Tienen %d titulares de recibo distintos, así que este cobro sale en %d recibos '
+            .'—uno por titular—. Abajo, cada lote dice a nombre de quién sale el suyo.',
+            $cuantos,
+            $cuantos,
+        );
     }
 
     /**
@@ -1239,6 +1282,8 @@ final readonly class CobrarUnPago
                 $this->avisarDelProntoPago($recibo);
             }
 
+            $this->olvidarLoCargado();
+
             return;
         }
 
@@ -1262,6 +1307,33 @@ final readonly class CobrarUnPago
 
             $this->avisarDelCobro($recibo);
         }
+
+        $this->olvidarLoCargado();
+    }
+
+    /**
+     * Tirar la memoria del contrato: ya se cobró, los saldos cambiaron.
+     *
+     * ═══ POR QUE AL FINAL Y NO ANTES DE LOS AVISOS ═══
+     *
+     * Porque los avisos hablan del cobro que ACABA de pasar, y para eso los
+     * lotes que valen son los que estaban marcados en la pantalla, no los que
+     * quedan debiendo ahora. `$codigosDelAbono` se arma con `lotesQueDeben()`,
+     * y un lote que el abono terminó de pagar ya no está en esa lista: leída
+     * después de escribir, su recibo se anunciaría como una cuota común y el
+     * cliente se iría sin ver que bajó capital.
+     *
+     * ⚠️ Lo que se olvida vive en los MODELOS —esta clase es `readonly` y no
+     * guarda nada—: `$this->venta` es el mismo objeto que tiene el resto del
+     * request, así que si Filament vuelve a dibujar algo después de la acción
+     * tiene que volver a preguntarle a la base.
+     */
+    private function olvidarLoCargado(): void
+    {
+        // Los compromisos enteros y no solo sus cuotas: un cobro puede dejar
+        // un lote pagado, y ese estado vive en la fila del compromiso.
+        $this->venta->unsetRelation('compromisos');
+        $this->venta->unsetRelation('titulares');
     }
 
     /**
@@ -1685,7 +1757,16 @@ final readonly class CobrarUnPago
 
     private function quienPaga(): Cliente
     {
-        return $this->venta->titular() ?? $this->venta->clientes()->firstOrFail();
+        /*
+         * 🔴 Por la RELACION `titulares` y no por `titular()`, desde el
+         * 9-sep-2026. `titular()` hace su propia consulta con pivote cada vez
+         * que se lo llama —lo dice su propio docblock— y ahora lo pregunta
+         * CADA renglón de lote, cuando el contrato tiene titulares de recibo
+         * distintos. La relación se carga una vez y queda sobre el modelo.
+         */
+        $this->venta->loadMissing('titulares');
+
+        return $this->venta->titulares->first() ?? $this->venta->clientes()->firstOrFail();
     }
 
     // ─── Lo que se muestra antes de confirmar (§10.8) ─────────────────
@@ -2421,6 +2502,19 @@ final readonly class CobrarUnPago
          * apareciendo en el modal de cobro, ofreciendole a la ventanilla
          * cobrarle a alguien por un terreno que ya no es suyo.
          */
+        /*
+         * 🔴 UNA consulta para las cuotas de TODO el contrato, y sobre los
+         * modelos que ya están en memoria. Sin esta línea, dibujar el modal
+         * preguntaba el saldo lote por lote, una docena de veces por clic —
+         * el porqué largo está en el docblock de `cuotasDe()`.
+         *
+         * `loadMissing` y no `load`: si el plano o el expediente ya trajeron
+         * las cuotas, no se vuelven a pedir. Y por eso esto se puede llamar
+         * las veces que haga falta: ordenar una colección que ya está en
+         * memoria no cuesta nada, volver a la base sí.
+         */
+        $this->venta->loadMissing(['compromisos.lote', 'compromisos.cuotas']);
+
         return $this->venta->compromisos
             ->reject(static fn (Compromiso $compromiso): bool => $compromiso->getAttribute('estado') === EstadoCompromiso::Rescindido)
             ->sortBy(static fn (Compromiso $compromiso): string => (string) $compromiso->lote?->getAttribute('codigo'))
@@ -2529,10 +2623,110 @@ final readonly class CobrarUnPago
         $datos[] = 'saldo '.$this->saldoDe($lote)->formateado();
 
         return new HtmlString(sprintf(
-            '<span class="olympo-renglon-lote">%s</span><span class="olympo-renglon-dato">%s</span>',
+            '<span class="olympo-renglon-lote">%s</span><span class="olympo-renglon-dato">%s</span>%s',
             e((string) $lote->lote?->getAttribute('codigo')),
             e(implode(' · ', $datos)),
+            $this->aQuienSaleElPapel($lote),
         ));
+    }
+
+    /**
+     * A nombre de quién sale el papel de ESTE lote, cuando hace falta decirlo.
+     *
+     * ═══ 🔴 «EL RECIBO LOS CUBRE A TODOS» NO SIEMPRE ERA CIERTO ═══
+     *
+     * Lo pidió Mauricio el 9-sep-2026: «que aparezca a qué titular de recibo
+     * sale, para que se tenga en cuenta al pagar (…) lo importante que diga
+     * quién es el titular de cada lote para que sepa que se está pagando».
+     *
+     * Y no es cosmético. `RegistroDePagos::agruparPorNombre()` parte el cobro
+     * en UN RECIBO POR TITULAR: dos lotes con titulares distintos salen en dos
+     * papeles, con dos correlativos. La pantalla no lo decía en ninguna parte
+     * —el aviso del contrato incluso afirmaba lo contrario— así que quien
+     * cobraba marcaba tres casillas creyendo que emitía un papel y emitía
+     * tres, y recién se enteraba al ver las notificaciones.
+     *
+     * ═══ POR QUE SOLO CUANDO HAY VARIOS ═══
+     *
+     * «Si es el mismo en todos o no hay configurado titular de recibos,
+     * entonces sí que se vea así» —el mismo pedido—. Con un solo nombre el
+     * dato no decide nada: el recibo sale a ese nombre marque lo que marque.
+     * Repetirlo en cada renglón sería la advertencia permanente que se deja de
+     * leer, y este modal ya se rediseñó una vez por estar cargado de más.
+     *
+     * ⚠️ El lote SIN titular configurado también muestra nombre —el del dueño
+     * del expediente, que es a quien le sale el papel—. Dejarlo en blanco
+     * mientras el de al lado dice un nombre haría preguntar si el blanco es un
+     * error de carga; y para `agruparPorNombre()` «el dueño» es un titular tan
+     * distinto como cualquier otro: también se lleva su propio recibo.
+     */
+    private function aQuienSaleElPapel(Compromiso $lote): string
+    {
+        if (! $this->nombraVariosTitulares()) {
+            return '';
+        }
+
+        return sprintf(
+            '<span class="olympo-renglon-titular">recibo a <span class="quien">%s</span></span>',
+            e($this->nombreDelPapelDe($lote)),
+        );
+    }
+
+    /**
+     * El nombre que va a salir impreso en el recibo de este lote.
+     *
+     * Es la misma regla que `Recibo::nombreDelPapel()` —el titular del recibo
+     * si lo tiene, y si no el dueño del expediente— dicha antes de emitir. Que
+     * la pantalla y el papel digan lo mismo es todo el punto de esto.
+     */
+    private function nombreDelPapelDe(Compromiso $lote): string
+    {
+        $suyo = $lote->titularDelRecibo();
+
+        if ($suyo !== null) {
+            return $suyo;
+        }
+
+        $duenio = $this->quienPaga()->getAttribute('nombre');
+
+        return is_string($duenio) && trim($duenio) !== '' ? trim($duenio) : 'el titular del expediente';
+    }
+
+    /**
+     * ¿Este contrato saca más de un papel por cobro?
+     */
+    private function nombraVariosTitulares(): bool
+    {
+        return count($this->titularesDelContrato()) > 1;
+    }
+
+    /**
+     * Los nombres distintos a los que pueden salir los papeles del contrato.
+     *
+     * La cadena vacía es «el dueño del expediente» y cuenta como un nombre
+     * más: es exactamente el criterio de `agruparPorNombre()`, y tiene que
+     * serlo, porque de ese criterio depende cuántos recibos se emiten.
+     *
+     * Mira los lotes CON SALDO y no todos los del contrato: un lote ya pagado
+     * no entra en ningún cobro de hoy, así que su titular no cambia cuántos
+     * papeles salen. Es el mismo conjunto que dibuja los renglones, y por eso
+     * el aviso de arriba y las etiquetas de abajo nunca se contradicen.
+     *
+     * @return list<string>
+     */
+    private function titularesDelContrato(): array
+    {
+        $nombres = [];
+
+        foreach ($this->lotesQueDeben() as $lote) {
+            $nombre = $lote->titularDelRecibo() ?? '';
+
+            if (! in_array($nombre, $nombres, strict: true)) {
+                $nombres[] = $nombre;
+            }
+        }
+
+        return $nombres;
     }
 
     /**
@@ -2675,22 +2869,74 @@ final readonly class CobrarUnPago
      * Las cuotas del lote que todavía deben algo, en el mismo orden que el
      * FIFO del Service.
      *
+     * Es el mismo filtro que hacía el SQL —`monto_pagado < monto`— dicho con
+     * el objeto: `saldo()` es `monto - monto_pagado`, así que «saldo cero» y
+     * «pagada» son la misma cuota. Se filtra en PHP porque las cuotas ya
+     * están en memoria: ver `cuotasDe()`.
+     *
      * @return Cuotas<int, Cuota>
      */
     private function pendientesDe(Compromiso $lote): Cuotas
     {
-        return Cuota::query()
-            ->where('compromiso_id', $lote->getKey())
-            ->whereColumn('monto_pagado', '<', 'monto')
-            ->orderBy('numero')
-            ->get();
+        return $this->cuotasDe($lote)
+            ->filter(static fn (Cuota $cuota): bool => ! $cuota->saldo()->esCero())
+            ->values();
+    }
+
+    /**
+     * Todas las cuotas del lote, de la relación ya cargada.
+     *
+     * ═══ 🔴 EL SEGUNDO QUE SE TARDABA ERA ESTO (9-sep-2026) ═══
+     *
+     * «Se tarda como un segundo o más en contestar al dar clic en algún
+     * check» —Mauricio, sobre el expediente de cinco lotes—. No era el
+     * navegador ni la red: era la base de datos.
+     *
+     * Cada casilla es `->live()`, así que un clic vuelve a armar el schema
+     * ENTERO. Y armarlo llama a `lotesQueDeben()` una docena de veces —los
+     * renglones de cuota, los de abono, los de pronto pago, los del sobrante,
+     * y cada previsualización—. Hasta hoy este método era
+     * `$lote->cuotas()->get()`: una consulta NUEVA por lote y por llamada.
+     * Sumando `pendientesDe()`, que hacía lo mismo en cuatro lugares más, un
+     * solo clic pasaba de cien consultas con cinco lotes.
+     *
+     * ═══ POR QUE LA MEMORIA VIVE EN LOS MODELOS Y NO ACA ═══
+     *
+     * Porque esta clase es `final readonly`: no puede guardar nada en una
+     * propiedad. Y porque no hace falta —es mejor así—: `compromisosEnOrden()`
+     * hace UN `loadMissing()` para todo el contrato, y esas cuotas quedan
+     * sobre los `Compromiso`, que se comparten. `$record` es el mismo objeto
+     * durante todo el request aunque `new self($record)` se construya tres
+     * veces —`fillForm()`, `schema()` y `->action()`—, así que la consulta
+     * ocurre una sola vez por request y no una por instancia.
+     *
+     * Lo que se recalcula —ordenar, filtrar, sumar saldos— es aritmética en
+     * memoria sobre un puñado de modelos. Eso no era el problema.
+     *
+     * El `load()` de respaldo es para el lote que llega por otro camino —una
+     * previsualización que recibe un `Compromiso` suelto, un test que arma el
+     * modelo a mano—: carga las suyas y quedan cargadas, no repite.
+     *
+     * ⚠️ Quien lea estas cuotas NO puede modificarlas: son los mismos objetos
+     * que ve el resto de la pantalla. `comoQuedanTrasCobrar()` ya lo respeta
+     * —proyecta sobre un `clone`— y así tiene que seguir.
+     *
+     * @return Cuotas<int, Cuota>
+     */
+    private function cuotasDe(Compromiso $lote): Cuotas
+    {
+        if (! $lote->relationLoaded('cuotas')) {
+            $lote->load('cuotas');
+        }
+
+        return $lote->cuotas;
     }
 
     private function saldoDe(Compromiso $renglon): Monto
     {
         $saldo = Monto::cero();
 
-        foreach ($renglon->cuotas()->get() as $cuota) {
+        foreach ($this->cuotasDe($renglon) as $cuota) {
             $saldo = $saldo->sumar($cuota->saldo());
         }
 

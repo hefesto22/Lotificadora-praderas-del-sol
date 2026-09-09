@@ -1,7 +1,100 @@
-# Continuar acá — 8-sep-2026
+# Continuar acá — 9-sep-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 🔴 9-sep — El titular de recibo de CADA lote, y el segundo que se tardaba
+
+«Acá que aparezca a qué titular de recibo sale, para que se tenga en cuenta al
+pagar; si es el mismo en todos o no hay configurado titular de recibos entonces
+sí que se vea así. Además se tarda como un segundo o más en contestar al dar clic
+en algún check, hay que mejorar eso también, pero **lo importante que diga quién
+es el titular de cada lote para que sepa que se está pagando**» — Mauricio,
+mirando el expediente 0085 recién cuadrado.
+
+### 🔴 Lo primero no era cosmético: la pantalla decía lo contrario
+
+`RegistroDePagos::agruparPorNombre()` parte el cobro en **un recibo por
+titular**. Dos lotes con titulares distintos salen en dos papeles, con dos
+correlativos. Eso ya era así desde el 13-ago y estaba bien; lo que faltaba era
+que alguien pudiera saberlo **antes** de apretar el botón.
+
+Y el aviso de arriba afirmaba lo contrario, en singular y sin condiciones:
+«El recibo los cubre a todos». Verdad en el caso común, mentira justo en el caso
+que ese aviso existe para cubrir. Quien cobraba marcaba cinco casillas creyendo
+que emitía un papel, y se enteraba al ver las notificaciones —con los papeles ya
+emitidos—.
+
+Ahora:
+
+1. **Cada renglón de lote lleva una pastilla** «recibo a NOMBRE»
+   (`CobrarUnPago::aQuienSaleElPapel()`), en cuotas, en abono y en el reparto del
+   sobrante. Es una pastilla y no un tercer renglón gris porque la pregunta que
+   contesta no es «cuánto» sino «¿son la misma persona o no?», y esa se contesta
+   comparando de un vistazo, no leyendo.
+2. **Solo cuando el contrato tiene más de un titular.** Con uno solo el dato no
+   decide nada y sería la advertencia permanente que se deja de leer. Es el
+   pedido textual: «si es el mismo en todos… entonces sí que se vea así».
+3. **El lote sin titular configurado también se nombra**, con el dueño del
+   expediente. Dejarlo en blanco al lado de uno con nombre haría preguntar si el
+   blanco es un error de carga —y para `agruparPorNombre()` «el dueño» es un
+   titular tan distinto como cualquier otro: también se lleva su propio recibo.
+4. **El aviso del contrato dice cuántos papeles salen**
+   (`cuantosPapelesSalen()`), en vez de prometer uno solo.
+
+⚠️ El conjunto que decide es el de los lotes **con saldo**, no todos los del
+contrato: un lote ya pagado no entra en ningún cobro de hoy, así que su titular
+no cambia cuántos recibos salen. Por eso el aviso de arriba y las etiquetas de
+abajo nunca se contradicen.
+
+### 🔴 El segundo que se tardaba era la base de datos, no el navegador
+
+Cada casilla es `->live()`, así que un clic vuelve a armar el schema **entero**.
+Y armarlo llamaba a `lotesQueDeben()` una docena de veces —los renglones de
+cuota, los de abono, los de pronto pago, los del sobrante y cada
+previsualización—, y `lotesQueDeben()` preguntaba el saldo **lote por lote, con
+una consulta nueva cada vez**. Sumando `pendientesDe()`, que hacía lo mismo en
+cuatro lugares más, un solo clic pasaba de cien consultas en el contrato de cinco
+lotes.
+
+### 🔴 La memoria va en los MODELOS, no en la instancia
+
+⚠️ **`CobrarUnPago` es `final readonly`: no puede guardar nada en una
+propiedad.** El primer intento agregó cuatro propiedades memo y PHPStan lo
+rechazó con doce errores (`readOnlyDefaultValue` y `readOnlyAssignNotInConstructor`).
+No hay que volver a intentarlo: la memoria correcta no es esa.
+
+1. **Las cuotas se cargan sobre los modelos** (`compromisosEnOrden()` hace UN
+   `loadMissing(['compromisos.lote', 'compromisos.cuotas'])`), y esos modelos se
+   comparten: `$record` es el mismo objeto durante todo el request aunque
+   `new self($record)` se construya tres veces —`fillForm()`, `schema()` y
+   `->action()`—. La consulta ocurre **una vez por request**, no una por
+   instancia. Por eso funciona sin propiedades.
+2. **`quienPaga()` va por la relación `titulares`** y no por `titular()`, que
+   —lo dice su propio docblock— consulta cada vez que se lo llama. Ahora lo
+   pregunta cada renglón de lote.
+3. **Lo que se recalcula** —ordenar, filtrar, sumar saldos— es aritmética en
+   memoria sobre un puñado de modelos. Eso nunca fue el problema.
+
+`pendientesDe()` filtra la relación ya cargada en vez de consultar; el filtro es
+el mismo que hacía el SQL, porque `saldo()` es `monto - monto_pagado`.
+
+⚠️ **Quien lea esas cuotas no puede modificarlas**: son los mismos objetos que ve
+el resto de la pantalla. `comoQuedanTrasCobrar()` ya lo respeta —proyecta sobre
+un `clone`— y así tiene que seguir. `EfectoDelAbono` no toca ninguna, se
+verificó.
+
+⚠️ **Las relaciones se sueltan al final de `registrar()`** (`olvidarLoCargado()`:
+`unsetRelation('compromisos')` y `unsetRelation('titulares')`), y al final y no
+antes de los avisos: los avisos hablan del cobro que acaba de pasar, y para eso
+los lotes que valen son los que estaban marcados en la pantalla. Leído después de
+escribir, un lote que el abono terminó de pagar ya no está en `lotesQueDeben()` y
+su recibo se anunciaría como una cuota común.
+
+El guardián es `tests/Feature/Filament/TitularDeCadaLoteTest.php`: cuenta solo las
+consultas a `cuotas` al abrir el modal —no todas las del request, que las mueve
+cualquier versión de Filament—. Lo que se cuida es que ese número **no crezca con
+los lotes**.
 
 ## 🔴 8-sep — «Ambas»: el sobrante se reparte entre los lotes
 
