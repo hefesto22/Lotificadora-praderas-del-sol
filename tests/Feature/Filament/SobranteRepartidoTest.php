@@ -307,6 +307,52 @@ test('con el sobrante en un solo lote, el papel dice cuál', function (): void {
 });
 
 /*
+| 🔴🔴 EL CASO DE PRODUCCION — RPS-00000057, 8-sep-2026.
+|
+| Ese recibo cobró L 43,500.00: la cuota 2 de RPS-W-005 y L 36,799.67 de abono
+| a capital al lote RPS-F-003. El papel salió diciendo «LOTE RPS-W-005», con
+| el renglón «Abono a capital» sin nombre y un «le queda por pagar» que hablaba
+| solo de W-005. Para el papel, F-003 no existía — y Mauricio terminó dudando
+| de un saldo que estaba bien.
+|
+| La causa: `compromisosTocados()` miraba las aplicaciones a CUOTAS y no las
+| reprogramaciones. Un abono a capital no aplica cuotas: escribe una
+| constancia. Así que el lote que recibe el abono y NO paga cuota en el mismo
+| recibo era invisible.
+|
+| ⚠️ Ningún detector lo iba a encontrar: el recibo cuadraba. El número estaba
+| bien y el papel estaba mudo.
+*/
+test('el papel nombra el lote que recibió el abono aunque no haya pagado cuota', function (): void {
+    ($this->expediente)()
+        ->callAction('cobrar', ($this->pago)([
+            // Solo el primero paga cuota (25,000); los 100,000 de sobrante van
+            // enteros al segundo, que en este papel no aparece en ninguna cuota.
+            'monto_total'                           => '125000.00',
+            'cobrar_'.$this->segundoLote->getKey()  => false,
+            'capital_'.$this->primerLote->getKey()  => false,
+            'capital_'.$this->segundoLote->getKey() => true,
+        ]))
+        ->assertHasNoActionErrors();
+
+    $recibo = Recibo::query()->where('concepto', ConceptoDeRecibo::AbonoCapital)->sole();
+
+    $uno = (string) $this->primerLote->lote?->getAttribute('codigo');
+    $dos = (string) $this->segundoLote->lote?->getAttribute('codigo');
+
+    // El recibo TOCÓ los dos: uno por la cuota, el otro por el abono.
+    expect($recibo->codigosDeLotes())->toContain($uno)->toContain($dos);
+
+    $papel = (string) $this->get(route('documentos.recibo', $recibo))->assertOk()->getContent();
+
+    preg_match_all('/<tr class="capital">.*?<\/tr>/s', $papel, $renglones);
+
+    expect($renglones[0])->toHaveCount(1)
+        // Y el renglón dice a CUAL: es la línea que faltaba en el RPS-00000057.
+        ->and($renglones[0][0])->toContain($dos)->toContain('L. 100,000.00');
+});
+
+/*
 | Y lo de siempre sigue andando: marcar UN solo lote manda el sobrante entero
 | ahí, que es exactamente lo que hacía el Select hasta el 8-sep-2026.
 */

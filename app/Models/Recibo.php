@@ -515,6 +515,34 @@ class Recibo extends Model
      * null: **el recibo que más necesita el desglose —el de varios lotes— era
      * justo el único que no lo mostraba.**
      *
+     * ═══ 🔴🔴 UN ABONO A CAPITAL TAMBIEN TOCA UN LOTE — 8-sep-2026 ═══
+     *
+     * Hasta hoy «tocó» quería decir SOLO dos cosas: `compromiso_id`, o los
+     * lotes de las cuotas que aplicó. **Las reprogramaciones no contaban**, y
+     * un abono a capital no aplica cuotas: escribe una constancia.
+     *
+     * Lo que eso hacía, y salió en producción: el recibo **RPS-00000057** de
+     * Praderas cobró L 43,500.00 —la cuota 2 de RPS-W-005 y L 36,799.67 de
+     * abono a capital al lote **RPS-F-003**— y el papel salió diciendo
+     * «LOTE RPS-W-005», con el renglón «Abono a capital» sin nombre y un «le
+     * queda por pagar» que hablaba solo de W-005. **Para el papel, F-003 no
+     * existía.** Mauricio lo levantó preguntando por qué a W-005 no le bajaba
+     * el saldo: le bajaba lo que le tocaba, pero el recibo se lo ocultaba.
+     *
+     * No era un dinero perdido —`olympo:cuadrar-recibos` decía la verdad, el
+     * recibo cuadraba— y por eso ningún detector lo iba a encontrar nunca:
+     * **el número estaba bien y el papel estaba mudo.**
+     *
+     * De acá cuelgan cuatro cosas, y las cuatro se arreglan con esta línea: el
+     * rótulo `LOTE`, los lotes de los que HABLA el papel
+     * (`compromisosDelPapel()`), el «Le queda por pagar» del pie, y
+     * `nombraVariosLotes()` —que decide si cada renglón lleva el código
+     * adelante—.
+     *
+     * ⚠️ El ORDEN se escribe, por código: antes salía en el orden en que
+     * vinieran las aplicaciones, que es el orden en que Postgres las devuelva.
+     * Si el orden decide lo que se lee, no lo decide el planificador.
+     *
      * @return list<Compromiso>
      */
     public function compromisosTocados(): array
@@ -535,7 +563,23 @@ class Recibo extends Model
             }
         }
 
-        return array_values($lotes);
+        // Los que recibieron abono a capital: ver el docblock.
+        foreach ($this->reprogramaciones as $constancia) {
+            $lote = $constancia->compromiso;
+
+            if ($lote instanceof Compromiso) {
+                $lotes[(int) $lote->getKey()] = $lote;
+            }
+        }
+
+        $tocados = array_values($lotes);
+
+        usort($tocados, static fn (Compromiso $uno, Compromiso $otro): int => strcmp(
+            self::codigoDe($uno),
+            self::codigoDe($otro),
+        ));
+
+        return $tocados;
     }
 
     /**

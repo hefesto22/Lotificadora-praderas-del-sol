@@ -2430,7 +2430,14 @@ final readonly class RegistroDePagos
      * `orderBy` de la relación; el 42803 de Postgres aparece cuando se agrega
      * sobre `$venta->cuotas()`, como documenta `Venta::saldoPendiente()`.
      */
-    private function recalcularElResumen(Venta $venta): void
+    /**
+     * ⚠️ `public` desde el 8-sep-2026, para `olympo:recuadrar-venta`: un
+     * recuadre reescribe los planes de varios lotes y tiene que dejar el
+     * resumen de la venta al día igual que un cobro. Duplicar estas quince
+     * líneas en el comando sería la forma segura de que dentro de tres meses
+     * una de las dos aprenda algo que la otra no.
+     */
+    public function recalcularElResumen(Venta $venta): void
     {
         /** @var string|int|null $horizonte */
         $horizonte = Cuota::query()
