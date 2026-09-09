@@ -42,6 +42,7 @@ use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Collection as Cuotas;
 use Illuminate\Support\Collection;
 use Illuminate\Support\HtmlString;
+use Livewire\Component as Pantalla;
 
 /**
  * El modal donde entra el dinero, uno solo para todas las pantallas.
@@ -198,7 +199,7 @@ final readonly class CobrarUnPago
                     ...$cobro->campos(),
                 ];
             })
-            ->action(static function (array $arguments, array $data) use ($porDefecto): void {
+            ->action(static function (array $arguments, array $data, Pantalla $livewire) use ($porDefecto): void {
                 $venta = self::ventaDelLote($arguments);
 
                 if (! $venta instanceof Venta) {
@@ -223,7 +224,7 @@ final readonly class CobrarUnPago
                     return;
                 }
 
-                new self($venta)->registrar($data);
+                new self($venta, $livewire)->registrar($data);
             });
     }
 
@@ -488,12 +489,20 @@ final readonly class CobrarUnPago
                 ...self::avisoDelTalonario($record),
                 ...new self($record)->campos(),
             ])
-            ->action(static function (Venta $record, array $data): void {
-                new self($record)->registrar($data);
+            ->action(static function (Venta $record, array $data, Pantalla $livewire): void {
+                new self($record, $livewire)->registrar($data);
             });
     }
 
-    private function __construct(private Venta $venta) {}
+    /**
+     * La pantalla desde la que se cobra, cuando la hay.
+     *
+     * Solo la necesita `registrar()`, y solo para una cosa: mandarle el
+     * JavaScript que abre el diálogo de impresión apenas sale el papel (ver
+     * `ImprimirRecibo::alEmitir()`). Nula al dibujar el formulario, porque ahí
+     * no hay nada que imprimir todavía.
+     */
+    private function __construct(private Venta $venta, private ?Pantalla $pantalla = null) {}
 
     // ─── Quién puede qué ──────────────────────────────────────────────
 
@@ -1282,6 +1291,7 @@ final readonly class CobrarUnPago
                 $this->avisarDelProntoPago($recibo);
             }
 
+            ImprimirRecibo::alEmitir($recibos, $this->pantalla);
             $this->olvidarLoCargado();
 
             return;
@@ -1307,6 +1317,20 @@ final readonly class CobrarUnPago
 
             $this->avisarDelCobro($recibo);
         }
+
+        /*
+         * 🔴 DESPUES de los avisos y en UNA sola llamada — 9-sep-2026.
+         *
+         * «Al pagar debería de abrirse de una la ventana para imprimir los
+         * recibos» —Mauricio—. Un cobro de varios titulares sale en varios
+         * papeles, y `olympoImprimir()` tiene un solo iframe: llamarla una vez
+         * por recibo imprimiría el último y nada más. Por eso se le pasa la
+         * lista entera y la ruta de varios arma una hoja por cada uno.
+         *
+         * Los botones de las notificaciones se quedan: esto es JavaScript, y
+         * el papel que el cliente espera no puede depender de eso.
+         */
+        ImprimirRecibo::alEmitir($recibos, $this->pantalla);
 
         $this->olvidarLoCargado();
     }

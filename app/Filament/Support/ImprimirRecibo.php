@@ -7,6 +7,7 @@ namespace App\Filament\Support;
 use App\Models\Recibo;
 use Filament\Actions\Action;
 use Filament\Support\Icons\Heroicon;
+use Livewire\Component;
 
 /**
  * El botón de imprimir, uno solo para las tres pantallas donde aparece.
@@ -71,5 +72,36 @@ final class ImprimirRecibo
                     route('documentos.recibo', $recibo),
                 ),
             ]);
+    }
+
+    /**
+     * Los recibos que ACABAN de emitirse, mandados a imprimir de una pasada.
+     *
+     * El porqué —y por qué no es una ventana— está en `AbrirLaImpresion`. Acá
+     * queda lo propio de los recibos: son N y se piden en UNA url, porque
+     * `olympoImprimir()` tiene un solo iframe y llamarla cuatro veces
+     * imprimiría el último papel y nada más.
+     *
+     * `documentos.recibos` sirve igual para uno solo, y eso es a propósito:
+     * quien cobra no tiene que decidir nada según cuántos salieron.
+     *
+     * @param list<Recibo> $recibos
+     */
+    public static function alEmitir(array $recibos, ?Component $pantalla): void
+    {
+        if ($recibos === []) {
+            return;
+        }
+
+        $ids = [];
+
+        foreach ($recibos as $recibo) {
+            $ids[] = (string) $recibo->getKey();
+        }
+
+        AbrirLaImpresion::de(
+            route('documentos.recibos', ['recibos' => implode(',', $ids)]),
+            $pantalla,
+        );
     }
 }

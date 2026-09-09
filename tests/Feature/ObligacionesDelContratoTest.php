@@ -205,9 +205,20 @@ describe('Cláusula Segunda g-i: la leyenda del recibo', function (): void {
     | El contrato pide el recibo interno correlativo «con NO VÁLIDO PARA
     | CRÉDITO FISCAL». Son palabras del contrato, no una paráfrasis, y son
     | las que evitan que alguien intente presentar este papel ante el SAR.
+    |
+    | ⚠️ Mira la HOJA y no el documento (9-sep-2026). El cuerpo del recibo se
+    | extrajo a `documentos/partes/recibo-hoja.blade.php` para que el papel de
+    | varios recibos lo repita sin copiarlo, y este test se quedó apuntando al
+    | archivo de afuera —que desde entonces es un `<html>` con dos `@include`—.
+    | Falló, y falló BIEN: la leyenda seguía saliendo impresa, pero un test
+    | que mira un archivo que ya no la contiene no cuida nada.
+    |
+    | Sigue mirando UN archivo concreto a propósito. Buscarla en toda la
+    | carpeta pasaría el día que alguien la deje en un documento que no se
+    | entrega, y esto es una obligación del contrato: tiene que ser exigente.
     */
     test('el papel lleva la leyenda con las palabras del contrato', function (): void {
-        $blade = File::get(resource_path('views/documentos/recibo.blade.php'));
+        $blade = File::get(resource_path('views/documentos/partes/recibo-hoja.blade.php'));
 
         expect($blade)->toContain('NO VÁLIDO PARA CRÉDITO FISCAL');
     });

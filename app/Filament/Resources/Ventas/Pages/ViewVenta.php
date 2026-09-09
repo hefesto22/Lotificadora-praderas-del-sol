@@ -16,6 +16,7 @@ use App\Filament\Resources\Ventas\VentaResource;
 use App\Filament\Schemas\Components\DNIField;
 use App\Filament\Schemas\Components\MayusculasField;
 use App\Filament\Schemas\Components\MontoField;
+use App\Filament\Support\AbrirLaImpresion;
 use App\Filament\Support\CobrarUnPago;
 use App\Models\Cliente;
 use App\Models\Compromiso;
@@ -490,10 +491,32 @@ class ViewVenta extends ViewRecord
                         // Filament 4 las notificaciones usan `Filament\Actions\Action`.
                         Action::make('imprimir')
                             ->label('Imprimir el acta')
+                            /*
+                             * Sin pestaña, como los recibos desde el 14-ago:
+                             * el documento se carga en un iframe escondido y
+                             * el diálogo sale ahí mismo. La `url` se conserva
+                             * de respaldo — si el JS no cargó, un enlace sigue
+                             * siendo un enlace.
+                             */
                             ->url(route('documentos.devolucion', $acta))
-                            ->openUrlInNewTab(),
+                            ->openUrlInNewTab()
+                            ->extraAttributes([
+                                'x-on:click.prevent' => sprintf(
+                                    "window.olympoImprimir && window.olympoImprimir('%s')",
+                                    route('documentos.devolucion', $acta),
+                                ),
+                            ]),
                     ])
                     ->send();
+
+                /*
+                 * Y el diálogo sale solo, sin apretar nada — 9-sep-2026. El
+                 * acta de una rescisión se firma en el momento: quien la
+                 * levanta tiene a la persona enfrente igual que quien cobra.
+                 * El botón de arriba se queda de respaldo (ver
+                 * `AbrirLaImpresion`).
+                 */
+                AbrirLaImpresion::de(route('documentos.devolucion', $acta), $this);
 
                 // El encabezado del expediente cambia de saldo y puede
                 // cambiar de estado: sin esto, la pantalla sigue mostrando

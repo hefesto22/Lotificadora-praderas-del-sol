@@ -6,6 +6,7 @@ use App\Http\Controllers\EstadoDeCuentaController;
 use App\Http\Controllers\EstadoMensualController;
 use App\Http\Controllers\ImprimirDevolucionController;
 use App\Http\Controllers\ImprimirReciboController;
+use App\Http\Controllers\ImprimirRecibosController;
 use App\Http\Controllers\PlanoImagenController;
 use App\Http\Controllers\PlanoPublicoController;
 use App\Http\Controllers\RegistrarInteresController;
@@ -49,6 +50,20 @@ Route::middleware(UsuarioActivoDelPanel::class, SuspensionPorMora::class)
     ->name('documentos.')
     ->group(function (): void {
         Route::get('recibo/{recibo}', ImprimirReciboController::class)->name('recibo');
+
+        /*
+         * Los recibos de UN cobro, apilados para una sola pasada de impresora
+         * (9-sep-2026):
+         *
+         *     /documentos/recibos?recibos=12,13,14
+         *
+         * Un cobro sale en un recibo por titular, asi que el contrato de
+         * varios representados emite varios papeles de un solo pago. Sin
+         * esta ruta eso eran cuatro clics y cuatro dialogos con el cliente
+         * enfrente. Por query y no por segmento porque son N y no uno:
+         * `recibos/12/13/14` seria una ruta con aridad variable.
+         */
+        Route::get('recibos', ImprimirRecibosController::class)->name('recibos');
         Route::get('estado-de-cuenta/{venta}', EstadoDeCuentaController::class)->name('estado-de-cuenta');
 
         /*

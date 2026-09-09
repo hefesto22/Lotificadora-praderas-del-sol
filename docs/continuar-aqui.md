@@ -3,6 +3,60 @@
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
 
+## 🔴 9-sep — El diálogo de impresión sale solo al cobrar
+
+«Al pagar debería de abrirse de una la ventana para imprimir los recibos»
+— Mauricio, mirando **cuatro** notificaciones apiladas después de UN cobro.
+
+Un cobro sale en un recibo por titular, así que el contrato con varios
+representados emite varios papeles de un solo pago: cuatro clics y cuatro
+diálogos que cerrar, con el cliente enfrente.
+
+### 🔴 Las dos trampas de esto, y son las dos que importan
+
+**No se abre una ventana.** Un `window.open()` que no nace de un clic —y este
+nace de una respuesta de Livewire— es exactamente lo que Chrome bloquea, y
+bloquearlo se ve como una barrita arriba que nadie mira: quedaría PEOR que el
+botón, porque además nadie se enteraría. Se usa `window.olympoImprimir()`, que
+ya existía desde el 14-ago: carga el documento en un iframe escondido y manda a
+imprimir ahí. Eso no es un pop-up, así que no hay nada que bloquear.
+
+**Una sola llamada, siempre.** `olympoImprimir()` tiene UN iframe y lo reemplaza
+en cada llamada: llamarla una vez por recibo no imprime cuatro papeles, imprime
+el último —o una hoja en blanco—. Por eso nació `documentos.recibos`, que apila
+**una hoja por recibo** en un solo documento. Dos titulares nunca comparten
+hoja: es el papel de otra persona.
+
+### Lo que se movió
+
+- `PapelDelRecibo` (nuevo, en `app/Domain/Documentos`) prepara los datos de una
+  hoja. Salió de `ImprimirReciboController` porque ahora los comparten los dos
+  documentos; preparados en dos lugares se separan solos.
+- `documentos/partes/recibo-estilos.blade.php` y `recibo-hoja.blade.php`: el CSS
+  y el cuerpo, para que el documento de varios los repita sin copiarlos.
+- `ImprimirRecibosController` + ruta `documentos.recibos?recibos=12,13,14`.
+  **Sirve igual para uno**, a propósito: quien cobra no decide nada según
+  cuántos salieron.
+- `AbrirLaImpresion::de($url, $pantalla)` manda el JS; `ImprimirRecibo::alEmitir()`
+  es su versión para recibos. `CobrarUnPago` recibe la pantalla por constructor.
+- El acta de rescisión también sale sola, y su botón dejó de abrir una pestaña.
+
+⚠️ **El permiso se pregunta por TODOS antes de preparar ninguno.** Autorizar
+sobre la marcha dejaría anotada la impresión de los primeros y recién ahí
+cortaría: filas escritas por un documento que nunca se entregó, y papeles que
+desde entonces dicen COPIA sin que nadie los haya impreso.
+
+⚠️ **Los botones de las notificaciones se quedan.** Esto es JavaScript, y el
+papel que el cliente espera del otro lado del mostrador no puede depender de que
+el JavaScript haya cargado.
+
+### Lo que NO entró
+
+La **prima al firmar** no se auto-imprime: `CreateVenta` redirige al expediente
+cuando termina, y un `js()` no sobrevive a la redirección. Hacerlo pide otra
+cosa —guardar el pendiente en sesión y dispararlo al montar la página—, y eso
+merece su propio pase, no un agregado al final de este.
+
 ## 🔴 9-sep — El titular de recibo de CADA lote, y el segundo que se tardaba
 
 «Acá que aparezca a qué titular de recibo sale, para que se tenga en cuenta al
