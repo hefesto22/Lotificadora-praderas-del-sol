@@ -1713,15 +1713,30 @@ final readonly class CobrarUnPago
 
             $renglones[] = Grid::make(12)->schema([
                 /*
-                 * Solo el código, sin el saldo: en «Ambas» este mismo lote ya
-                 * aparece tres centímetros más arriba, en «¿qué viene a pagar?»,
-                 * con su cuota y su saldo. Repetir la cifra hacía que el ojo la
-                 * leyera dos veces para descubrir que era la misma.
+                 * Sin la cuota ni el saldo: en «Ambas» este mismo lote ya
+                 * aparece más arriba, en «¿qué viene a pagar?», con las dos
+                 * cifras. Repetirlas hacía que el ojo las leyera dos veces para
+                 * descubrir que eran las mismas.
+                 *
+                 * ═══ 🔴 EL TITULAR SI SE REPITE (9-sep-2026) ═══
+                 *
+                 * «En "cómo se reparte" no dice de quién es» —Mauricio, con
+                 * esto ya en producción—. Y tiene razón: la cifra es un dato
+                 * que se compara con lo que se teclea, pero el titular es la
+                 * IDENTIDAD del renglón. Acá se decide a quién se le baja el
+                 * capital, y sin el nombre lo único que queda es un código.
+                 *
+                 * Y el argumento de «ya está arriba» no le alcanza a este
+                 * dato: esta sección está lo bastante abajo como para que
+                 * «¿qué viene a pagar?» quede fuera de la pantalla —así se
+                 * veía en la captura del pedido—. Un nombre que hay que ir a
+                 * buscar con scroll, con el cliente enfrente, no está.
                  */
                 Checkbox::make("capital_{$id}")
                     ->label(new HtmlString(sprintf(
-                        '<span class="olympo-renglon-lote">%s</span>',
+                        '<span class="olympo-renglon-lote">%s</span>%s',
                         e((string) $lote->lote?->getAttribute('codigo')),
+                        $this->aQuienSaleElPapel($lote),
                     )))
                     ->live()
                     ->columnSpan(7),

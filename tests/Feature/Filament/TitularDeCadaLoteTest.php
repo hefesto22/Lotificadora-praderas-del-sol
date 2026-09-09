@@ -7,6 +7,7 @@ use App\Domain\Ventas\PrecioPactado;
 use App\Domain\Ventas\RegistroDeVentas;
 use App\Filament\Resources\Proyectos\Pages\VerPlano;
 use App\Filament\Resources\Ventas\Pages\ViewVenta;
+use App\Filament\Support\ModoDeCobro;
 use App\Models\Bloque;
 use App\Models\Cliente;
 use App\Models\Compromiso;
@@ -167,6 +168,42 @@ test('el lote sin titular sale a nombre del dueno del expediente', function (): 
         ->assertSuccessful()
         ->assertMountedActionModalSeeHtml(($this->pastilla)('JOSE ANTONIO MEJIA'))
         ->assertMountedActionModalSeeHtml(($this->pastilla)('MARIA EVELINA CABALLERO'));
+});
+
+/*
+| 🔴 Tambien en «¿A que lotes va el sobrante?» — 9-sep-2026.
+|
+| «En "como se reparte" no dice de quien es» — Mauricio, con la primera
+| version ya en produccion. Ese renglon arma su propia etiqueta: a proposito
+| NO repite la cuota ni el saldo, porque son cifras que ya estan arriba. Pero
+| el titular no es una cifra, es la IDENTIDAD del renglon: ahi se decide a
+| quien se le baja el capital.
+|
+| ⚠️ Dos cosas que parecen detalles y no lo son:
+|
+| 1. La asercion es el codigo PEGADO a la pastilla, sin el span de datos en el
+|    medio. Esa forma solo la produce el renglon del sobrante —los de cuota y
+|    abono llevan `olympo-renglon-dato` entremedio—, asi que un test que mirara
+|    solo «aparece el nombre» pasaria en verde sin comprobar nada de esto.
+| 2. Hay que poner el modo en «Ambas» antes de mirar: la seccion del sobrante
+|    es `->visible()` solo en ese modo y el modal abre en «Cuota», asi que sin
+|    esta linea el renglon no se dibuja y la asercion falla por el motivo
+|    equivocado.
+*/
+test('el reparto del sobrante tambien dice de quien es cada lote', function (): void {
+    ($this->conTitular)($this->uno, 'JOSE ANTONIO MEJIA');
+
+    $codigo = (string) $this->uno->refresh()->getAttribute('codigo');
+
+    ($this->expediente)()
+        ->mountAction('cobrar')
+        ->setActionData(['modo' => ModoDeCobro::Ambas->value])
+        ->assertSuccessful()
+        ->assertMountedActionModalSeeHtml(sprintf(
+            '<span class="olympo-renglon-lote">%s</span>%s',
+            $codigo,
+            ($this->pastilla)('JOSE ANTONIO MEJIA'),
+        ));
 });
 
 /*

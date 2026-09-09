@@ -47,6 +47,16 @@ contrato: un lote ya pagado no entra en ningún cobro de hoy, así que su titula
 no cambia cuántos recibos salen. Por eso el aviso de arriba y las etiquetas de
 abajo nunca se contradicen.
 
+⚠️ **El renglón del sobrante arma su etiqueta aparte**, y hubo que tocarlo dos
+veces. No repite la cuota ni el saldo a propósito —son cifras que ya están
+arriba, y releerlas para descubrir que son las mismas es trabajo de más—, pero
+sí repite el titular: la cifra es un dato que se compara con lo que se teclea, y
+el titular es la IDENTIDAD del renglón. «En "cómo se reparte" no dice de quién
+es» —Mauricio, con la primera versión ya en producción—. Y el «ya está arriba»
+no le alcanza a este dato: esa sección queda lo bastante abajo como para que
+«¿qué viene a pagar?» salga de la pantalla. Un nombre que hay que ir a buscar
+con scroll, con el cliente enfrente, no está.
+
 ### 🔴 El segundo que se tardaba era la base de datos, no el navegador
 
 Cada casilla es `->live()`, así que un clic vuelve a armar el schema **entero**.
