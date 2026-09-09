@@ -7,6 +7,7 @@ namespace App\Console\Commands;
 use App\Domain\Pagos\RegistroDePagos;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\PlanDeCuotas;
+use App\Models\AplicacionDePago;
 use App\Models\Compromiso;
 use App\Models\Cuota;
 use App\Models\Recibo;
@@ -399,11 +400,14 @@ final class RecuadrarVenta extends Command
         }
 
         /*
-         * 1. Las constancias. Se REUSAN las filas que ya existen —emparejadas
-         *    por recibo, en orden— en vez de borrarlas y crear otras: así el
-         *    `plan_anterior` de cada una y su `created_at` sobreviven. Una
-         *    constancia borrada es historia que nadie puede volver a leer.
+         * 1. A qué fila le toca cada abono. Se REUSAN las filas que ya existen
+         *    —emparejadas por recibo, en orden— en vez de borrarlas y crear
+         *    otras: así el `plan_anterior` de cada una y su `created_at`
+         *    sobreviven. Una constancia borrada es historia que nadie puede
+         *    volver a leer.
          */
+        $destino = [];
+
         foreach ($abonos as $folio => $porLote) {
             $recibo = $this->reciboDe($venta, $folio);
 
@@ -427,18 +431,171 @@ final class RecuadrarVenta extends Command
             sort($codigos);
 
             foreach ($codigos as $puesto => $codigo) {
-                $existentes[$puesto]->update([
-                    'compromiso_id' => $porCodigo[$codigo]['lote']->getKey(),
-                    'abono_capital' => $porLote[$codigo]->redondeado(),
-                ]);
+                $destino[(int) $recibo->getKey()][$codigo] = $existentes[$puesto];
             }
         }
 
-        // 2. El plan de cada lote, con la MISMA cuota de siempre.
+        /*
+         * 2. 🔴 LOS SALDOS DE CADA CONSTANCIA SE REPLICAN, NO SE DEJAN.
+         *
+         * La base tiene `reprogramaciones_saldo_cuadra_chk`:
+         * `saldo_nuevo = saldo_anterior - abono_capital`, y su migración lo
+         * dice sin rodeos — «un centavo de diferencia tumba la transacción
+         * entera».
+         *
+         * ⚠️ Y tumbó la primera corrida en producción, el 9-sep-2026: la
+         * versión inicial de este comando cambiaba `abono_capital` y dejaba
+         * los dos saldos como estaban. El CHECK la paró antes de escribir una
+         * fila. **La constancia no es un renglón suelto: es la aritmética de
+         * un momento**, así que cambiar el abono obliga a recalcular el antes
+         * y el después.
+         *
+         * Se replica la historia del lote: se arranca del financiado y se
+         * caminan los recibos en orden de id, restando lo que cada uno aplicó
+         * a las cuotas de ESE lote y después su abono. Es la misma cuenta que
+         * hizo el sistema el día del cobro, rehecha con los montos del
+         * cuaderno.
+         */
+        $aplicado = $this->aplicadoACuotas($venta);
+
+        foreach ($lotes as $renglon) {
+            $codigo = $renglon['codigo'];
+            $cuota = $this->cuotaDe($renglon['lote']);
+            $saldo = $renglon['financiado'];
+
+            foreach ($this->recibosEnOrden($venta) as $recibo) {
+                $id = (int) $recibo->getKey();
+
+                $saldo = $saldo->restar($aplicado[$id][$codigo] ?? Monto::cero());
+
+                $constancia = $destino[$id][$codigo] ?? null;
+
+                if (! $constancia instanceof Reprogramacion) {
+                    continue;
+                }
+
+                $antes = $saldo;
+                $saldo = $saldo->restar($abonos[$recibo->folio()][$codigo]);
+
+                $constancia->update([
+                    'compromiso_id'  => $renglon['lote']->getKey(),
+                    'abono_capital'  => $abonos[$recibo->folio()][$codigo]->redondeado(),
+                    'saldo_anterior' => $antes->redondeado(),
+                    'saldo_nuevo'    => $saldo->redondeado(),
+                    'cuotas_antes'   => $this->cuantasCuotas($antes, $cuota),
+                    'cuotas_despues' => $this->cuantasCuotas($saldo, $cuota),
+                ]);
+            }
+
+            /*
+             * La comprobación constructiva: si la réplica no termina en el
+             * objetivo, los abonos que se pidieron no cuentan esta historia.
+             * La invariante 3 ya lo verificó por suma; esto lo verifica por
+             * camino.
+             */
+            if (! $saldo->igualA($renglon['objetivo'])) {
+                throw new RuntimeException(sprintf(
+                    'Replicando la historia del lote %s se llega a %s y el objetivo es %s.',
+                    $codigo,
+                    $saldo->formateado(),
+                    $renglon['objetivo']->formateado(),
+                ));
+            }
+        }
+
+        // 3. El plan de cada lote, con la MISMA cuota de siempre.
         foreach ($lotes as $renglon) {
             $this->reescribir($venta, $renglon['lote'], $renglon['objetivo']);
             $this->asentar($venta, $renglon, $motivo);
         }
+    }
+
+    /**
+     * Lo que cada recibo aplicó a las cuotas de cada lote.
+     *
+     * @return array<int, array<string, Monto>> id del recibo => [código => monto]
+     */
+    private function aplicadoACuotas(Venta $venta): array
+    {
+        $porRecibo = [];
+
+        $aplicaciones = AplicacionDePago::query()
+            ->whereIn('recibo_id', Recibo::query()->where('venta_id', $venta->getKey())->select('id'))
+            ->with('cuota.compromiso.lote')
+            ->get();
+
+        foreach ($aplicaciones as $aplicacion) {
+            $codigo = (string) ($aplicacion->cuota?->compromiso?->lote?->getAttribute('codigo') ?? '');
+
+            if ($codigo === '') {
+                continue;
+            }
+
+            $id = (int) $aplicacion->getAttribute('recibo_id');
+            $antes = $porRecibo[$id][$codigo] ?? Monto::cero();
+
+            $porRecibo[$id][$codigo] = $antes->sumar($aplicacion->montoAplicado());
+        }
+
+        return $porRecibo;
+    }
+
+    /**
+     * Los recibos de la venta, en el orden en que ocurrieron.
+     *
+     * ⚠️ Por id y no por fecha: dos recibos del mismo día se aplicaron en el
+     * orden en que se emitieron, y ese orden decide de qué saldo parte cada
+     * abono. Si el orden decide dinero, ese orden se escribe.
+     *
+     * @return list<Recibo>
+     */
+    private function recibosEnOrden(Venta $venta): array
+    {
+        /** @var list<Recibo> $recibos */
+        $recibos = Recibo::query()
+            ->where('venta_id', $venta->getKey())
+            ->orderBy('id')
+            ->get()
+            ->all();
+
+        return $recibos;
+    }
+
+    /**
+     * La cuota mensual de un lote: la de su primera cuota pendiente.
+     */
+    private function cuotaDe(Compromiso $lote): Monto
+    {
+        $primera = Cuota::query()
+            ->where('compromiso_id', $lote->getKey())
+            ->orderBy('numero')
+            ->get()
+            ->first(static fn (Cuota $cuota): bool => ! $cuota->saldo()->esCero());
+
+        if (! $primera instanceof Cuota) {
+            throw new RuntimeException(sprintf(
+                'El lote %s no tiene cuotas pendientes de las que leer la cuota mensual.',
+                (string) ($lote->lote?->getAttribute('codigo') ?? '?'),
+            ));
+        }
+
+        return $primera->montoTotal();
+    }
+
+    /**
+     * Cuántas cuotas de ese tamaño hacen falta para ese saldo.
+     *
+     * Redondea para ARRIBA porque la última puede ser más chica — es como
+     * arma el plan `PlanDeCuotas::porCuotaFija()`, y es lo que ya dicen las
+     * constancias que escribió el sistema.
+     */
+    private function cuantasCuotas(Monto $saldo, Monto $cuota): int
+    {
+        if ($saldo->esCero() || $cuota->esCero()) {
+            return 0;
+        }
+
+        return (int) ceil($saldo->enCentavos() / $cuota->enCentavos());
     }
 
     /**

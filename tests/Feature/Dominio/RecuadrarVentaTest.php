@@ -159,6 +159,44 @@ test('la constancia cambia de lote sin perder su fila', function (): void {
         ->and($despues->montoAbonado())->toBeMonto('100000.00');
 });
 
+/*
+| 🔴🔴 LO QUE TUMBO LA PRIMERA CORRIDA EN PRODUCCION (9-sep-2026).
+|
+| La primera versión del comando cambiaba `abono_capital` y dejaba
+| `saldo_anterior` y `saldo_nuevo` como estaban. La base tiene
+| `reprogramaciones_saldo_cuadra_chk` —«un centavo de diferencia tumba la
+| transacción entera»— y la paró antes de escribir una sola fila.
+|
+| **La constancia no es un renglón suelto: es la aritmética de un momento.**
+| Cambiar el abono obliga a recalcular el antes y el después replicando la
+| historia del lote.
+|
+| Acá: el lote arranca en 300,000, el recibo le cobra 25,000 de cuota y recién
+| entonces recibe el abono de 100,000.
+*/
+test('la constancia queda con los saldos recalculados, no con los viejos', function (): void {
+    $this->artisan('olympo:recuadrar-venta', ($this->recuadrar)())->assertSuccessful();
+
+    $constancia = Reprogramacion::query()->sole();
+
+    /*
+    | ⚠️ Los saldos NO tienen cast a `Monto` —Postgres entrega NUMERIC como
+    | string, que es lo que consume bcmath (§8.3.1)—, así que se envuelven acá.
+    | `montoAbonado()` sí es un accesor y por eso se usa tal cual.
+    */
+    $antes = new Monto((string) $constancia->getAttribute('saldo_anterior'));
+    $nuevo = new Monto((string) $constancia->getAttribute('saldo_nuevo'));
+
+    expect($antes)->toBeMonto('275000.00')
+        ->and($nuevo)->toBeMonto('175000.00')
+        // 275,000 y 175,000 a cuotas de 25,000.
+        ->and($constancia->getAttribute('cuotas_antes'))->toBe(11)
+        ->and($constancia->getAttribute('cuotas_despues'))->toBe(7)
+        // Y la igualdad que impone el CHECK, dicha de nuevo acá: si alguien
+        // cambia la réplica, este test se cae antes que Postgres.
+        ->and($antes->restar($constancia->montoAbonado()))->toBeMonto($nuevo->redondeado());
+});
+
 test('con --ensayo no escribe nada', function (): void {
     $this->artisan('olympo:recuadrar-venta', ($this->recuadrar)(['--ensayo' => true]))
         ->assertSuccessful();
