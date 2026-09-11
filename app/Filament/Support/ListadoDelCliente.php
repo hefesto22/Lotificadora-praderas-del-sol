@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Support;
 
 use App\Filament\Resources\Apartados\ApartadoResource;
+use App\Filament\Resources\Recibos\Pages\ListRecibos;
 use App\Filament\Resources\Recibos\ReciboResource;
 use App\Filament\Resources\Ventas\Pages\ListVentas;
 use App\Filament\Resources\Ventas\VentaResource;
@@ -79,9 +80,21 @@ final class ListadoDelCliente
         return ApartadoResource::getUrl('index', self::filtradoPor($cliente));
     }
 
+    /**
+     * ⚠️ Con pestaña, por lo mismo que `ventas()` — 11-sep-2026.
+     *
+     * Desde hoy la pantalla de Recibos abre en «Activos», y el contador de la
+     * ficha cuenta TODOS. Sin esta línea, el cliente con un recibo anulado
+     * muestra «Recibos 3» y al hacer clic aparecen dos: el contador que miente
+     * del §9.E6, otra vez y del lado del listado.
+     */
     public static function recibos(Cliente $cliente): string
     {
-        return ReciboResource::getUrl('index', self::filtradoPor($cliente));
+        return ReciboResource::getUrl('index', [
+            ...self::filtradoPor($cliente),
+            // La llave es `tab` y no `activeTab`: ver el docblock de `ventas()`.
+            'tab' => ListRecibos::TODOS,
+        ]);
     }
 
     public static function puedeVerVentas(): bool

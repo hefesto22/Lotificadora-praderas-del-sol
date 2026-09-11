@@ -59,6 +59,64 @@ filas. Lo que pasó queda en el recibo anulado, con su motivo y quién lo anuló
 no cuánto era capital y cuánto interés, y repartirlo a ojo es inventar el plan del
 cliente. En Praderas no pasa (R1, sin interés) y se rechaza con su mensaje.
 
+## 🔴 11-sep — Activos y anulados separados, y la señal del cobro
+
+«Esos anulados deben de estar en un toggle que sea activos y anulados para
+cambiar entre ellos y que no se amontonen» — Mauricio, el mismo día en que
+anular empezó a usarse de verdad.
+
+Tiene razón por una razón que no se veía hasta hoy: hasta el 11-sep un recibo
+anulado era raro, y ahora un cobro mal registrado tacha CUATRO papeles de una
+vez. `ListRecibos` gana pestañas —**Activos** (por defecto), **Anulados** con el
+conteo, **Todos**— y el filtro ternario que hacía lo mismo escondido en el
+embudo se fue.
+
+⚠️ Se pierde algo, y se acepta: la lista mostraba TODO sin filtrar a propósito,
+porque «la búsqueda es por número y quien llega con el papel tiene que
+encontrarlo». Con «Activos» por defecto, un folio ANULADO no aparece buscándolo.
+Por eso «Todos» no es decorativa —es dónde se busca— y por eso «Anulados» lleva
+el conteo a la vista.
+
+⚠️ Y `ListadoDelCliente::recibos()` ahora pasa `'tab' => ListRecibos::TODOS`,
+por lo mismo que `ventas()` desde el 22-ago: el contador de la ficha cuenta
+todos, y sin eso el cliente con un recibo anulado muestra «Recibos 3» y al
+entrar aparecen dos (§9.E6).
+
+### 🔴🔴 EL PARAMETRO DE `modifyQueryUsing` SE LLAMA `$query`
+
+**Costó CUATRO vueltas de la puerta.** `Tab::modifyQuery()` inyecta el builder
+POR NOMBRE —pasa `['query' => $query]`— y usa el valor de retorno como query de
+la tabla. Se escribió `$consulta`: Filament no lo encontró por nombre, cayó a
+resolverlo por TIPO y entregó otro builder, uno **sin modelo**. Ese huérfano pasó
+a ser el query de la tabla.
+
+Y el síntoma nunca apuntó acá:
+
+1. Primero culpó a `withCount('impresiones')`, que llevaba dos semanas sin
+   tocarse — `withCount` resuelve la relación con `$query->getModel()->…`.
+2. Al quitarlo, culpó a los filtros (`where(Closure)` hace
+   `$this->model->newQueryWithoutRelationships()`).
+
+Se mueve porque la causa está arriba de los dos. La comparación con `ListVentas`
+—que tiene pestañas desde el 22-ago y usa `$query`— era el primer lugar donde
+había que mirar.
+
+⚠️ De rebote quedó una regla que conviene respetar igual: los dos conteos de
+`RecibosTable` son **subqueries escritos a mano** y no `withCount()`. Funcionan
+aunque el builder no traiga modelo, y el aviso está arriba del closure.
+
+### La señal de que un papel no vino solo
+
+Se propuso mostrar el cobro de varios recibos como UNA fila. Se descartó, y está
+escrito en `RecibosTable::conCuantosSalio()`: rompía el libro de correlativos
+(R12), la búsqueda por número y la línea de cada titular. En su lugar, cada fila
+dice debajo del folio **«4 papeles del mismo cobro»**.
+
+⚠️ Se cuenta con un subquery que se cuenta a sí mismo, para que se lea como se
+habla. Un `emision_id` en null no cuenta ni consigo mismo —en SQL `null = null`
+no es verdadero— así que los recibos de antes del 11-sep y los cobros de un solo
+papel no dicen nada, que es el 99 % de las filas.
+
 ## 🔴 11-sep — Anular TODO el cobro, cuando salió en varios papeles
 
 «Cuando tiene más de un titular de recibo y a cada uno se le hizo un abono o

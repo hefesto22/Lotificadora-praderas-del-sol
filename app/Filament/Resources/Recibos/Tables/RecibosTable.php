@@ -21,10 +21,10 @@ use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
-use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Lo cobrado, del más reciente al más viejo.
@@ -38,9 +38,47 @@ class RecibosTable
     public static function configure(Table $table): Table
     {
         return $table
+            /*
+             * ═══ 🔴 NI UN `withCount()` ACA. NUNCA — 11-sep-2026 ═══
+             *
+             * `withCount('impresiones')` vivió acá desde el 27-ago y funcionó
+             * hasta que esta página tuvo PESTAÑAS. Ese día rompió siete tests
+             * de pantalla con «Call to a member function impresiones() on
+             * null», y el error no apuntaba a nada que se hubiera tocado.
+             *
+             * La causa, leída del stack: `withCount()` resuelve la relación
+             * con `$query->getModel()->impresiones()`, y con pestañas Filament
+             * evalúa este closure también desde `getAllTableSummaryQuery()`,
+             * por un camino en el que el builder llega SIN MODELO. `getModel()`
+             * devuelve null y el `->impresiones()` explota sobre él.
+             *
+             * ⚠️ Por eso los dos conteos son subqueries escritos a mano: no le
+             * piden nada al modelo, dicen en SQL exactamente lo que hacen, y no
+             * se rompen porque la página gane una pestaña. Si alguien los
+             * "limpia" volviendo a `withCount()`, esto se cae otra vez — y la
+             * segunda vez tampoco va a parecer culpa de este archivo.
+             *
+             * El `select` explícito es obligatorio: sin él, `addSelect()` deja
+             * la consulta con SOLO las dos columnas contadas y los modelos se
+             * hidratan vacíos. Es lo que `withCount()` hacía por su cuenta.
+             */
             ->modifyQueryUsing(static fn (Builder $query): Builder => $query->with([
                 'cliente', 'venta', 'compromiso.lote', 'aplicaciones.cuota.compromiso.lote',
-            ])->withCount('impresiones'))
+            ])->select('recibos.*')->addSelect([
+                'impresiones_count' => DB::table('impresiones_de_recibo')
+                    ->selectRaw('count(*)')
+                    ->whereColumn('impresiones_de_recibo.recibo_id', 'recibos.id'),
+
+                /*
+                 * ⚠️ `emision_id` en null no cuenta ni consigo mismo, porque en
+                 * SQL `null = null` no es verdadero. Es justo lo que hace falta:
+                 * los recibos de antes del 11-sep, y los cobros de un solo
+                 * papel, dan cero y no dicen nada en la lista.
+                 */
+                'de_la_misma_emision_count' => DB::table('recibos as hermanos')
+                    ->selectRaw('count(*)')
+                    ->whereColumn('hermanos.emision_id', 'recibos.emision_id'),
+            ]))
             ->columns([
                 /*
                  * El folio interno, que es el numero de la caja (R12) y el
@@ -199,18 +237,12 @@ class RecibosTable
                     ->label('Forma de pago')
                     ->options(static fn (): array => self::opciones(FormaDePago::cases())),
 
-                // Sin filtro se ven TODOS, anulados incluidos: la búsqueda es
-                // por número y quien llega con el papel tiene que encontrarlo.
-                TernaryFilter::make('anulado_el')
-                    ->label('Anulados')
-                    ->placeholder('Todos')
-                    ->trueLabel('Solo los anulados')
-                    ->falseLabel('Sin los anulados')
-                    ->queries(
-                        true: static fn (Builder $query): Builder => $query->whereNotNull('anulado_el'),
-                        false: static fn (Builder $query): Builder => $query->whereNull('anulado_el'),
-                        blank: static fn (Builder $query): Builder => $query,
-                    ),
+                /*
+                 * ⚠️ El filtro de anulados salió de acá el 11-sep-2026: ahora
+                 * son las PESTAÑAS de `ListRecibos`, que se ven sin abrir nada.
+                 * Tener las dos cosas era ofrecer la misma pregunta dos veces
+                 * y con respuestas que se pisan.
+                 */
 
                 /*
                  * El destino del link que sale de la ficha del cliente. El
@@ -448,14 +480,61 @@ class RecibosTable
             $renglones[] = $papel;
         }
 
+        $cobro = self::conCuantosSalio($record);
+
+        if ($cobro !== null) {
+            $renglones[] = $cobro;
+        }
+
         return $renglones === [] ? null : implode(' · ', $renglones);
+    }
+
+    /**
+     * 🔴 «Este papel no vino solo» — 11-sep-2026.
+     *
+     * ═══ LO QUE SE DESCARTO, Y POR QUE ═══
+     *
+     * Mauricio propuso que un cobro de varios recibos fuera UNA SOLA FILA con
+     * los papeles adentro, para anularlos desde ahí «y no saber hasta cuál
+     * era». El problema que quería resolver es real; la forma rompía tres
+     * cosas:
+     *
+     * 1. Esta tabla es el LIBRO DE CORRELATIVOS. Su razón de ser es poder
+     *    decir «entre el 000120 y el 000130 no falta ninguno» (R12), y una
+     *    fila que vale por cuatro números hace imposible contar la serie
+     *    leyéndola.
+     * 2. Quien llega con el papel busca SU NUMERO — por eso el folio es la
+     *    primera columna y va en negrita—. Un folio que no es una fila no se
+     *    encuentra.
+     * 3. Cada papel es de una PERSONA distinta. «Un cobro» es la vista de la
+     *    lotificadora; el representado que llama por su recibo necesita su
+     *    línea, con su nombre y su monto.
+     *
+     * Así que la fila se queda y lo que se agrega es la SEÑAL: el ojo agrupa
+     * los cuatro sin que dejen de ser cuatro. Anular todos sigue siendo una
+     * casilla dentro del modal, que además lista los folios — nadie tiene que
+     * acordarse de cuáles eran.
+     *
+     * ⚠️ Depende del subquery `de_la_misma_emision_count` de
+     * `modifyQueryUsing()`. Sin él la columna no existe, el conteo da cero y
+     * esto no dice nada nunca — un silencio difícil de notar, porque se parece
+     * al caso normal.
+     */
+    private static function conCuantosSalio(Recibo $record): ?string
+    {
+        $cuantos = (int) $record->getAttribute('de_la_misma_emision_count');
+
+        // Cero es un recibo de antes del 11-sep —sin emisión— y uno es un
+        // cobro de un solo papel. En los dos casos no hay nada que agrupar.
+        return $cuantos < 2 ? null : $cuantos.' papeles del mismo cobro';
     }
 
     /**
      * Cuántas veces salió impreso, y solo cuando eso dice algo.
      *
-     * ⚠️ Depende del `withCount('impresiones')` de `modifyQueryUsing()`: sin él
-     * la columna no existe y esto diría «sin imprimir» en todas las filas.
+     * ⚠️ Depende del subquery `impresiones_count` de `modifyQueryUsing()`: sin
+     * él la columna no existe y esto diría «sin imprimir» en todas las filas.
+     * Es un subquery y no un `withCount()` — el porqué está allá arriba.
      */
     private static function comoSalioElPapel(Recibo $record): ?string
     {

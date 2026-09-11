@@ -118,6 +118,51 @@ test('los papeles de un mismo cobro comparten emisión', function (): void {
 });
 
 /*
+| La señal de la lista: «este papel no vino solo».
+|
+| Se descartó mostrar el cobro como UNA fila —rompía el libro de correlativos,
+| la búsqueda por número y la línea de cada titular; está escrito en
+| `RecibosTable::conCuantosSalio()`— y en su lugar cada fila dice con cuántos
+| salió.
+|
+| ⚠️ La lista lo cuenta con un SUBQUERY a mano y no con `withCount()` de una
+| relación. Se intentó con `hasMany(self::class, 'emision_id', 'emision_id')` y
+| rompió siete tests de pantalla: esa relación apunta a su propia tabla,
+| Eloquent la renombra a un alias y le hace `setTable()` al modelo, y Filament
+| clona esa consulta varias veces. El porqué completo está en
+| `RecibosTable::configure()`; acá se prueba lo que ese subquery cuenta.
+*/
+test('los papeles del cobro se cuentan entre sí', function (): void {
+    $recibos = ($this->cobroDeLosTres)();
+
+    // Uno más el hermano: es lo que la lista lee como «2 papeles del mismo cobro».
+    expect($recibos[0]->hermanosDeEmision())->toHaveCount(1)
+        ->and($recibos[1]->hermanosDeEmision())->toHaveCount(1)
+        ->and($recibos[0]->salioConOtros())->toBeTrue();
+});
+
+/*
+| 🔴 Y un recibo SIN emisión no encuentra a nadie, ni a sí mismo.
+|
+| Es lo que hace que los recibos anteriores al 11-sep —y los cobros de un solo
+| papel— no digan nada en la lista, en vez de decir «1 papel del mismo cobro»,
+| que sería ruido en el 99 % de las filas.
+*/
+test('un recibo sin emisión no cuenta ni consigo mismo', function (): void {
+    $recibo = $this->pagos->cobrarCuotas(
+        venta: $this->venta,
+        lote: $this->dos,
+        cliente: $this->cliente,
+        monto: new Monto('25000.00'),
+        forma: FormaDePago::Efectivo,
+    );
+
+    expect($recibo->getAttribute('emision_id'))->toBeNull()
+        ->and($recibo->hermanosDeEmision())->toHaveCount(0)
+        ->and($recibo->salioConOtros())->toBeFalse();
+});
+
+/*
 | ⚠️ Un recibo solo NO lleva emisión. Darle una propia haría que la pantalla
 | ofrezca «anular todo el cobro» para anular exactamente uno.
 */
