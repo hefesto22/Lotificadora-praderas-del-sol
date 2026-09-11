@@ -15,6 +15,7 @@ use App\Models\Recibo;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\ViewAction;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
@@ -315,10 +316,46 @@ class RecibosTable
                     ->placeholder('Se tecleó L 5,000.00 en vez de L 500.00')
                     ->helperText('Queda con tu usuario y la fecha. Dentro de seis meses alguien va a '
                         .'preguntar qué pasó con este número.'),
+
+                /*
+                 * 🔴 EL COBRO COMPLETO, CUANDO SALIO EN VARIOS PAPELES.
+                 *
+                 * «Cuando tiene más de un titular de recibo y a cada uno se le
+                 * hizo un abono o pago de cuota y generó varios recibos, ¿cómo
+                 * se maneja eso?» — Mauricio, 11-sep-2026.
+                 *
+                 * Se podían anular de a uno y ese era el problema: cuatro veces
+                 * el mismo trámite, cuatro veces el motivo, y quien anula tres y
+                 * se olvida del cuarto deja el expediente a medias.
+                 *
+                 * Viene MARCADO. Un cobro mal registrado está mal entero — los
+                 * cuatro papeles salieron del mismo dinero mal aplicado—, así
+                 * que lo raro es querer anular uno solo. Se puede desmarcar,
+                 * pero hay que decidirlo.
+                 */
+                Checkbox::make('todo_el_cobro')
+                    ->label(static fn (Recibo $record): string => sprintf(
+                        'Anular también los otros %d recibos de este mismo cobro',
+                        $record->hermanosDeEmision()->count(),
+                    ))
+                    ->default(true)
+                    ->visible(static fn (Recibo $record): bool => $record->salioConOtros())
+                    ->helperText(static fn (Recibo $record): string => sprintf(
+                        'Este pago salió en varios papeles porque sus lotes tienen titulares de recibo '
+                        .'distintos: %s. Se anulan todos juntos o no se anula ninguno.',
+                        $record->hermanosDeEmision()->map(
+                            static fn (Recibo $otro): string => $otro->folio(),
+                        )->implode(', '),
+                    )),
             ])
             ->action(function (Recibo $record, array $data): void {
+                $motivo = (string) ($data['motivo'] ?? '');
+                $todo = ($data['todo_el_cobro'] ?? false) === true && $record->salioConOtros();
+
                 try {
-                    app(RegistroDePagos::class)->anular($record, (string) ($data['motivo'] ?? ''));
+                    $anulados = $todo
+                        ? app(RegistroDePagos::class)->anularElCobro($record, $motivo)
+                        : [app(RegistroDePagos::class)->anular($record, $motivo)];
                 } catch (GrupoOlympoException $error) {
                     // El mensaje del dominio ya está escrito para quien atiende.
                     Notification::make()
@@ -331,9 +368,16 @@ class RecibosTable
                     return;
                 }
 
+                $folios = array_map(static fn (Recibo $papel): string => $papel->folio(), $anulados);
+
                 Notification::make()
-                    ->title("Recibo {$record->folio()} anulado")
-                    ->body('Lo que aplicaba volvió a deberse y el número queda en la serie, marcado.')
+                    ->title(count($folios) === 1
+                        ? "Recibo {$folios[0]} anulado"
+                        : count($folios).' recibos anulados')
+                    ->body(count($folios) === 1
+                        ? 'Lo que aplicaba volvió a deberse y el número queda en la serie, marcado.'
+                        : 'Lo que aplicaban volvió a deberse y los números quedan en la serie, marcados: '
+                            .implode(', ', $folios).'.')
                     ->success()
                     ->send();
             });

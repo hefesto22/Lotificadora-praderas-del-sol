@@ -27,6 +27,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * El dinero que entra, aplicado a las cuotas que lo esperan.
@@ -555,6 +556,59 @@ final readonly class RegistroDePagos
     }
 
     /**
+     * 🔴 Anular TODOS los papeles de un mismo cobro — 11-sep-2026.
+     *
+     * «Cuando tiene más de un titular de recibo y a cada uno se le hizo un
+     * abono o pago de cuota y generó varios recibos, ¿cómo se maneja eso?»
+     * —Mauricio—.
+     *
+     * Un cobro sale en un recibo por titular, así que el contrato con cuatro
+     * representados emite cuatro papeles de un solo pago. Se podían anular de a
+     * uno —cada papel toca sus propios lotes, así que no se estorban entre sí—
+     * y ese es justamente el problema: cuatro veces el mismo trámite, cuatro
+     * veces el motivo, y quien anula tres y se olvida del cuarto deja el
+     * expediente a medias sin que nadie se entere hasta que no cuadra el mes.
+     *
+     * ═══ 🔴 TODOS O NINGUNO ═══
+     *
+     * Una sola transacción. Si uno de los cuatro no se puede anular —porque
+     * después entró un cobro sobre su lote— se cae la operación entera y no se
+     * anula ninguno. Media anulación es peor que ninguna: deja el contrato en
+     * un estado que no es ni el de antes ni el de después, y que nadie pidió.
+     *
+     * El mensaje del que falló es el que sale, con sus folios: dice qué anular
+     * primero, que es lo único accionable.
+     *
+     * ⚠️ Del más NUEVO al más viejo. Entre hermanos no hace falta —cada uno
+     * tiene sus lotes— pero el orden es el mismo que manda la regla general, y
+     * tener dos órdenes distintos según el caso es cómo se aprende mal una
+     * regla.
+     *
+     * @return list<Recibo> los papeles anulados, en el orden en que se emitieron
+     *
+     * @throws PagoInvalidoException
+     */
+    public function anularElCobro(Recibo $recibo, string $motivo): array
+    {
+        $delCobro = [$recibo, ...$recibo->hermanosDeEmision()->all()];
+
+        usort(
+            $delCobro,
+            static fn (Recibo $uno, Recibo $otro): int => (int) $otro->getKey() <=> (int) $uno->getKey(),
+        );
+
+        return DB::transaction(function () use ($delCobro, $motivo): array {
+            $anulados = [];
+
+            foreach ($delCobro as $papel) {
+                $anulados[] = $this->anular($papel, $motivo);
+            }
+
+            return array_reverse($anulados);
+        });
+    }
+
+    /**
      * 🔴 Devolverle al lote las cuotas que el abono le borró — 11-sep-2026.
      *
      * ═══ SE PUEDE PORQUE EL PLAN VIEJO ESTA GUARDADO ═══
@@ -568,6 +622,16 @@ final readonly class RegistroDePagos
      *
      * El porqué largo está en `porMovimientosPosterioresAlAbono()`. Acá alcanza
      * con la regla: se deshace de atrás para adelante, como un libro contable.
+     *
+     * ⚠️ Y esa regla es SOLO del abono, a propósito. Anular un recibo de CUOTA
+     * no exige nada parecido: no devuelve ningún plan, devuelve lo pagado a
+     * cuotas que siguen existiendo —una cuota con pago NUNCA se reemplaza, por
+     * el tope de `EfectoDelAbono`— así que un abono posterior no la estorba y
+     * el saldo del lote queda coherente.
+     *
+     * Se descubrió probando: el primer intento de test puso un abono después de
+     * un cobro de cuotas esperando que lo bloqueara, y no lo bloqueó. Queda
+     * escrito para que nadie «arregle» esa asimetría creyéndola un olvido.
      *
      * ⚠️ LA CONSTANCIA SE BORRA, y es la única cosa de este repo que se borra
      * en vez de marcarse. La regla de `Reprogramacion` —«es historia, no se
@@ -1645,7 +1709,7 @@ final readonly class RegistroDePagos
                 );
             }
 
-            return $recibos;
+            return $this->marcarLaEmision($recibos);
         });
     }
 
@@ -2331,7 +2395,43 @@ final readonly class RegistroDePagos
             return [$emitir($renglones)];
         }
 
-        return DB::transaction(fn (): array => array_values(array_map($emitir, $grupos)));
+        return DB::transaction(fn (): array => $this->marcarLaEmision(array_values(array_map($emitir, $grupos))));
+    }
+
+    /**
+     * 🔴 Los papeles de un mismo cobro, marcados como lo que son — 11-sep-2026.
+     *
+     * «Cuando tiene más de un titular de recibo y a cada uno se le hizo un
+     * abono o pago de cuota y generó varios recibos, ¿cómo se maneja eso?»
+     * —Mauricio—. Si ese cobro estuvo mal hay que anular los cuatro, y hasta
+     * hoy no había forma de saber que eran cuatro: compartían contrato, fecha y
+     * quién los emitió, que es exactamente lo que también comparten un cobro de
+     * la mañana y otro de la tarde.
+     *
+     * ⚠️ SOLO CUANDO SON VARIOS. Un recibo solo no salió «junto» con nadie, y
+     * darle una emisión propia haría que la pantalla ofrezca «anular todo el
+     * cobro» para anular exactamente uno.
+     *
+     * Va acá y no en `emitir()` a propósito: `emitir()` hace UN papel y no
+     * sabe —ni tiene por qué— si es el único. Quien arma la lista sí.
+     *
+     * @param list<Recibo> $recibos
+     *
+     * @return list<Recibo>
+     */
+    private function marcarLaEmision(array $recibos): array
+    {
+        if (count($recibos) < 2) {
+            return $recibos;
+        }
+
+        $emision = (string) Str::uuid();
+
+        foreach ($recibos as $recibo) {
+            $recibo->update(['emision_id' => $emision]);
+        }
+
+        return $recibos;
     }
 
     /**

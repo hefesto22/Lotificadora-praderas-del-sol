@@ -59,6 +59,53 @@ filas. Lo que pasó queda en el recibo anulado, con su motivo y quién lo anuló
 no cuánto era capital y cuánto interés, y repartirlo a ojo es inventar el plan del
 cliente. En Praderas no pasa (R1, sin interés) y se rechaza con su mensaje.
 
+## 🔴 11-sep — Anular TODO el cobro, cuando salió en varios papeles
+
+«Cuando tiene más de un titular de recibo y a cada uno se le hizo un abono o
+pago de cuota y generó varios recibos, ¿cómo se maneja eso?» — Mauricio, el
+mismo día y unas horas después.
+
+Se podían anular de a uno —cada papel toca sus propios lotes, así que **no se
+estorban entre sí**— y ese era justamente el problema: cuatro veces el mismo
+trámite, cuatro veces el motivo, y quien anula tres y se olvida del cuarto deja
+el expediente a medias sin que nadie se entere hasta que no cuadra el mes.
+
+### La columna que faltaba
+
+Hasta hoy los papeles hermanos no tenían NADA que dijera que salieron juntos:
+compartían contrato, fecha y quién los emitió, que es exactamente lo que también
+comparten un cobro de la mañana y otro de la tarde. `recibos.emision_id` lo
+resuelve, y se llena en `RegistroDePagos::marcarLaEmision()`.
+
+⚠️ **Solo cuando el cobro sale en VARIOS papeles.** Un recibo solo no salió
+«junto» con nadie, y darle emisión propia haría que la pantalla ofrezca «anular
+todo el cobro» para anular exactamente uno.
+
+⚠️ **Nullable, y se queda así.** Lo emitido antes del 11-sep no tiene emisión y
+no se le puede inventar — no hay forma de saber cuáles salieron juntos—. Esos se
+siguen anulando de a uno. Rellenarlo a ojo sería escribir un dato falso en la
+base para que una pantalla se vea más completa.
+
+### 🔴 Todos o ninguno
+
+`anularElCobro()` es una sola transacción. Si uno de los cuatro no se puede
+anular —porque después entró un cobro sobre su lote— se cae la operación entera
+y no se anula ninguno. Media anulación deja el contrato en un estado que no es
+ni el de antes ni el de después, y que nadie pidió. El test verifica el ESTADO
+después del error, no solo que lance: una transacción mal puesta lanzaría igual
+habiendo dejado el primero anulado.
+
+### ⚠️ La asimetría es a propósito
+
+Anular una CUOTA no exige ser el último movimiento del lote; anular un ABONO sí.
+No es un olvido: la cuota no devuelve ningún plan, devuelve lo pagado a cuotas
+que siguen existiendo —una cuota con pago nunca se reemplaza, por el tope de
+`EfectoDelAbono`— así que un abono posterior no la estorba.
+
+Se descubrió probando: el primer intento de test puso un abono después de un
+cobro de cuotas esperando que lo bloqueara, y no lo bloqueó. Queda escrito en
+`anular()` para que nadie lo «arregle».
+
 ## 🔴 9-sep-2026 — lo anterior
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es

@@ -12,6 +12,7 @@ use App\Domain\ValueObjects\Monto;
 use App\Traits\HasAuditFields;
 use Database\Factories\ReciboFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -57,6 +58,7 @@ use Spatie\Activitylog\Support\LogOptions;
     'rango_hasta',
     'fecha_limite_emision',
     'venta_id',
+    'emision_id',
     'compromiso_id',
     'cliente_id',
     'a_nombre_de',
@@ -359,6 +361,43 @@ class Recibo extends Model
     public function reprogramaciones(): HasMany
     {
         return $this->hasMany(Reprogramacion::class);
+    }
+
+    /**
+     * Los OTROS papeles que salieron del mismo cobro — 11-sep-2026.
+     *
+     * Un cobro se parte en un recibo por titular de recibo, así que el contrato
+     * con cuatro representados emite cuatro papeles de un solo pago. Esto los
+     * encuentra: la columna `emision_id` los marcó al emitirlos.
+     *
+     * ⚠️ Vacío cuando el recibo salió solo, y vacío también para todo lo
+     * emitido ANTES del 11-sep: esos papeles no tienen emisión y no se les
+     * puede inventar una. Se siguen anulando de a uno.
+     *
+     * @return Collection<int, self>
+     */
+    public function hermanosDeEmision(): Collection
+    {
+        $emision = $this->getAttribute('emision_id');
+
+        if (! is_string($emision) || $emision === '') {
+            return new Collection;
+        }
+
+        return self::query()
+            ->where('emision_id', $emision)
+            ->whereKeyNot($this->getKey())
+            ->orderBy('numero')
+            ->get();
+    }
+
+    /**
+     * ¿Este papel salió acompañado? Lo pregunta la pantalla para ofrecer
+     * «anular todo el cobro» solo cuando hay un cobro completo que anular.
+     */
+    public function salioConOtros(): bool
+    {
+        return $this->hermanosDeEmision()->isNotEmpty();
     }
 
     // ─── Anulación ────────────────────────────────────────────────────
