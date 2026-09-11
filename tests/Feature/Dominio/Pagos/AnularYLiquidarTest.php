@@ -16,6 +16,7 @@ use App\Models\Cuota;
 use App\Models\Lote;
 use App\Models\Proyecto;
 use App\Models\Recibo;
+use App\Models\Reprogramacion;
 use Carbon\CarbonImmutable;
 
 /*
@@ -116,30 +117,144 @@ describe('Anular un recibo', function (): void {
         expect(($this->pagadas)(1))->toBe(['0.00']);
     });
 
-    /*
-    | Un abono a capital BORRÓ cuotas y escribió otras. Deshacerlo es
-    | devolverle al lote su plan viejo, no restar un número.
-    */
-    test('un abono a capital no se anula desde acá', function (): void {
-        $recibo = $this->pagos->abonarACapital(
+});
+
+/*
+|--------------------------------------------------------------------------
+| 🔴 Anular un ABONO A CAPITAL — 11-sep-2026
+|--------------------------------------------------------------------------
+| «Ocurrió lo que temíamos: se equivocó y era de otra manera el hacer los pagos
+| de cuota o abono a capital (…) muy seguramente volverá a pasar» — Mauricio.
+|
+| Hasta hoy esto se rechazaba: el abono BORRA las cuotas pendientes del lote y
+| escribe otras, y devolverle el plan viejo «todavía no estaba construido».
+|
+| Se puede porque el plan viejo está guardado: cada reprogramación conserva en
+| `plan_anterior` las cuotas que reemplazó y en `desde_numero` desde dónde
+| reescribió. Deshacer es borrar lo que el abono creó y volver a escribir eso.
+|
+| Sobre el fixture: 300,000 a 12 meses son cuotas de 25,000. Un abono de
+| 100,000 con «misma cuota, menos meses» deja 200,000, o sea 8 cuotas.
+*/
+describe('Anular un abono a capital', function (): void {
+    beforeEach(function (): void {
+        $this->abonar = fn (string $monto): Recibo => $this->pagos->abonarACapital(
             venta: $this->venta,
             lote: $this->renglon,
             cliente: $this->cliente,
-            monto: new Monto('100000.00'),
+            monto: new Monto($monto),
             modalidad: ModalidadDeReprogramacion::AcortarPlazo,
             motivo: 'Abono solicitado por la clienta',
             forma: FormaDePago::Efectivo,
         );
 
-        expect(fn () => $this->pagos->anular($recibo, 'Me equivoqué'))
-            ->toThrow(PagoInvalidoException::class, 'reescribió el plan');
+        $this->plan = fn (): array => Cuota::query()
+            ->where('compromiso_id', $this->renglon->getKey())
+            ->orderBy('numero')
+            ->pluck('monto', 'numero')
+            ->all();
+    });
+
+    /*
+    | El caso del pedido, de punta a punta: el lote queda exactamente como
+    | estaba antes del abono — las mismas doce cuotas, los mismos montos y el
+    | mismo saldo—. No «parecido»: el mismo plan.
+    */
+    test('el lote recupera el plan que tenía antes', function (): void {
+        $antes = ($this->plan)();
+
+        expect($antes)->toHaveCount(12);
+
+        $recibo = ($this->abonar)('100000.00');
+
+        // El abono acortó el plazo: 200,000 a cuota fija de 25,000.
+        expect(($this->plan)())->toHaveCount(8);
+
+        $this->pagos->anular($recibo->refresh(), 'Era cuota, no abono a capital');
+
+        expect(($this->plan)())->toBe($antes)
+            ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('300000.00');
+    });
+
+    /*
+    | La constancia se BORRA, y es lo único de este repo que se borra en vez de
+    | marcarse. `Reprogramacion` dice «es historia, no se edita ni se borra», y
+    | vale para una reprogramación que OCURRIO. Esta no ocurrió: el plan volvió
+    | a ser el de antes, y una constancia que siga diciendo «tu cuota cambió
+    | por este abono» le mentiría al estado de cuenta, que se reconstruye
+    | leyendo justamente estas filas.
+    |
+    | Lo que pasó no se pierde: queda el recibo anulado, con su motivo.
+    */
+    test('no queda constancia de una reprogramación que se deshizo', function (): void {
+        $recibo = ($this->abonar)('100000.00');
+
+        expect(Reprogramacion::query()->count())->toBe(1);
+
+        $this->pagos->anular($recibo->refresh(), 'Era cuota, no abono a capital');
+
+        expect(Reprogramacion::query()->count())->toBe(0)
+            ->and($recibo->refresh()->estaAnulado())->toBeTrue()
+            ->and($recibo->getAttribute('motivo_anulacion'))->toBe('Era cuota, no abono a capital');
+    });
+
+    /*
+    | 🔴🔴 LA INVARIANTE CARA: solo si es el ULTIMO movimiento del lote.
+    |
+    | Si después del abono se cobró una cuota del plan NUEVO, devolver el plan
+    | viejo dejaría ese pago apuntando a una cuota que deja de existir: el lote
+    | perdería plata pagada y las cuentas no cuadrarían con ningún recibo.
+    |
+    | Se deshace de atrás para adelante, y el mensaje dice por dónde empezar —
+    | con el folio, no con «hay movimientos posteriores», que obliga a quien lo
+    | lee a salir a buscarlos.
+    */
+    test('no se anula si después se cobró una cuota del plan nuevo', function (): void {
+        $abono = ($this->abonar)('100000.00');
+        $cobro = ($this->cobrar)('25000.00');
+
+        expect(fn () => $this->pagos->anular($abono->refresh(), 'Me equivoqué'))
+            ->toThrow(PagoInvalidoException::class, $cobro->folio());
+
+        // Y el lote no quedó a medias: sigue con el plan del abono.
+        expect(($this->plan)())->toHaveCount(8);
+    });
+
+    /*
+    | Lo mismo con otro abono encima: su `plan_anterior` es el plan que escribió
+    | este, así que devolverle a este el suyo lo dejaría apuntando a cuotas que
+    | dejan de existir.
+    */
+    test('no se anula si después hubo otro abono sobre el mismo lote', function (): void {
+        $primero = ($this->abonar)('100000.00');
+        $segundo = ($this->abonar)('50000.00');
+
+        expect(fn () => $this->pagos->anular($primero->refresh(), 'Me equivoqué'))
+            ->toThrow(PagoInvalidoException::class, $segundo->folio());
+    });
+
+    /*
+    | Y deshaciendo en el orden correcto sí se puede: el de arriba no es un
+    | callejón sin salida, es una cola.
+    */
+    test('deshaciendo del más nuevo al más viejo se puede con los dos', function (): void {
+        $antes = ($this->plan)();
+
+        $primero = ($this->abonar)('100000.00');
+        $segundo = ($this->abonar)('50000.00');
+
+        $this->pagos->anular($segundo->refresh(), 'El segundo estaba mal');
+        $this->pagos->anular($primero->refresh(), 'El primero también');
+
+        expect(($this->plan)())->toBe($antes)
+            ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('300000.00');
     });
 
     /*
     | La prima consumió el correlativo del contrato. Revertirla es deshacer la
-    | venta, que es otro trámite y tiene otro permiso.
+    | venta, que es otro trámite y tiene otro permiso. Eso NO cambió.
     */
-    test('el recibo de la prima no se anula desde acá', function (): void {
+    test('el recibo de la prima sigue sin anularse desde acá', function (): void {
         $prima = Recibo::query()->where('concepto', ConceptoDeRecibo::Prima)->sole();
 
         expect(fn () => $this->pagos->anular($prima, 'Me equivoqué'))

@@ -1,4 +1,65 @@
-# Continuar acá — 9-sep-2026
+# Continuar acá — 11-sep-2026
+
+> Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
+> `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 🔴 11-sep — El abono a capital YA SE ANULA
+
+«Ocurrió lo que temíamos: se equivocó y era de otra manera el hacer los pagos de
+cuota o abono a capital, y quiere cancelar recibos (…) muy seguramente volverá a
+pasar» — Mauricio.
+
+Los tres errores que trae la ventanilla —el monto mal, el abono que era cuota, la
+cuota que era abono— se arreglan todos igual: **anular y volver a cobrar bien**.
+Lo que faltaba era poder anular el abono, que hasta el 9-sep se rechazaba.
+
+⚠️ **«Editar el recibo» no sirve para esto y no se construyó.** Cambiar un recibo
+de cuota a abono a capital no es corregir un campo: el abono reescribe el plan de
+cuotas del lote y la cuota no toca nada de eso. Son dos movimientos con efectos
+distintos sobre la deuda, y deshacer uno y hacer el otro deja rastro de los dos —
+que es lo que hace falta cuando alguien pregunta seis meses después.
+
+### Cómo funciona
+
+Cada reprogramación guardaba ya el plan viejo entero: `plan_anterior` tiene las
+cuotas que borró —número, vencimiento y monto— y `desde_numero` dice desde dónde
+reescribió. Deshacer es borrar las cuotas que el abono creó y volver a escribir
+las que borró (`RegistroDePagos::deshacerLasReprogramaciones()`).
+
+### 🔴 Solo si es el ULTIMO movimiento del lote
+
+Si después del abono se cobró una cuota del plan nuevo, o hubo otro abono encima,
+se rechaza **nombrando los folios** que hay que anular primero, del más nuevo al
+más viejo. No es un callejón: hay un test que prueba que deshaciendo en orden se
+llega igual al plan original.
+
+Se descartó anular en cadena: un clic tumbaría cinco papeles y algunos estaban
+bien —el cliente sí pagó su cuota de septiembre—, reemitirlos cuesta más de lo que
+la cadena ahorra, y cada reemisión quema otro correlativo.
+
+### 🔴🔴 EL PRONTO PAGO SALE CON CONCEPTO `AbonoCapital` Y NO ES LO MISMO
+
+Abrir el abono le abrió la puerta al pronto pago **sin querer**, porque comparten
+concepto. Lo agarró `ProntoPagoTest` en la primera corrida.
+
+No era un detalle: un pronto pago **perdona saldo**. `anular()` sabe devolver la
+mora condonada, no el capital perdonado — el descuento habría quedado regalado con
+el recibo que lo explicaba marcado como anulado. La puerta ahora mira
+`Recibo::tuvoDescuento()` —el capital condonado— y no el concepto, que es lo que
+de verdad los separa. Revertir un descuento sigue sin existir.
+
+⚠️ **La constancia de la reprogramación SE BORRA**, y es lo único de este repo que
+se borra en vez de marcarse. La regla de `Reprogramacion` —«es historia, no se
+edita ni se borra»— vale para una reprogramación que OCURRIO. Esta no ocurrió: el
+plan volvió a ser el de antes, y una constancia que siga diciendo «tu cuota cambió
+por este abono» le mentiría al estado de cuenta, que se reconstruye leyendo esas
+filas. Lo que pasó queda en el recibo anulado, con su motivo y quién lo anuló.
+
+⚠️ **Con interés no se puede**: `plan_anterior` guarda el monto de cada cuota pero
+no cuánto era capital y cuánto interés, y repartirlo a ojo es inventar el plan del
+cliente. En Praderas no pasa (R1, sin interés) y se rechaza con su mensaje.
+
+## 🔴 9-sep-2026 — lo anterior
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.

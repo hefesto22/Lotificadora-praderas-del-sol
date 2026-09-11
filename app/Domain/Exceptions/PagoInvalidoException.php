@@ -171,19 +171,78 @@ final class PagoInvalidoException extends GrupoOlympoException
     }
 
     /**
-     * Un abono a capital reescribió el plan de cuotas.
+     * 🔴 Un pronto pago no es un abono, aunque salga con el mismo concepto.
      *
-     * Deshacerlo no es devolver el dinero: es devolverle al lote las cuotas
-     * que ese abono borró, con sus fechas y sus montos. El plan viejo está
-     * guardado entero en `reprogramaciones.plan_anterior`, así que se puede —
-     * pero es un trámite propio y no una variante de este.
+     * Los dos bajan capital, pero el pronto pago además PERDONA saldo: parte
+     * de lo que el lote debía dejó de deberse sin que entrara un centavo.
+     * Anularlo tendría que devolver ese perdón, y `anular()` solo sabe
+     * devolver la mora condonada — el capital perdonado se quedaría regalado,
+     * con el recibo que lo explicaba marcado como anulado.
+     *
+     * Se reconoce por el capital condonado y no por el concepto: los dos
+     * salen como `AbonoCapital`, y el 11-sep-2026 abrir el abono abrió este
+     * también sin querer. Lo agarró `ProntoPagoTest`.
      */
-    public static function porReciboQueReprogramo(string $folio): self
+    public static function porProntoPagoQueNoSeAnula(string $folio): self
     {
         return new self(
-            "El recibo {$folio} es un abono a capital: reescribió el plan de cuotas del lote. ".
-            'Anularlo tendría que devolver las cuotas que borró, y eso todavía no está construido. '.
-            'Avisá antes de tocarlo.'
+            "El recibo {$folio} lleva un descuento por pronto pago: perdonó saldo que el lote debía. ".
+            'Anularlo tendría que volver a cobrar ese perdón, y eso es otro trámite que todavía no '.
+            'está construido. Avisá antes de tocarlo.'
+        );
+    }
+
+    /**
+     * 🔴 Deshacer un abono pide que sea el ULTIMO movimiento del lote.
+     *
+     * ═══ POR QUE NO SE ANULA EN CADENA ═══
+     *
+     * Anular un abono le devuelve al lote las cuotas que borró. Si después de
+     * ese abono se cobraron cuotas del plan NUEVO, esos pagos quedarían
+     * apuntando a cuotas que dejan de existir: el lote perdería plata pagada y
+     * las cuentas no cuadrarían con ningún recibo.
+     *
+     * Se podría anular todo en cadena, y se decidió que no (9-sep-2026): un
+     * clic tumbaría cinco papeles y algunos estaban bien —el cliente sí pagó
+     * su cuota de septiembre, y ese recibo no tiene la culpa del abono mal
+     * tecleado de agosto—. Reemitirlos cuesta más de lo que la cadena ahorra,
+     * y cada reemisión quema otro correlativo.
+     *
+     * Así que se deshace de atrás para adelante, y este mensaje dice por
+     * dónde empezar. Es el orden de un libro contable.
+     *
+     * @param list<string> $folios los que hay que anular primero, del más nuevo al más viejo
+     */
+    public static function porMovimientosPosterioresAlAbono(string $folio, array $folios): self
+    {
+        return new self(sprintf(
+            'El recibo %s no se puede anular todavía: después de él %s sobre el mismo lote. '.
+            'Anulá primero %s —del más nuevo al más viejo— y volvé a intentar. '.
+            'Se deshace en orden inverso para que ningún pago quede apuntando a una cuota que dejó de existir.',
+            $folio,
+            count($folios) === 1 ? 'entró otro movimiento' : 'entraron otros movimientos',
+            implode(', ', $folios),
+        ));
+    }
+
+    /**
+     * El plan viejo no alcanza para reconstruirse con interés.
+     *
+     * `reprogramaciones.plan_anterior` guarda número, vencimiento y monto de
+     * cada cuota borrada — no cuánto de ese monto era capital y cuánto
+     * interés. En un plan sin interés no hay ambigüedad: todo el monto es
+     * capital. Con interés habría que repartirlo, y repartirlo a ojo es
+     * inventar el plan del cliente.
+     *
+     * En Praderas no pasa nunca (R1: sin interés). Queda escrito para el día
+     * que un desarrollo financie con tasa.
+     */
+    public static function porPlanViejoSinDesgloseDeInteres(string $folio): self
+    {
+        return new self(
+            "El recibo {$folio} reprogramó un lote que lleva interés, y lo guardado del plan viejo ".
+            'no dice cuánto de cada cuota era capital y cuánto interés. Reconstruirlo sería inventar '.
+            'ese reparto. Este hay que enderezarlo a mano.'
         );
     }
 

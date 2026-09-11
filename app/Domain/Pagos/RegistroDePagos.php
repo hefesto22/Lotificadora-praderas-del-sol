@@ -24,6 +24,7 @@ use App\Models\Reprogramacion;
 use App\Models\Venta;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -434,13 +435,45 @@ final readonly class RegistroDePagos
 
         $concepto = $recibo->getAttribute('concepto');
 
-        if ($concepto !== ConceptoDeRecibo::Cuota) {
-            throw $concepto === ConceptoDeRecibo::AbonoCapital
-                ? PagoInvalidoException::porReciboQueReprogramo($recibo->folio())
-                : PagoInvalidoException::porConceptoQueNoSeAnulaAsi(
-                    $concepto instanceof ConceptoDeRecibo ? $concepto->etiqueta() : 'otro concepto',
-                    $recibo->folio(),
-                );
+        /*
+         * 🔴 EL ABONO A CAPITAL YA SE ANULA — 11-sep-2026.
+         *
+         * «Ocurrió lo que temíamos: se equivocó y era de otra manera el hacer
+         * los pagos de cuota o abono a capital (…) muy seguramente volverá a
+         * pasar» — Mauricio.
+         *
+         * Hasta hoy se rechazaba porque ese recibo reescribió el plan del lote
+         * y devolverle sus cuotas «todavía no está construido». Ya lo está:
+         * `deshacerLasReprogramaciones()`.
+         *
+         * La prima y la seña siguen afuera, y eso NO cambió: revertirlas es
+         * deshacer la venta o el apartado del que salieron, que es otro
+         * trámite con otras consecuencias.
+         */
+        if ($concepto !== ConceptoDeRecibo::Cuota && $concepto !== ConceptoDeRecibo::AbonoCapital) {
+            throw PagoInvalidoException::porConceptoQueNoSeAnulaAsi(
+                $concepto instanceof ConceptoDeRecibo ? $concepto->etiqueta() : 'otro concepto',
+                $recibo->folio(),
+            );
+        }
+
+        /*
+         * 🔴🔴 EL PRONTO PAGO SALE CON EL MISMO CONCEPTO Y NO ES LO MISMO.
+         *
+         * Un pronto pago se emite como `AbonoCapital` —dio por terminado un
+         * plan— así que abrir el abono lo abrió a él también, sin querer. Lo
+         * agarró `ProntoPagoTest` en la primera corrida, y menos mal: un abono
+         * mueve dinero que entró, y un pronto pago además PERDONA saldo. Lo
+         * que `anular()` sabe devolver es la mora condonada
+         * —`revertirLaCondonacion()`—, no el capital perdonado: el lote habría
+         * quedado con el descuento regalado y sin el recibo que lo explicaba.
+         *
+         * Se distingue por el capital condonado y no por el concepto, porque
+         * es lo que de verdad los separa. Revertir un descuento es otro
+         * trámite y sigue sin existir.
+         */
+        if ($recibo->tuvoDescuento()) {
+            throw PagoInvalidoException::porProntoPagoQueNoSeAnula($recibo->folio());
         }
 
         return DB::transaction(function () use ($recibo, $porQue): Recibo {
@@ -463,6 +496,18 @@ final readonly class RegistroDePagos
             if ($vivo->estaAnulado()) {
                 throw PagoInvalidoException::porReciboYaAnulado($vivo->folio());
             }
+
+            /*
+             * 🔴 EL PLAN PRIMERO, LAS APLICACIONES DESPUES.
+             *
+             * Deshacer la reprogramación borra las cuotas que ese abono creó y
+             * devuelve las que borró. Las aplicaciones del MISMO recibo apuntan
+             * a cuotas anteriores —las vencidas que puso al día; una cuota con
+             * pago no es reemplazable, por el tope de `EfectoDelAbono`—, así
+             * que ninguna de las dos pisa a la otra. El orden igual importa:
+             * si algo estorba, se descubre antes de haber tocado un centavo.
+             */
+            $this->deshacerLasReprogramaciones($vivo);
 
             foreach ($vivo->aplicaciones()->with('cuota')->get() as $aplicacion) {
                 $cuota = $aplicacion->cuota;
@@ -494,8 +539,204 @@ final readonly class RegistroDePagos
 
             $this->reabrirSiVolvioADeber($vivo);
 
+            /*
+             * El horizonte y la cuota del contrato son un resumen de `cuotas`,
+             * y las cuotas acaban de cambiar: sin esto la lista de ventas
+             * seguiría diciendo el plazo que dejó el abono anulado.
+             */
+            $venta = $vivo->venta;
+
+            if ($venta instanceof Venta) {
+                $this->recalcularElResumen($venta);
+            }
+
             return $vivo;
         });
+    }
+
+    /**
+     * 🔴 Devolverle al lote las cuotas que el abono le borró — 11-sep-2026.
+     *
+     * ═══ SE PUEDE PORQUE EL PLAN VIEJO ESTA GUARDADO ═══
+     *
+     * Cada reprogramación conserva en `plan_anterior` las cuotas que reemplazó
+     * —número, vencimiento y monto— y en `desde_numero` desde dónde reescribió.
+     * Eso alcanza para reconstruir el plan exactamente como estaba: se borran
+     * las cuotas que el abono creó y se vuelven a escribir las que borró.
+     *
+     * ═══ SOLO SI ES EL ULTIMO MOVIMIENTO DEL LOTE ═══
+     *
+     * El porqué largo está en `porMovimientosPosterioresAlAbono()`. Acá alcanza
+     * con la regla: se deshace de atrás para adelante, como un libro contable.
+     *
+     * ⚠️ LA CONSTANCIA SE BORRA, y es la única cosa de este repo que se borra
+     * en vez de marcarse. La regla de `Reprogramacion` —«es historia, no se
+     * edita ni se borra»— vale para una reprogramación que OCURRIO. Esta no
+     * ocurrió: el plan volvió a ser el de antes, y una constancia que siga
+     * diciendo «tu cuota cambió por este abono» le mentiría al estado de
+     * cuenta, que se reconstruye leyendo justamente estas filas.
+     *
+     * Lo que pasó no se pierde: queda el recibo anulado, con su motivo, quién
+     * lo anuló y cuándo — que es donde se busca «¿qué pasó con este número?».
+     *
+     * @throws PagoInvalidoException
+     */
+    private function deshacerLasReprogramaciones(Recibo $recibo): void
+    {
+        $constancias = $recibo->reprogramaciones()->with('compromiso')->get();
+
+        foreach ($constancias as $constancia) {
+            $lote = $constancia->compromiso;
+
+            if (! $lote instanceof Compromiso) {
+                continue;
+            }
+
+            $plan = $constancia->planAnterior();
+
+            if ($plan === []) {
+                // No reemplazó ninguna cuota: no hay plan que devolver. Pasa
+                // cuando el abono canceló lo que quedaba del lote y no quedó
+                // ninguna cuota pendiente que reescribir.
+                $constancia->delete();
+
+                continue;
+            }
+
+            $this->comprobarQueSePuedeDeshacer($recibo, $constancia, $lote);
+
+            $desde = (int) $constancia->getAttribute('desde_numero');
+
+            Cuota::query()
+                ->where('compromiso_id', $lote->getKey())
+                ->where('numero', '>=', $desde)
+                ->delete();
+
+            $this->reescribirElPlanViejo($lote, $plan);
+
+            $constancia->delete();
+        }
+    }
+
+    /**
+     * Las dos cosas que impiden devolver el plan, dichas con nombre y apellido.
+     *
+     * ⚠️ Se preguntan ANTES de borrar una sola cuota. Con la transacción
+     * alcanzaría para no dejar el lote a medias, pero el mensaje tiene que
+     * poder decir QUE estorba, y para eso hay que mirarlo antes de tocarlo.
+     *
+     * @throws PagoInvalidoException
+     */
+    private function comprobarQueSePuedeDeshacer(
+        Recibo $recibo,
+        Reprogramacion $constancia,
+        Compromiso $lote,
+    ): void {
+        /*
+         * Con interés, `plan_anterior` no alcanza: guarda el monto de cada
+         * cuota pero no cuánto era capital y cuánto interés. Ver
+         * `porPlanViejoSinDesgloseDeInteres()`. En Praderas nunca pasa (R1).
+         */
+        if (! $lote->tasaDeInteres()->esCero()) {
+            throw PagoInvalidoException::porPlanViejoSinDesgloseDeInteres($recibo->folio());
+        }
+
+        $folios = $this->loQueVinoDespues($recibo, $constancia, $lote);
+
+        if ($folios !== []) {
+            throw PagoInvalidoException::porMovimientosPosterioresAlAbono($recibo->folio(), $folios);
+        }
+    }
+
+    /**
+     * Los recibos que tocaron este lote DESPUES de este abono.
+     *
+     * Son de dos clases y las dos estorban por la misma razón —el plan viejo
+     * no tiene dónde ponerlos—:
+     *
+     * 1. Otra reprogramación posterior: su `plan_anterior` es el plan que este
+     *    abono escribió, y devolverle a este el suyo lo dejaría apuntando a
+     *    cuotas que dejan de existir.
+     * 2. Cualquier cobro sobre las cuotas que este abono creó. Nacieron en
+     *    cero, así que un solo centavo ahí entró después.
+     *
+     * Se devuelven del más NUEVO al más viejo, que es el orden en que hay que
+     * anularlos.
+     *
+     * @return list<string>
+     */
+    private function loQueVinoDespues(Recibo $recibo, Reprogramacion $constancia, Compromiso $lote): array
+    {
+        $folios = [];
+
+        $posteriores = Reprogramacion::query()
+            ->where('compromiso_id', $lote->getKey())
+            ->where('id', '>', $constancia->getKey())
+            ->with('recibo')
+            ->orderByDesc('id')
+            ->get();
+
+        foreach ($posteriores as $otra) {
+            $suRecibo = $otra->recibo;
+
+            if ($suRecibo instanceof Recibo && ! $suRecibo->estaAnulado()) {
+                $folios[] = $suRecibo->folio();
+            }
+        }
+
+        $cobrados = Recibo::query()
+            ->whereNull('anulado_el')
+            ->whereKeyNot($recibo->getKey())
+            ->whereHas('aplicaciones.cuota', static function (Builder $consulta) use ($lote, $constancia): void {
+                $consulta
+                    ->where('compromiso_id', $lote->getKey())
+                    ->where('numero', '>=', (int) $constancia->getAttribute('desde_numero'));
+            })
+            ->orderByDesc('id')
+            ->get();
+
+        foreach ($cobrados as $otro) {
+            $folios[] = $otro->folio();
+        }
+
+        return array_values(array_unique($folios));
+    }
+
+    /**
+     * Las cuotas viejas, escritas de vuelta tal como estaban.
+     *
+     * Todo el monto va a capital porque el lote no lleva interés —lo comprueba
+     * `comprobarQueSePuedeDeshacer()` antes de llegar acá—, así que no hay nada
+     * que repartir y no se inventa nada.
+     *
+     * Nacen sin un centavo pagado, y tiene que ser así: lo que este recibo
+     * había aplicado se devuelve aparte, cuota por cuota, en `anular()`.
+     *
+     * @param list<array{numero: int, vence: string, monto: string}> $plan
+     */
+    private function reescribirElPlanViejo(Compromiso $lote, array $plan): void
+    {
+        $ahora = now();
+        $filas = [];
+
+        foreach ($plan as $cuota) {
+            $filas[] = [
+                'venta_id'          => $lote->getAttribute('venta_id'),
+                'compromiso_id'     => $lote->getKey(),
+                'numero'            => $cuota['numero'],
+                'fecha_vencimiento' => $cuota['vence'],
+                'monto'             => $cuota['monto'],
+                'monto_capital'     => $cuota['monto'],
+                'monto_interes'     => '0.00',
+                'monto_pagado'      => '0.00',
+                'mora_pagada'       => '0.00',
+                'mora_condonada'    => '0.00',
+                'created_at'        => $ahora,
+                'updated_at'        => $ahora,
+            ];
+        }
+
+        Cuota::query()->insert($filas);
     }
 
     /**
@@ -2429,13 +2670,13 @@ final readonly class RegistroDePagos
      * El `reorder()` no hace falta acá porque `Cuota::query()` no arrastra el
      * `orderBy` de la relación; el 42803 de Postgres aparece cuando se agrega
      * sobre `$venta->cuotas()`, como documenta `Venta::saldoPendiente()`.
-     */
-    /**
+     *
      * ⚠️ `public` desde el 8-sep-2026, para `olympo:recuadrar-venta`: un
      * recuadre reescribe los planes de varios lotes y tiene que dejar el
      * resumen de la venta al día igual que un cobro. Duplicar estas quince
      * líneas en el comando sería la forma segura de que dentro de tres meses
-     * una de las dos aprenda algo que la otra no.
+     * una de las dos aprenda algo que la otra no. Desde el 11-sep lo llama
+     * también `anular()`: deshacer un abono también cambia el plan.
      */
     public function recalcularElResumen(Venta $venta): void
     {

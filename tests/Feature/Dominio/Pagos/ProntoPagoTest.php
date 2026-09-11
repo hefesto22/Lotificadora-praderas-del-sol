@@ -270,17 +270,30 @@ describe('Lo que se rechaza', function (): void {
     });
 
     /*
-    | Sale con concepto `AbonoCapital` porque dio por terminado un plan, y
-    | `anular()` rechaza esos por lo mismo que rechaza un abono. Revertir un
-    | pronto pago es otro trámite, y todavía no existe.
+    | 🔴🔴 ESTE TEST GANO SU LUGAR EL 11-SEP-2026.
+    |
+    | Un pronto pago sale con concepto `AbonoCapital` porque dio por terminado
+    | un plan. Ese día se abrió la anulación del abono a capital —«se equivocó
+    | y era de otra manera el hacer los pagos», Mauricio— y eso abrió ESTE
+    | también sin querer, porque comparten concepto.
+    |
+    | Lo agarró este test en la primera corrida. Sin él, un pronto pago anulado
+    | habría dejado el descuento regalado: `anular()` sabe devolver la mora
+    | condonada, no el capital perdonado.
+    |
+    | Por eso ahora la puerta mira el capital condonado y no el concepto, que
+    | es lo que de verdad los separa. La aserción del mensaje es parte del
+    | test: si algún día alguien lo deja pasar por otro camino, un
+    | `PagoInvalidoException` cualquiera haría que esto siguiera en verde.
     */
     test('un pronto pago no se anula', function (): void {
         $recibo = prontoPagoDe($this->venta, $this->cliente, [['lote' => $this->uno, 'descuento' => new Monto('10000.00')]])[0];
 
-        expect($recibo->getAttribute('concepto'))->toBe(ConceptoDeRecibo::AbonoCapital);
+        expect($recibo->getAttribute('concepto'))->toBe(ConceptoDeRecibo::AbonoCapital)
+            ->and($recibo->tuvoDescuento())->toBeTrue();
 
         expect(fn () => $this->pagos->anular($recibo, 'Me equivoqué de lote'))
-            ->toThrow(PagoInvalidoException::class);
+            ->toThrow(PagoInvalidoException::class, 'perdonó saldo');
     });
 });
 
