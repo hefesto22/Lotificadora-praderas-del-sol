@@ -3,6 +3,72 @@
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
 
+## 🔴🔴 11-sep, noche — LA CACHE DE COMPONENTES SE COMIO UN WIDGET ENTERO
+
+El widget de costo contra ingreso se desplegó a pruebas y **no apareció**. El
+`git pull` lo trajo, el archivo estaba en el servidor, el permiso existía y el
+usuario lo tenía. El Escritorio simplemente no lo mostraba.
+
+**Era `bootstrap/cache/filament/`**, del 27 de agosto. Filament guarda ahí la
+lista de recursos, páginas y widgets que descubrió, y mientras ese archivo
+exista `discoverWidgets()` **no vuelve a mirar la carpeta**. `config:cache`,
+`route:cache` y `view:cache` no la tocan: es otra caché, con su propio comando.
+
+Es el mismo síntoma que ya había mordido dos veces en agosto con los permisos
+—R23 y pronto pago—: una función que se entrega, no falla, no tira error, no
+sale en ningún log, y no está en la pantalla.
+
+`docs/DESPLIEGUE.md` ahora lleva las dos líneas en la secuencia fija:
+
+```bash
+php8.5 artisan filament:clear-cached-components && php8.5 artisan filament:cache-components
+php8.5 artisan olympo:sembrar-permisos
+```
+
+Las dos van en TODO despliegue, aunque la entrega «solo toque un blade».
+
+## 🔴 11-sep, noche — El Escritorio dejó de saludar
+
+«Ese bienvenido debería quitarse y hay que hacerlo más profesional y
+empresarial» — Mauricio.
+
+Tenía razón por algo concreto: el `AccountWidget` de fábrica ocupaba **el lugar
+de más peso de la pantalla** —arriba del todo, ancho completo— para decir
+«Bienvenida/o» y ofrecer un botón de salir que ya vive en el menú del usuario.
+
+### Lo que entró
+
+- `EncabezadoDelEscritorio` (`sort = -10`) — logo de la marca, el nombre del
+  residencial de `config('app.name')`, la fecha larga en español, y el nombre y
+  rol de quien entró **como pie de línea, no como titular**. La diferencia no
+  es de estilo: un tablero que empieza con un saludo se lee como una aplicación
+  personal; uno que empieza diciendo de qué residencial es y de qué día habla
+  se lee como el sistema de una empresa.
+- `AdminPanelProvider` — fuera `->widgets([AccountWidget::class])`.
+- Título de sección en los cuatro cuadros de cifras: «El mes», «La caja de
+  hoy», «El proyecto», «El sistema». Hasta hoy eran tres filas del mismo
+  tamaño y el mismo peso, así que nada parecía más importante que lo demás.
+  `StatsOverviewWidget` ya pinta `$heading`; no hubo que dibujar nada.
+- El CSS va en `filament/tema-olympo`, como todo el chasis visual. **Ni una
+  clase de Tailwind**: una clase que Vite no compiló no existe en el panel, y
+  acá no hay build que la compile.
+
+### ⚠️ Dos trampas que quedaron escritas en el código
+
+- `config('app.name')` y **nunca** `env()`: con `config:cache` puesto —y en el
+  servidor lo está— `env()` devuelve null y el encabezado saldría vacío.
+- La lectura de la marca va con `try`/`catch`, igual que
+  `AdminPanelProvider::brandingValue()`. Sin la tabla —instalación nueva,
+  migración a medias— tiene que devolver null y dejar abrir el panel. **Un
+  widget que lanza se lleva la página entera**, no solo su cuadro.
+
+### Qué mirar en pruebas
+
+El encabezado arriba del todo con el logo y el nombre del residencial, y
+debajo los cuadros con su título de sección. Entrar con el receptor: el
+encabezado **sí** lo ve —no dice ninguna cifra, es un rótulo—; el cuadro de
+«El proyecto», no.
+
 ## 🔴 11-sep, tarde — Costo contra ingreso: el Escritorio ya resta
 
 «Hoy hay que sumar a mano lo cobrado y lo gastado para saber cómo va el

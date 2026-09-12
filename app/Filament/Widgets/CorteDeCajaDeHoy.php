@@ -58,6 +58,19 @@ class CorteDeCajaDeHoy extends StatsOverviewWidget
     #[Override]
     protected int|string|array $columnSpan = 'full';
 
+    /*
+     * El título de la sección — 11-sep-2026.
+     *
+     * Hasta hoy el Escritorio eran tres filas de cuadros del mismo tamaño y
+     * el mismo peso, así que nada parecía más importante que lo demás y
+     * había que leerlos todos para encontrar el que se buscaba. Con un
+     * título arriba, cada fila se salta o se lee entera de un vistazo.
+     *
+     * Lo dibuja Filament solo: `StatsOverviewWidget` ya pinta `$heading`.
+     */
+    #[Override]
+    protected ?string $heading = 'La caja de hoy';
+
     #[Override]
     public static function canView(): bool
     {

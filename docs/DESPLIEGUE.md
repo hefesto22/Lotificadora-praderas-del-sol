@@ -192,10 +192,41 @@ git pull
 php8.5 $(command -v composer) install --no-dev --optimize-autoloader
 php8.5 artisan migrate --force
 php8.5 artisan config:cache && php8.5 artisan route:cache && php8.5 artisan view:cache
+php8.5 artisan filament:clear-cached-components && php8.5 artisan filament:cache-components
+php8.5 artisan olympo:sembrar-permisos
 php8.5 artisan queue:restart        # con colas Redis: horizon:terminate
 php8.5 artisan up
 php8.5 artisan olympo:verificar-produccion
 ```
+
+### 🔴 LAS DOS LINEAS QUE SE AGREGARON EL 11-SEP, Y LO QUE COSTARON
+
+Las dos son la misma historia: **una función se entrega y no aparece.** No
+falla, no tira error, no sale en ningún log. Simplemente no está en la
+pantalla, y quien la pidió cree que no se hizo.
+
+**`filament:clear-cached-components`.** Filament guarda en
+`bootstrap/cache/filament/` la lista de recursos, páginas y widgets que
+descubrió. Mientras ese archivo exista, `discoverWidgets()` y sus hermanos
+**no vuelven a mirar la carpeta**: leen la lista vieja. El 11-sep se desplegó
+el widget `ComoVanLosProyectos` a pruebas, el `git pull` lo trajo, el archivo
+estaba en el servidor, el permiso existía y el usuario lo tenía — y el
+Escritorio no lo mostraba. La caché era del 27 de agosto.
+
+`config:cache`, `route:cache` y `view:cache` **no la tocan**: es otra caché,
+con su propio comando. Se limpia y se vuelve a armar; dejarla sin armar
+funciona igual pero más lento en cada carga.
+
+**`olympo:sembrar-permisos`.** El mismo síntoma por el otro lado. Con
+`define_via_gate => false`, un permiso que no está en la base no lo tiene
+nadie —ni el super-admin— y una acción de Filament sin permiso no falla: no
+se dibuja. Ya había mordido dos veces en agosto (R23 y pronto pago). Es
+idempotente: correrlo de más no hace nada, y por eso va en la secuencia fija
+en vez de en la memoria de alguien.
+
+**La regla:** las dos van en TODO despliegue, aunque la entrega «solo toque
+un blade». Cuesta tres segundos y es la diferencia entre entregar y creer que
+se entregó.
 
 `npm ci && npm run build` **solo si el cambio tocó `resources/css`,
 `resources/js` o algo que Vite compile.** Los documentos imprimibles —recibo,

@@ -18,7 +18,6 @@ use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
 use Filament\View\PanelsRenderHook;
-use Filament\Widgets\AccountWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -111,10 +110,19 @@ class AdminPanelProvider extends PanelProvider
             ->pages([
                 Dashboard::class,
             ])
+            /*
+             * Sin `->widgets([AccountWidget::class])` desde el 11-sep-2026.
+             *
+             * Ese recuadro decía «Bienvenida/o» con el nombre de quien entró
+             * y un botón de salir, y ocupaba el lugar de más peso de la
+             * pantalla —arriba del todo, ancho completo— para decir algo que
+             * no le sirve a nadie dos veces: el botón de salir ya está en el
+             * menú del usuario, arriba a la derecha.
+             *
+             * Lo reemplaza `EncabezadoDelEscritorio`, que el descubrimiento
+             * de abajo encuentra solo.
+             */
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\\Filament\\Widgets')
-            ->widgets([
-                AccountWidget::class,
-            ])
             ->middleware([
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,

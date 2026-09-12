@@ -688,4 +688,104 @@
     .dark .fi-sidebar-item .fi-badge { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); }
     .dark .fi-sidebar-item .fi-badge.fi-color-warning { background-color: rgba(180, 83, 9, .25); }
     .dark .fi-sidebar-item .fi-badge.fi-color-danger { background-color: rgba(153, 27, 27, .3); }
+
+    /*
+       ── 15. El encabezado del Escritorio ──────────────────────────────
+
+       Reemplaza al `AccountWidget` de fábrica —el recuadro que decía
+       «Bienvenida/o»—. «Hay que hacerlo más profesional y empresarial»
+       —Mauricio, 11-sep-2026—.
+
+       Lo que cambia no es el adorno: es QUE DICE PRIMERO. Un tablero que
+       empieza con un saludo se lee como una aplicación personal; uno que
+       empieza diciendo de qué residencial es y de qué día habla se lee como
+       el sistema de una empresa. El nombre de quien entró no se va, se
+       achica: pasa de titular a pie de línea.
+
+       Sin recuadro ni sombra a propósito. Es un rótulo, no una tarjeta: si
+       llevara caja competiría visualmente con los cuadros de cifras que van
+       abajo, que son los que hay que mirar.
+    */
+    .olympo-encabezado {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 1rem 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid rgba(9, 9, 11, .08);
+    }
+
+    .olympo-encabezado-marca {
+        display: flex;
+        align-items: center;
+        gap: .875rem;
+        min-width: 0;
+    }
+
+    .olympo-encabezado-logo {
+        height: 2.75rem;
+        width: auto;
+        max-width: 9rem;
+        object-fit: contain;
+        flex-shrink: 0;
+    }
+
+    .olympo-encabezado-texto { min-width: 0; }
+
+    /* Versalitas chicas, como el resto de las etiquetas del sistema (§1). */
+    .olympo-encabezado-rotulo {
+        margin: 0 0 .125rem;
+        font-size: .6875rem;
+        font-weight: 600;
+        letter-spacing: .09em;
+        text-transform: uppercase;
+        color: rgb(113 113 122);
+    }
+
+    .olympo-encabezado-nombre {
+        margin: 0;
+        font-size: 1.375rem;
+        font-weight: 700;
+        letter-spacing: -.02em;
+        line-height: 1.15;
+        color: rgb(24 24 27);
+    }
+
+    .olympo-encabezado-dia {
+        text-align: right;
+        margin-left: auto;
+    }
+
+    .olympo-encabezado-fecha {
+        margin: 0;
+        font-size: .875rem;
+        font-weight: 500;
+        color: rgb(63 63 70);
+        /* La fecha viene de `fechaLarga()`, que la escribe en minúsculas. */
+        text-transform: capitalize;
+    }
+
+    .olympo-encabezado-quien {
+        margin: .125rem 0 0;
+        font-size: .75rem;
+        color: rgb(113 113 122);
+    }
+
+    .olympo-encabezado-quien span { text-transform: capitalize; }
+
+    /* En pantalla angosta la fecha baja y se alinea a la izquierda: a la
+       derecha quedaría colgando debajo del logo, que se lee como un error. */
+    @media (max-width: 40rem) {
+        .olympo-encabezado-dia {
+            text-align: left;
+            margin-left: 0;
+        }
+    }
+
+    .dark .olympo-encabezado { border-bottom-color: rgba(255, 255, 255, .1); }
+    .dark .olympo-encabezado-nombre { color: rgb(244 244 245); }
+    .dark .olympo-encabezado-fecha { color: rgb(212 212 216); }
+    .dark .olympo-encabezado-rotulo,
+    .dark .olympo-encabezado-quien { color: rgb(161 161 170); }
 </style>
