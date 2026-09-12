@@ -27,13 +27,38 @@ cuarta celda vacía, y eso se lee como una rejilla — no como un error.
 estrechar el tipo de una propiedad heredada, así que `int|array` es un error
 FATAL al cargar la clase, no un aviso. Se encontró antes de entregarlo.
 
-### 2. Las ALTURAS: el `height: 100%` no llegaba
+### 2. 🔴🔴 Las ALTURAS: tres intentos a ciegas, y la lección del día
 
-Entre la rejilla (`fi-grid-ctn`) y la tarjeta hay un envoltorio del esquema, y
-un `height` sobre el hijo no hace nada si el padre mide lo que mide su
-contenido. El estirón se pide ahora en los tres eslabones, y el selector del
-del medio es `> *` en vez del nombre de una clase: así sobrevive a que
-Filament renombre ese envoltorio.
+El culpable es **`align-self: start` en `.fi-grid-col`**. Con eso cada celda
+mide lo que mide su contenido, y un `height: 100%` más adentro no tiene contra
+qué medir: es el 100 % de un padre que ya se encogió.
+
+La cadena real, leída del DOM:
+
+```
+.fi-section-content.fi-grid   ← display: grid
+  └ .fi-grid-col              ← ⚠️ align-self: start
+      └ .fi-sc-component
+          └ .fi-wi-stats-overview-stat
+```
+
+**Se intentó TRES veces adivinando esa cadena y las tres fallaron**, porque el
+envoltorio no se llama `fi-grid-ctn` —esa clase existe en Filament, pero no en
+este contexto—, así que el selector no casaba con nada. Cada intento costó
+puerta, commit y despliegue.
+
+Se resolvió abriendo pruebas en el navegador, leyendo el DOM y **midiendo**:
+antes 161 · 141 · 141 · 141; con el arreglo puesto en vivo, 161 en las cuatro.
+Recién ahí se escribió en el archivo.
+
+⚠️ **LA REGLA QUE SALE DE ACA:** para cualquier cosa visual, mirar la pantalla
+ANTES de escribir CSS. Inferir el HTML que genera un framework es adivinar, y
+cada adivinanza cuesta un despliegue. El navegador estaba disponible desde el
+principio.
+
+El `min-height` es para el otro caso: un renglón de UNA sola cifra —«El
+sistema»— no tiene contra quién estirarse. Con él, las doce tarjetas del
+Escritorio miden lo mismo, estén donde estén.
 
 De paso se acortaron los dos pies más largos, que eran los que estiraban el
 renglón entero.

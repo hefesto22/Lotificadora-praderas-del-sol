@@ -835,18 +835,32 @@
     }
 
     /*
-       🔴 LA CADENA ENTERA, NO SOLO LA TARJETA.
+       🔴 LA CADENA ENTERA, Y MEDIDA EN LA PANTALLA — 12-sep-2026.
 
-       `height: 100%` sobre el cuadro no alcanzaba: entre la rejilla y el
-       cuadro hay un envoltorio del esquema, y un `height` sobre el hijo no
-       hace nada si el padre mide lo que mide su contenido. Por eso el estirón
-       se pide en los tres eslabones —la rejilla, lo que sea que envuelva, y
-       la tarjeta— y por eso el selector es `> *` en vez del nombre de una
-       clase: así sobrevive a que Filament renombre ese envoltorio.
+       Esto se intentó tres veces a ciegas y las tres fallaron, porque el
+       envoltorio que hay entre la rejilla y la tarjeta NO se llama como
+       parecía. Se resolvió abriendo pruebas en el navegador y leyendo el DOM
+       de verdad. La cadena real, de afuera hacia adentro:
+
+         .fi-section-content.fi-grid   ← display: grid
+           └ .fi-grid-col              ← ⚠️ trae `align-self: start`
+               └ .fi-sc-component
+                   └ .fi-wi-stats-overview-stat
+
+       **El culpable es `align-self: start` en `.fi-grid-col`.** Con eso, cada
+       celda mide lo que mide su contenido y un `height: 100%` más adentro no
+       tiene contra qué medir: el 100 % de un padre que ya se encogió.
+
+       Medido antes: 161 · 141 · 141 · 141. Después: 161 en las cuatro.
+
+       El `min-height` es para el otro caso: un renglón de UNA sola cifra
+       —«El sistema»— no tiene contra quién estirarse, así que sin él quedaría
+       más bajo que todos los demás. Con él, las doce tarjetas del Escritorio
+       miden lo mismo, estén donde estén.
     */
-    .fi-wi-stats-overview .fi-grid-ctn { align-items: stretch; }
-    .fi-wi-stats-overview .fi-grid-ctn > * { height: 100%; }
-    .fi-wi-stats-overview-stat { height: 100%; }
+    .fi-wi-stats-overview .fi-grid-col { align-self: stretch; }
+    .fi-wi-stats-overview .fi-sc-component { height: 100%; }
+    .fi-wi-stats-overview-stat { height: 100%; min-height: 10rem; }
 
     .fi-wi-stats-overview-stat-content {
         display: flex;
