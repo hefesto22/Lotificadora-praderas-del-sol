@@ -3,6 +3,41 @@
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
 
+## 🔴 12-sep — Todas las tarjetas del Escritorio miden lo mismo
+
+«No hay consistencia de tamaños, todos deberían tener el mismo tamaño, que se
+vea súper empresarial y profesional» — Mauricio. Dos causas, y ninguna era el
+CSS que ya estaba puesto.
+
+### 1. Los ANCHOS: Filament elegía las columnas solo
+
+`StatsOverviewWidget::getColumns()` decide por la CANTIDAD de cifras: menos de
+tres, o un múltiplo que no deje resto 1, dan **tres** columnas; cuatro dan
+**cuatro**. Con los cuatro tableros uno debajo del otro eso significaba que
+«La caja de hoy» (tres cifras) tenía tarjetas más anchas que «El mes»
+(cuatro), y que nada se alineaba en vertical.
+
+Peor: el corte de caja dibuja un cuarto cuadro **solo los días que hubo
+egreso**, así que el ancho de sus tarjetas cambiaba de un día para otro.
+
+Los cuatro widgets ahora fijan `$columns = 4`. Un renglón con tres deja la
+cuarta celda vacía, y eso se lee como una rejilla — no como un error.
+
+⚠️ **El tipo va igual que en el padre: `int|array|null`.** PHP no deja
+estrechar el tipo de una propiedad heredada, así que `int|array` es un error
+FATAL al cargar la clase, no un aviso. Se encontró antes de entregarlo.
+
+### 2. Las ALTURAS: el `height: 100%` no llegaba
+
+Entre la rejilla (`fi-grid-ctn`) y la tarjeta hay un envoltorio del esquema, y
+un `height` sobre el hijo no hace nada si el padre mide lo que mide su
+contenido. El estirón se pide ahora en los tres eslabones, y el selector del
+del medio es `> *` en vez del nombre de una clase: así sobrevive a que
+Filament renombre ese envoltorio.
+
+De paso se acortaron los dos pies más largos, que eran los que estiraban el
+renglón entero.
+
 ## 🔴 12-sep — El encabezado salía a media pantalla, y la propiedad estaba bien
 
 «Eso que está seleccionado se ve muy feo» — Mauricio, con el encabezado

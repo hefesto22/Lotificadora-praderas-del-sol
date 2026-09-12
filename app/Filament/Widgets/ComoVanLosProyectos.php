@@ -99,6 +99,30 @@ class ComoVanLosProyectos extends StatsOverviewWidget
     #[Override]
     protected int|string|array $columnSpan = 'full';
 
+    /*
+     * 🔴 CUATRO COLUMNAS SIEMPRE, AUNQUE EL RENGLON TENGA TRES CUADROS.
+     *
+     * Filament decide solas las columnas por la CANTIDAD de cifras: tres o
+     * seis dan tres columnas, cuatro dan cuatro. Con los cuatro tableros del
+     * Escritorio uno abajo del otro, eso hacía que las tarjetas de «La caja
+     * de hoy» fueran más anchas que las de «El mes» —tres contra cuatro— y
+     * que nada se alineara en vertical.
+     *
+     * Peor: el corte de caja dibuja un cuarto cuadro solo los días que hubo
+     * egreso, así que el ancho de sus tarjetas CAMBIABA de un día para otro.
+     *
+     * Fijo en cuatro, todas las tarjetas del Escritorio miden lo mismo y
+     * están en la misma cuadrícula. Un renglón con tres deja la cuarta celda
+     * vacía, y eso se lee como una rejilla, no como un error.
+     */
+    #[Override]
+    /*
+     * ⚠️ El tipo va IGUAL que en el padre —`int|array|null`— aunque acá el
+     * null no se use nunca: PHP no deja estrechar el tipo de una propiedad
+     * al heredarla, y `int|array` sería un error fatal al cargar la clase.
+     */
+    protected int|array|null $columns = 4;
+
     /**
      * El título de la sección — 11-sep-2026.
      *
@@ -181,7 +205,7 @@ class ComoVanLosProyectos extends StatsOverviewWidget
              */
             $totalInvertido->esCero()
                 ? Stat::make('Sin gastos cargados', '—')
-                    ->description('Hasta que se registren los gastos del proyecto no hay contra qué comparar lo cobrado')
+                    ->description('Sin gastos no hay contra qué comparar lo cobrado')
                     ->descriptionIcon('heroicon-m-exclamation-circle')
                     ->color('gray')
                 : Stat::make($this->rotuloDelResultado($alcanzo, $diferencia), $diferencia->formateado())
@@ -229,7 +253,7 @@ class ComoVanLosProyectos extends StatsOverviewWidget
             : sprintf(' · menos %s devueltos', $devuelto->formateado());
 
         if ($invertido->esCero()) {
-            return 'Cobrado en toda la vida del proyecto'.$nota;
+            return 'En toda la vida del proyecto'.$nota;
         }
 
         /*
