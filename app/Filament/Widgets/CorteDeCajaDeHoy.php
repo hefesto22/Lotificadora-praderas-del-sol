@@ -47,6 +47,21 @@ use Override;
  * Solo se le muestran a quien ve el arqueo completo. Un receptor ve lo que
  * cobró él, y de la caja de la administración no registra ni decide nada.
  */
+/*
+ * 🔴 ESTE CUADRO **NO** SE RECORTA POR PROYECTO — 11-sep-2026.
+ *
+ * Todo lo demás del Escritorio sí: el interruptor de la barra deja ver un
+ * solo desarrollo. Este no, y no es un olvido.
+ *
+ * La gaveta es UNA. «En efectivo: es lo que tiene que estar en la caja al
+ * cerrar» solo es verdad si suma lo que entró por los tres proyectos, porque
+ * los billetes están todos en el mismo cajón. Recortarlo por proyecto daría
+ * un número menor que el efectivo real y quien cuenta encontraría de más,
+ * buscando un error que no existe.
+ *
+ * El corte de caja se recorta por PERSONA —un receptor ve lo que cobró él—,
+ * que es la división que sí corresponde a un arqueo.
+ */
 class CorteDeCajaDeHoy extends StatsOverviewWidget
 {
     #[Override]

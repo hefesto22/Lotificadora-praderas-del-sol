@@ -23,6 +23,7 @@ use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 use Throwable;
 
@@ -105,6 +106,26 @@ class AdminPanelProvider extends PanelProvider
             ->renderHook(
                 PanelsRenderHook::HEAD_END,
                 static fn (): string => view('filament.tema-olympo')->render(),
+            )
+            /*
+             * 🔴 El interruptor de proyecto — 11-sep-2026.
+             *
+             * «Cuando carguemos otros proyectos —ya hablamos con la clienta y
+             * posiblemente agreguemos otros dos en unos días o semanas»
+             * —Mauricio—. Con tres desarrollos, el Escritorio mezclaría los
+             * inventarios de los tres y la lista de a quién llamar mezclaría
+             * sus clientes; quien cobra trabaja un desarrollo a la vez.
+             *
+             * `TOPBAR_START` y no la barra lateral: es un estado de la
+             * pantalla entera, no una sección del menú, y arriba está a la
+             * vista siempre — que es lo que hace que nadie olvide en qué
+             * proyecto está mirando un número.
+             *
+             * Con UN solo proyecto el componente no dibuja nada.
+             */
+            ->renderHook(
+                PanelsRenderHook::TOPBAR_START,
+                static fn (): string => Blade::render('@livewire(\'selector-de-proyecto\')'),
             )
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
             ->pages([

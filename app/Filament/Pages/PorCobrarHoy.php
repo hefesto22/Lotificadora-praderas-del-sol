@@ -12,6 +12,7 @@ use App\Filament\Support\Menu;
 use App\Models\Cuota;
 use App\Models\GestionDeCobro;
 use App\Models\Venta;
+use App\Support\ProyectoActivo;
 use BackedEnum;
 use Carbon\CarbonInterface;
 use Filament\Actions\Action;
@@ -148,8 +149,20 @@ class PorCobrarHoy extends Page implements HasTable
     {
         $hoy = today()->toDateString();
 
+        $delProyecto = app(ProyectoActivo::class)->id();
+
         return Venta::query()
             ->vigentes()
+            /*
+             * 🔴 El proyecto que se está mirando — 11-sep-2026.
+             *
+             * Con varios desarrollos, la lista de a quién llamar los mezcla:
+             * quien cobra abre la pantalla y ve clientes de tres residenciales
+             * seguidos, cuando normalmente trabaja uno a la vez. El
+             * interruptor de la barra la recorta; en «Todos» sale completa,
+             * como hasta hoy.
+             */
+            ->when($delProyecto !== null, static fn (Builder $suyo): Builder => $suyo->where('proyecto_id', $delProyecto))
             ->whereExists(self::cuotasQueSeDeben('<=', $hoy))
             /*
              * El silencio. `COALESCE(…, $hoy) <= $hoy` deja pasar al que

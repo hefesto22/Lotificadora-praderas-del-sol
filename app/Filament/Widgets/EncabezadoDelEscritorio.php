@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Filament\Widgets;
 
 use App\Models\BrandingSetting;
+use App\Models\Proyecto;
+use App\Support\ProyectoActivo;
 use Carbon\CarbonImmutable;
 use Filament\Widgets\Widget;
 use Override;
@@ -74,6 +76,7 @@ class EncabezadoDelEscritorio extends Widget
         $hoy = CarbonImmutable::now();
 
         return [
+            'rotulo'      => $this->elRotulo(),
             'residencial' => $this->nombreDelSistema(),
             'logo'        => $this->logoDeLaMarca(),
             'fecha'       => fechaLarga($hoy, conDiaSemana: true),
@@ -85,22 +88,57 @@ class EncabezadoDelEscritorio extends Widget
     // ─── Interno ──────────────────────────────────────────────────────
 
     /**
-     * El nombre del residencial, de `config('app.name')`.
+     * Qué dice el título grande.
      *
-     * Es el mismo que usa `olympo:verificar-produccion` para encabezar su
-     * informe —«Revisión del servidor — RESIDENCIAL PRADERAS DEL SOL»— y el
-     * que cada instalación pone en su `.env`. No se inventa otra fuente para
-     * lo mismo: dos nombres para el mismo sistema es cómo terminan diciendo
-     * cosas distintas.
+     * ═══ CON UN PROYECTO ELEGIDO, EL DEL PROYECTO ═══
+     *
+     * Desde el 11-sep-2026 la instalación puede tener varios desarrollos, y
+     * el interruptor de la barra recorta la pantalla a uno. Si el encabezado
+     * siguiera diciendo el nombre de la lotificadora mientras las cifras de
+     * abajo son de un solo residencial, el tablero estaría rotulado con una
+     * cosa y hablando de otra — que es peor que no rotularlo.
+     *
+     * ═══ SIN NADA ELEGIDO, EL DE LA EMPRESA ═══
+     *
+     * `config('app.name')`, el mismo que usa `olympo:verificar-produccion`
+     * para encabezar su informe y el que cada instalación pone en su `.env`.
+     * No se inventa otra fuente para lo mismo: dos nombres para el mismo
+     * sistema es cómo terminan diciendo cosas distintas.
      *
      * ⚠️ `config()` y NUNCA `env()`: con `config:cache` puesto —y en el
      * servidor lo está— `env()` devuelve null y el encabezado saldría vacío.
      */
     private function nombreDelSistema(): string
     {
+        $proyecto = app(ProyectoActivo::class)->proyecto();
+
+        if ($proyecto instanceof Proyecto) {
+            $nombre = $proyecto->getAttribute('nombre');
+
+            if (is_string($nombre) && trim($nombre) !== '') {
+                return $nombre;
+            }
+        }
+
         $nombre = config('app.name');
 
         return is_string($nombre) && trim($nombre) !== '' ? $nombre : 'Olympo';
+    }
+
+    /**
+     * La línea chica de arriba. Con un proyecto elegido dice de quién es ese
+     * proyecto —el nombre de la lotificadora—, así el encabezado contesta las
+     * dos preguntas sin repetir ninguna.
+     */
+    private function elRotulo(): string
+    {
+        if (! app(ProyectoActivo::class)->hayUno()) {
+            return 'Sistema de lotificación';
+        }
+
+        $empresa = config('app.name');
+
+        return is_string($empresa) && trim($empresa) !== '' ? $empresa : 'Sistema de lotificación';
     }
 
     private function logoDeLaMarca(): ?string

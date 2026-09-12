@@ -3,6 +3,76 @@
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
 
+## 🔴 11-sep, noche — El interruptor de proyecto, antes de que hagan falta tres
+
+«Cuando carguemos otros proyectos —ya hablamos con la clienta y posiblemente
+agreguemos otros dos en unos días o semanas» — Mauricio. Se hace **ahora**,
+con un solo proyecto, porque hoy nada se puede romper: con un proyecto el
+comportamiento nuevo y el viejo son idénticos.
+
+### Qué se rompía con tres desarrollos
+
+- **«104 lotes disponibles de 309»** sumando tres residenciales. No hay un
+  cliente al que se le puedan ofrecer esos 104: están en tres desarrollos.
+- **La lista de a quién llamar** mezclaría clientes de los tres, y quien cobra
+  trabaja uno a la vez.
+- **El encabezado** rotularía la pantalla con el nombre de la empresa mientras
+  las cifras de abajo hablan de un proyecto.
+- **«El proyecto»**, en singular, sobre la suma de tres.
+
+### Cómo funciona
+
+`SelectorDeProyecto` en `TOPBAR_START`: «Todos» y un renglón por proyecto. Lo
+elegido vive en `ProyectoActivo`, que lo guarda en la **sesión**.
+
+⚠️ **Con UN solo proyecto no se dibuja.** Un interruptor de una sola posición
+es ruido en la barra, y esa es la situación de Praderas hasta que entren los
+que vienen. Por eso hoy, en pantalla, no se ve nada nuevo.
+
+### 🔴 POR QUE NO ES UN `addGlobalScope`
+
+Un global scope filtraría todo solo, con una línea, y sería la peor decisión
+del repo: **un recorte invisible sobre consultas de dinero es cómo se llega a
+«el número está mal y nadie sabe por qué»**. Cada lugar que recorta lo dice en
+su propia línea y `grep ProyectoActivo` los encuentra a todos.
+
+De paso, eso resuelve gratis el caso que un global scope habría arruinado: los
+comandos —`olympo:verificar-produccion`, `olympo:cuadrar-recibos`, los
+seeders— corren sin sesión y ven **todo**. Un comando que cuadra la cartera no
+puede estar mirando un pedazo.
+
+### 🔴 EL CORTE DE CAJA **NO** SE RECORTA, Y ES A PROPOSITO
+
+La gaveta es UNA. «En efectivo: es lo que tiene que estar en la caja al
+cerrar» solo es verdad si suma lo que entró por los tres proyectos, porque los
+billetes están todos en el mismo cajón. Recortarlo daría un número menor que
+el efectivo real y quien cuenta encontraría de más, buscando un error que no
+existe. Ese cuadro se divide por PERSONA —un receptor ve lo que cobró él—, que
+es la división que sí corresponde a un arqueo. Tiene su test.
+
+### Dos trampas del camino
+
+- **`Recibo::delProyecto()` mira DOS caminos.** R13 admite `venta_id` en NULL
+  mientras haya `compromiso_id`: es la seña de un apartado. Preguntar solo por
+  la venta dejaría esas señas fuera —dinero que entró y no aparecería en
+  ningún proyecto—, el mismo agujero que tapa el `COALESCE` de
+  `ComoVanLosProyectos`.
+- **`ProyectoActivo` memoriza en la INSTANCIA, no en un `static`.** La clase se
+  resuelve del contenedor, que Pest rehace por test; un `static` sobreviviría
+  de un test al siguiente y el segundo vería el proyecto del primero. Es el
+  mismo molde que la memoria del modal de cobro del 9-sep.
+- **Los nombres de proyecto salen en MAYUSCULAS** (mutador del 3-ago). Me lo
+  comí DOS veces el mismo día, en este test y en el de
+  `ComoVanLosProyectos`. Anotado en los dos.
+
+### Lo que falta de esto
+
+El segundo pase: **Ventas, Recibos, Lotes, Apartados y Prospectos** todavía no
+respetan el interruptor. Ventas y Lotes ya tienen su propio filtro de
+proyecto; Recibos y Apartados no tienen ninguno. Mientras el interruptor
+recorte el Escritorio y los listados no, la pantalla dice dos cosas
+distintas — así que esto **no se despliega solo**.
+
 ## 🔴 11-sep, noche — Lo que encontró MIRAR la pantalla, y no leer el código
 
 Se desplegó el Escritorio nuevo a pruebas y Mauricio contestó: «se ve feo, no

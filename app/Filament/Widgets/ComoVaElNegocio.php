@@ -11,6 +11,7 @@ use App\Models\Cuota;
 use App\Models\Lote;
 use App\Models\Recibo;
 use App\Models\Venta;
+use App\Support\ProyectoActivo;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Database\Eloquent\Builder;
@@ -158,8 +159,18 @@ class ComoVaElNegocio extends StatsOverviewWidget
 
     private function inventario(): Stat
     {
+        $delProyecto = app(ProyectoActivo::class)->id();
+
+        /*
+         * 🔴 EL QUE MAS SE NOTA CON VARIOS PROYECTOS.
+         *
+         * «104 de 309» sumando tres residenciales distintos es un número con
+         * el que no se decide nada: no hay ningún cliente al que se le puedan
+         * ofrecer esos 104 lotes, porque están en tres desarrollos.
+         */
         $porEstado = Lote::query()
             ->reorder()
+            ->when($delProyecto !== null, static fn (Builder $suyo): Builder => $suyo->where('proyecto_id', $delProyecto))
             ->selectRaw('estado, COUNT(*) AS cuantos')
             ->groupBy('estado')
             ->pluck('cuantos', 'estado');
@@ -186,11 +197,17 @@ class ComoVaElNegocio extends StatsOverviewWidget
      */
     private function cobradoEntre(string $desde, string $hasta): Monto
     {
+        $delProyecto = app(ProyectoActivo::class)->id();
+
         /** @var string|int|null $suma */
         $suma = Recibo::query()
             ->reorder()
             ->whereNull('anulado_el')
             ->whereBetween('fecha', [$desde, $hasta])
+            // 🔴 El recorte es EXPLICITO, acá y en cada lugar que lo hace: un
+            // global scope filtraría todo solo y sin dejar rastro, que es
+            // cómo se llega a «el número está mal y nadie sabe por qué».
+            ->when($delProyecto !== null, static fn (Builder $suyo): Builder => $suyo->delProyecto((int) $delProyecto))
             ->selectRaw('COALESCE(SUM(monto), 0) AS cobrado')
             ->value('cobrado');
 
@@ -208,7 +225,18 @@ class ComoVaElNegocio extends StatsOverviewWidget
      */
     private function ventasVigentes(): Builder
     {
-        return Venta::query()->reorder()->select('id')->where('estado', EstadoVenta::Vigente);
+        $delProyecto = app(ProyectoActivo::class)->id();
+
+        /*
+         * Recortar acá alcanza para DOS cuadros: «vencido a hoy» y «por
+         * cobrar» salen los dos de este subquery. Es la razón por la que la
+         * condición vive en un método y no repetida en cada uno.
+         */
+        return Venta::query()
+            ->reorder()
+            ->select('id')
+            ->where('estado', EstadoVenta::Vigente)
+            ->when($delProyecto !== null, static fn (Builder $suyo): Builder => $suyo->where('proyecto_id', $delProyecto));
     }
 
     /**

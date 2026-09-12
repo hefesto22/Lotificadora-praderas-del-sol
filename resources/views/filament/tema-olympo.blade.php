@@ -864,4 +864,71 @@
     }
 
     .dark .fi-wi-stats-overview .fi-section-header-heading { color: rgb(161 161 170); }
+
+    /*
+       ── 18. El interruptor de proyecto de la barra ────────────────────
+
+       Un `<select>` de fábrica en la barra superior se ve como un formulario
+       perdido arriba del panel. Con la línea de un pixel del §2 y las
+       versalitas del §5 pasa a ser parte del chasis: se lee como un rótulo
+       que además se puede cambiar, que es exactamente lo que es.
+
+       ⚠️ `appearance: none` le saca la flecha del sistema operativo —que en
+       Mac y en Windows se dibujan distinto— y la repone en SVG, para que el
+       control se vea igual en las dos máquinas donde va a usarse.
+    */
+    .olympo-selector {
+        display: inline-flex;
+        align-items: center;
+        gap: .5rem;
+        padding: .3125rem .5rem .3125rem .625rem;
+        border: 1px solid rgb(228 230 235);
+        border-radius: .5rem;
+        background-color: rgb(255 255 255);
+    }
+
+    .olympo-selector-rotulo {
+        font-size: .625rem;
+        font-weight: 600;
+        letter-spacing: .09em;
+        text-transform: uppercase;
+        color: rgb(113 113 122);
+        white-space: nowrap;
+    }
+
+    .olympo-selector-campo {
+        appearance: none;
+        border: 0;
+        background-color: transparent;
+        padding: 0 1.125rem 0 0;
+        font-size: .8125rem;
+        font-weight: 600;
+        color: rgb(24 24 27);
+        cursor: pointer;
+        max-width: 14rem;
+        text-overflow: ellipsis;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2371717a' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right center;
+        background-size: 1rem 1rem;
+    }
+
+    .olympo-selector-campo:focus { outline: none; }
+    .olympo-selector:focus-within { border-color: rgb(161 161 170); }
+
+    /* En pantalla angosta la barra ya va apretada: se queda el control y se
+       va el rótulo, que es la parte que se adivina por el contenido. */
+    @media (max-width: 48rem) {
+        .olympo-selector-rotulo { display: none; }
+        .olympo-selector-campo { max-width: 9rem; }
+    }
+
+    .dark .olympo-selector {
+        border-color: rgba(255, 255, 255, .12);
+        background-color: rgba(255, 255, 255, .04);
+    }
+
+    .dark .olympo-selector-rotulo { color: rgb(161 161 170); }
+    .dark .olympo-selector-campo { color: rgb(244 244 245); }
+    .dark .olympo-selector-campo option { color: rgb(24 24 27); }
 </style>

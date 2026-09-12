@@ -12,6 +12,8 @@ use App\Domain\ValueObjects\Monto;
 use App\Traits\HasAuditFields;
 use Database\Factories\ReciboFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -1114,5 +1116,31 @@ class Recibo extends Model
         $valor = $this->getAttribute($columna);
 
         return new Monto(is_string($valor) || is_int($valor) ? $valor : '0');
+    }
+
+    /**
+     * Los recibos de un proyecto — 11-sep-2026.
+     *
+     * ⚠️ SON DOS CAMINOS, NO UNO. `recibos_cuelgan_de_un_compromiso_chk`
+     * (R13) admite `venta_id` en NULL mientras haya `compromiso_id`: es la
+     * seña de un apartado, que todavía no tiene contrato. Preguntar solo por
+     * la venta dejaría esas señas fuera —dinero que entró y no aparecería en
+     * ningún proyecto—, que es el mismo agujero que tapa el `COALESCE` de
+     * `ComoVanLosProyectos`.
+     *
+     * @param Builder<Recibo> $query
+     *
+     * @return Builder<Recibo>
+     */
+    #[Scope]
+    protected function delProyecto(Builder $query, int $proyectoId): Builder
+    {
+        return $query->where(static function (Builder $suyo) use ($proyectoId): void {
+            $suyo->whereHas('venta', static function (Builder $venta) use ($proyectoId): void {
+                $venta->where('proyecto_id', $proyectoId);
+            })->orWhereHas('compromiso', static function (Builder $lote) use ($proyectoId): void {
+                $lote->where('proyecto_id', $proyectoId);
+            });
+        });
     }
 }

@@ -11,6 +11,7 @@ use App\Models\Devolucion;
 use App\Models\Gasto;
 use App\Models\Proyecto;
 use App\Models\Recibo;
+use App\Support\ProyectoActivo;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Support\Collection;
@@ -98,18 +99,24 @@ class ComoVanLosProyectos extends StatsOverviewWidget
     #[Override]
     protected int|string|array $columnSpan = 'full';
 
-    /*
+    /**
      * El título de la sección — 11-sep-2026.
      *
-     * Hasta hoy el Escritorio eran tres filas de cuadros del mismo tamaño y
-     * el mismo peso, así que nada parecía más importante que lo demás y
-     * había que leerlos todos para encontrar el que se buscaba. Con un
-     * título arriba, cada fila se salta o se lee entera de un vistazo.
+     * Hasta el 11-sep el Escritorio eran tres filas de cuadros del mismo
+     * tamaño y el mismo peso, así que nada parecía más importante que lo
+     * demás y había que leerlas todas para encontrar la que se buscaba.
      *
-     * Lo dibuja Filament solo: `StatsOverviewWidget` ya pinta `$heading`.
+     * ⚠️ Acá es un MÉTODO y no la propiedad `$heading` de los otros tres
+     * widgets, porque cambia: «El proyecto» cuando se está mirando uno; «Los
+     * proyectos» cuando son todos. Con tres desarrollos, un título en
+     * singular sobre la suma de los tres es el mismo error que las cifras
+     * que este widget arregla.
      */
     #[Override]
-    protected ?string $heading = 'El proyecto';
+    protected function getHeading(): ?string
+    {
+        return app(ProyectoActivo::class)->hayUno() ? 'El proyecto' : 'Los proyectos';
+    }
 
     /**
      * Quien ve los gastos. El receptor no los ve, y por eso tampoco ve esto.
@@ -126,10 +133,10 @@ class ComoVanLosProyectos extends StatsOverviewWidget
     #[Override]
     protected function getStats(): array
     {
-        $invertido = $this->gastadoPorProyecto();
-        $cobrado = $this->cobradoPorProyecto();
-        $devuelto = $this->devueltoPorProyecto();
-        $porCobrar = $this->porCobrarPorProyecto();
+        $invertido = $this->soloElElegido($this->gastadoPorProyecto());
+        $cobrado = $this->soloElElegido($this->cobradoPorProyecto());
+        $devuelto = $this->soloElElegido($this->devueltoPorProyecto());
+        $porCobrar = $this->soloElElegido($this->porCobrarPorProyecto());
 
         $recuperado = [];
 
@@ -427,6 +434,34 @@ class ComoVanLosProyectos extends StatsOverviewWidget
         }
 
         return $montos;
+    }
+
+    /**
+     * Deja solo el proyecto que se está mirando — 11-sep-2026.
+     *
+     * ⚠️ Recorta en PHP y no en SQL, y es a propósito: las cuatro consultas
+     * ya vienen agrupadas por proyecto, así que son tantas filas como
+     * desarrollos tenga la lotificadora —tres, cinco— y filtrarlas acá cuesta
+     * nada. Meterle la condición a cada `groupBy` serían cuatro `when()` más,
+     * cuatro lugares donde olvidarse de uno, y el mismo resultado.
+     *
+     * @param array<int, Monto> $montos
+     *
+     * @return array<int, Monto>
+     */
+    private function soloElElegido(array $montos): array
+    {
+        $id = app(ProyectoActivo::class)->id();
+
+        if ($id === null) {
+            return $montos;
+        }
+
+        return array_filter(
+            $montos,
+            static fn (int $proyecto): bool => $proyecto === $id,
+            ARRAY_FILTER_USE_KEY,
+        );
     }
 
     /**

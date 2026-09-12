@@ -13,7 +13,7 @@
         @endif
 
         <div class="olympo-encabezado-texto">
-            <p class="olympo-encabezado-rotulo">Sistema de lotificación</p>
+            <p class="olympo-encabezado-rotulo">{{ $rotulo }}</p>
             <h1 class="olympo-encabezado-nombre">{{ $residencial }}</h1>
         </div>
     </div>
