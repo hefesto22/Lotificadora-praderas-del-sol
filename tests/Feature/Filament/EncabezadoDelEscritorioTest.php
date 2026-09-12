@@ -70,6 +70,29 @@ test('el receptor también lo ve', function (): void {
 });
 
 /*
+| 🔴🔴 ESTE TEST NACIO DE UNA VUELTA PERDIDA — 12-sep-2026.
+|
+| El encabezado salía a MEDIA PANTALLA, con la fecha envuelta debajo del logo
+| en vez de a la derecha. La clase declaraba `columnSpan = 'full'` y la
+| propiedad estaba bien: lo que faltaba era que la vista envolviera todo en
+| `<x-filament-widgets::widget>`, que es el componente que aplica
+| `gridColumn($this->getColumnSpan())`. Sin él, la propiedad se declara y no
+| la lee nadie, y el widget cae en una de las dos columnas del Escritorio.
+|
+| Los widgets de cifras no tenían el problema porque `StatsOverviewWidget`
+| ya trae ese envoltorio en su propia vista. Este es el único de la casa que
+| dibuja su blade a mano, así que es el único que puede olvidarlo.
+|
+| ⚠️ Si algún día Filament cambia el nombre de esa clase, este test se cae y
+| lo que hay que hacer NO es cambiar la cadena: es abrir el Escritorio y
+| mirar si el encabezado sigue ocupando el ancho completo.
+*/
+test('ocupa el ancho completo del Escritorio', function (): void {
+    Livewire::test(EncabezadoDelEscritorio::class)
+        ->assertSee('fi-wi-widget', escape: false);
+});
+
+/*
 | Una instalación recién levantada todavía no tiene logo cargado. El blade
 | pregunta antes de dibujar, así que no queda ni un hueco ni un ícono de
 | imagen rota — y sobre todo, no revienta.

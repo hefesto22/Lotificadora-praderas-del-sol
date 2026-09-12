@@ -3,6 +3,30 @@
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
 
+## 🔴 12-sep — El encabezado salía a media pantalla, y la propiedad estaba bien
+
+«Eso que está seleccionado se ve muy feo» — Mauricio, con el encabezado
+marcado en la captura.
+
+Y no era el CSS. El bloque ocupaba **una de las dos columnas** del Escritorio,
+así que la fecha se envolvía debajo del logo en vez de irse a la derecha y
+medio ancho de pantalla quedaba vacío.
+
+### La clase declaraba `columnSpan = 'full'`. Nadie lo leía.
+
+`<x-filament-widgets::widget>` es el componente que aplica
+`gridColumn($this->getColumnSpan())`. Sin él, la propiedad se declara y no
+llega a ningún lado: el widget se dibuja con la colocación por defecto.
+
+`EncabezadoDelEscritorio` es **el único widget de la casa que escribe su blade
+a mano** — los otros cuatro extienden `StatsOverviewWidget`, que ya trae ese
+envoltorio en su propia vista. Por eso es el único que podía olvidarlo, y por
+eso no había forma de aprenderlo mirando a los demás.
+
+Tiene test: `assertSee('fi-wi-widget')`. ⚠️ Si Filament renombra esa clase, lo
+que hay que hacer NO es cambiar la cadena del test: es abrir el Escritorio y
+mirar si el encabezado sigue ocupando el ancho completo.
+
 ## 🔴 11-sep, noche — El interruptor de proyecto, antes de que hagan falta tres
 
 «Cuando carguemos otros proyectos —ya hablamos con la clienta y posiblemente
