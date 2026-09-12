@@ -9,6 +9,7 @@ use App\Filament\Resources\Apartados\Pages\ListApartados;
 use App\Filament\Resources\Apartados\Tables\ApartadosTable;
 use App\Filament\Support\Menu;
 use App\Models\Compromiso;
+use App\Support\ProyectoActivo;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
@@ -109,7 +110,14 @@ class ApartadoResource extends Resource
         /** @var Builder<Compromiso> $query */
         $query = parent::getEloquentQuery();
 
-        return $query->where('tipo', TipoCompromiso::Apartado);
+        /*
+         * Recortado al proyecto que se está mirando — 11-sep-2026.
+         * `compromisos` tiene su propio `proyecto_id` (la FK compuesta contra
+         * `lotes`), así que no hace falta pasar por el lote.
+         */
+        return app(ProyectoActivo::class)
+            ->recortar($query)
+            ->where('tipo', TipoCompromiso::Apartado);
     }
 
     /**

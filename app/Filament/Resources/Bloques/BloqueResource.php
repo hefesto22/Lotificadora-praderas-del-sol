@@ -13,11 +13,13 @@ use App\Filament\Resources\Bloques\Schemas\BloqueInfolist;
 use App\Filament\Resources\Bloques\Tables\BloquesTable;
 use App\Filament\Support\Menu;
 use App\Models\Bloque;
+use App\Support\ProyectoActivo;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Override;
 
 class BloqueResource extends Resource
@@ -91,6 +93,29 @@ class BloqueResource extends Resource
     public static function table(Table $table): Table
     {
         return BloquesTable::configure($table);
+    }
+
+    /**
+     * Recortado al proyecto que se está mirando — 11-sep-2026.
+     *
+     * En «Todos» la consulta sale intacta: es el comportamiento de siempre, y
+     * por eso una instalación de un solo proyecto no nota el cambio.
+     *
+     * 🔴 Va en `getEloquentQuery()` y NO en la tabla: así recorta también la
+     * ficha, el buscador global y cualquier pantalla que salga de este
+     * recurso. Un listado recortado con una ficha que no lo está deja abrir
+     * por búsqueda un expediente de otro proyecto, y ahí el interruptor
+     * mentiría.
+     *
+     * @return Builder<Bloque>
+     */
+    #[Override]
+    public static function getEloquentQuery(): Builder
+    {
+        /** @var Builder<Bloque> $query */
+        $query = parent::getEloquentQuery();
+
+        return app(ProyectoActivo::class)->recortar($query);
     }
 
     #[Override]

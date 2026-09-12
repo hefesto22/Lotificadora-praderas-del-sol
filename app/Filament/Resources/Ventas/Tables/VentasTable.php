@@ -234,11 +234,15 @@ class VentasTable
                         ->mapWithKeys(static fn (EstadoVenta $estado): array => [$estado->value => $estado->etiqueta()])
                         ->all()),
 
-                SelectFilter::make('proyecto')
-                    ->label('Proyecto')
-                    ->relationship('proyecto', 'nombre')
-                    ->searchable()
-                    ->preload(),
+                /*
+                 * Sin filtro de proyecto desde el 11-sep-2026: lo hace el
+                 * interruptor de la barra superior, que recorta esta pantalla
+                 * y el Escritorio de una sola vez.
+                 *
+                 * Dejar los dos era peor que redundante: con un proyecto
+                 * elegido arriba, este desplegable seguiría ofreciendo los
+                 * otros, y elegir uno daría una tabla vacía sin decir por qué.
+                 */
 
                 /*
                  * ═══ EL FILTRO QUE HACE POSIBLE EL LINK DESDE EL CLIENTE ═══

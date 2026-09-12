@@ -65,13 +65,28 @@ es la división que sí corresponde a un arqueo. Tiene su test.
   comí DOS veces el mismo día, en este test y en el de
   `ComoVanLosProyectos`. Anotado en los dos.
 
-### Lo que falta de esto
+### El segundo pase: los listados
 
-El segundo pase: **Ventas, Recibos, Lotes, Apartados y Prospectos** todavía no
-respetan el interruptor. Ventas y Lotes ya tienen su propio filtro de
-proyecto; Recibos y Apartados no tienen ninguno. Mientras el interruptor
-recorte el Escritorio y los listados no, la pantalla dice dos cosas
-distintas — así que esto **no se despliega solo**.
+Entró el mismo día. **Ventas, Recibos, Lotes, Apartados, Prospectos y
+Bloques** respetan el interruptor.
+
+**Va en `getEloquentQuery()` del Resource y NO en la tabla.** Así recorta
+también la ficha, el buscador global y cualquier pantalla que salga de ese
+recurso. Un listado recortado con una ficha que no lo está deja abrir por
+búsqueda un expediente de otro proyecto, y ahí el interruptor mentiría.
+
+**Recibos usa `Recibo::delProyecto()`, no `ProyectoActivo::recortar()`**, por
+lo mismo de siempre: esa tabla no tiene `proyecto_id`. Tiene su test, y el
+test arma el caso raro —una seña con `venta_id` en NULL— porque es el único
+que distingue las dos implementaciones.
+
+**Se quitaron los filtros de proyecto de Ventas y Lotes.** Dejar los dos era
+peor que redundante: con un proyecto elegido arriba, ese desplegable seguiría
+ofreciendo los otros, y elegir uno daría una tabla vacía sin decir por qué.
+
+**Clientes queda global a propósito.** Una persona puede comprar en dos
+desarrollos; recortarla escondería la mitad de su historia, y la ficha del
+cliente es justamente donde uno va a ver todo lo suyo.
 
 ## 🔴 11-sep, noche — Lo que encontró MIRAR la pantalla, y no leer el código
 

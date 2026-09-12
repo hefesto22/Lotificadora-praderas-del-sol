@@ -95,11 +95,10 @@ class LotesTable
                     ->sortable(),
             ])
             ->filters([
-                SelectFilter::make('proyecto_id')
-                    ->label('Proyecto')
-                    ->relationship('proyecto', 'nombre')
-                    ->searchable()
-                    ->preload(),
+                /*
+                 * Sin filtro de proyecto desde el 11-sep-2026: lo hace el
+                 * interruptor de la barra superior. Ver `VentasTable`.
+                 */
 
                 /*
                 | La etiqueta lleva el código del proyecto adelante.

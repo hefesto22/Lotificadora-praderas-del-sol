@@ -10,11 +10,13 @@ use App\Filament\Resources\Recibos\Schemas\ReciboInfolist;
 use App\Filament\Resources\Recibos\Tables\RecibosTable;
 use App\Filament\Support\Menu;
 use App\Models\Recibo;
+use App\Support\ProyectoActivo;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Override;
 
 /**
@@ -89,6 +91,27 @@ class ReciboResource extends Resource
     public static function table(Table $table): Table
     {
         return RecibosTable::configure($table);
+    }
+
+    /**
+     * Recortado al proyecto que se está mirando — 11-sep-2026.
+     *
+     * ⚠️ Con `Recibo::delProyecto()` y NO con `ProyectoActivo::recortar()`:
+     * `recibos` no tiene `proyecto_id`. Llega a su proyecto por la venta, o
+     * por el compromiso cuando es la seña de un apartado que todavía no tiene
+     * contrato (R13). Recortar por la venta sola escondería esas señas.
+     *
+     * @return Builder<Recibo>
+     */
+    #[Override]
+    public static function getEloquentQuery(): Builder
+    {
+        /** @var Builder<Recibo> $query */
+        $query = parent::getEloquentQuery();
+
+        $id = app(ProyectoActivo::class)->id();
+
+        return $id === null ? $query : $query->delProyecto($id);
     }
 
     /**

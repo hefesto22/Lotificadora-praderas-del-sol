@@ -14,6 +14,7 @@ use App\Filament\Resources\Lotes\Schemas\LoteInfolist;
 use App\Filament\Resources\Lotes\Tables\LotesTable;
 use App\Filament\Support\Menu;
 use App\Models\Lote;
+use App\Support\ProyectoActivo;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
@@ -87,10 +88,18 @@ class LoteResource extends Resource
     #[Override]
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->with([
+        /*
+         * Recortado al proyecto que se está mirando — 11-sep-2026. En «Todos»
+         * sale intacta, que es el comportamiento de siempre.
+         *
+         * @var Builder<Lote> $query
+         */
+        $query = parent::getEloquentQuery()->with([
             'proyecto:id,nombre',
             'bloque:id,nombre',
         ]);
+
+        return app(ProyectoActivo::class)->recortar($query);
     }
 
     #[Override]

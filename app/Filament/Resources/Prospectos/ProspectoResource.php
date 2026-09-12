@@ -8,10 +8,12 @@ use App\Filament\Resources\Prospectos\Pages\ListProspectos;
 use App\Filament\Resources\Prospectos\Tables\ProspectosTable;
 use App\Filament\Support\Menu;
 use App\Models\Prospecto;
+use App\Support\ProyectoActivo;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Override;
 
 /**
@@ -104,5 +106,28 @@ class ProspectoResource extends Resource
         return [
             'index' => ListProspectos::route('/'),
         ];
+    }
+
+    /**
+     * Recortado al proyecto que se está mirando — 11-sep-2026.
+     *
+     * En «Todos» la consulta sale intacta: es el comportamiento de siempre, y
+     * por eso una instalación de un solo proyecto no nota el cambio.
+     *
+     * 🔴 Va en `getEloquentQuery()` y NO en la tabla: así recorta también la
+     * ficha, el buscador global y cualquier pantalla que salga de este
+     * recurso. Un listado recortado con una ficha que no lo está deja abrir
+     * por búsqueda un expediente de otro proyecto, y ahí el interruptor
+     * mentiría.
+     *
+     * @return Builder<Prospecto>
+     */
+    #[Override]
+    public static function getEloquentQuery(): Builder
+    {
+        /** @var Builder<Prospecto> $query */
+        $query = parent::getEloquentQuery();
+
+        return app(ProyectoActivo::class)->recortar($query);
     }
 }

@@ -2,11 +2,16 @@
 
 declare(strict_types=1);
 
+use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Pagos\RegistroDePagos;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\RegistroDeVentas;
 use App\Filament\Pages\PorCobrarHoy;
+use App\Filament\Resources\Apartados\ApartadoResource;
+use App\Filament\Resources\Lotes\LoteResource;
+use App\Filament\Resources\Recibos\ReciboResource;
+use App\Filament\Resources\Ventas\VentaResource;
 use App\Filament\Widgets\ComoVaElNegocio;
 use App\Filament\Widgets\ComoVanLosProyectos;
 use App\Filament\Widgets\CorteDeCajaDeHoy;
@@ -14,9 +19,11 @@ use App\Filament\Widgets\EncabezadoDelEscritorio;
 use App\Livewire\SelectorDeProyecto;
 use App\Models\Bloque;
 use App\Models\Cliente;
+use App\Models\Compromiso;
 use App\Models\Gasto;
 use App\Models\Lote;
 use App\Models\Proyecto;
+use App\Models\Recibo;
 use App\Support\ProyectoActivo;
 use Livewire\Livewire;
 
@@ -78,7 +85,7 @@ beforeEach(function (): void {
             diaPago: 5,
         );
 
-        $lote($this->altamira, '1');
+        $this->loteAltamira = $lote($this->altamira, '1');
 
         Gasto::factory()->delProyecto($this->altamira)->de('80000.00')->create();
     };
@@ -246,5 +253,81 @@ describe('El interruptor', function (): void {
 
         expect(app(ProyectoActivo::class)->id())->toBeNull()
             ->and(app(ProyectoActivo::class)->hayUno())->toBeFalse();
+    });
+});
+
+describe('Los listados', function (): void {
+    test('Ventas muestra solo las del proyecto elegido', function (): void {
+        ($this->armar)();
+
+        ($this->elegir)((int) $this->praderas->getKey());
+        expect(VentaResource::getEloquentQuery()->count())->toBe(1);
+
+        ($this->elegir)((int) $this->altamira->getKey());
+        expect(VentaResource::getEloquentQuery()->count())->toBe(0);
+
+        ($this->elegir)(null);
+        expect(VentaResource::getEloquentQuery()->count())->toBe(1);
+    });
+
+    test('Lotes muestra solo los del proyecto elegido', function (): void {
+        ($this->armar)();
+
+        ($this->elegir)((int) $this->altamira->getKey());
+        expect(LoteResource::getEloquentQuery()->count())->toBe(1);
+
+        ($this->elegir)(null);
+        expect(LoteResource::getEloquentQuery()->count())->toBe(2);
+    });
+
+    test('Apartados también, y sale del proyecto_id del compromiso', function (): void {
+        ($this->armar)();
+
+        Compromiso::factory()->paraLote($this->loteAltamira)->create();
+
+        ($this->elegir)((int) $this->altamira->getKey());
+        expect(ApartadoResource::getEloquentQuery()->count())->toBe(1);
+
+        ($this->elegir)((int) $this->praderas->getKey());
+        expect(ApartadoResource::getEloquentQuery()->count())->toBe(0);
+    });
+
+    /*
+    | 🔴🔴 EL TEST QUE JUSTIFICA `Recibo::delProyecto()`.
+    |
+    | `recibos` no tiene `proyecto_id`: llega a su proyecto por la venta. Pero
+    | R13 (`recibos_cuelgan_de_un_compromiso_chk`) admite `venta_id` en NULL
+    | mientras haya `compromiso_id`, y ese es el caso de la SEÑA de un
+    | apartado, que todavía no tiene contrato.
+    |
+    | Recortar por la venta sola escondería esas señas: dinero que entró y que
+    | no aparecería en ningún proyecto. El recibo existiría en la base, sumaría
+    | en el corte de caja del día, y el listado de su proyecto no lo mostraría
+    | nunca — que es como se pierde un papel sin que nadie lo note.
+    */
+    test('Recibos incluye la seña de un apartado, que no cuelga de ninguna venta', function (): void {
+        ($this->armar)();
+
+        $apartado = Compromiso::factory()->paraLote($this->loteAltamira)->create();
+
+        Recibo::factory()->create([
+            'venta_id'      => null,
+            'compromiso_id' => $apartado->getKey(),
+            'cliente_id'    => $this->cliente->getKey(),
+            'concepto'      => ConceptoDeRecibo::Senia,
+            'monto'         => '3000.00',
+        ]);
+
+        // Praderas: solo el recibo de la prima de su venta.
+        ($this->elegir)((int) $this->praderas->getKey());
+        expect(ReciboResource::getEloquentQuery()->count())->toBe(1);
+
+        // Altamira: la seña, que llega por el compromiso y no por la venta.
+        ($this->elegir)((int) $this->altamira->getKey());
+        expect(ReciboResource::getEloquentQuery()->count())->toBe(1)
+            ->and(ReciboResource::getEloquentQuery()->sum('monto'))->toEqual('3000.00');
+
+        ($this->elegir)(null);
+        expect(ReciboResource::getEloquentQuery()->count())->toBe(2);
     });
 });

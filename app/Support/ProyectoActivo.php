@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Support;
 
 use App\Models\Proyecto;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Throwable;
 
@@ -109,6 +111,31 @@ final class ProyectoActivo
         } catch (Throwable) {
             // Sin sesión no hay nada que recordar, y tampoco nada que romper.
         }
+    }
+
+    /**
+     * Recorta una consulta al proyecto que se está mirando.
+     *
+     * El molde de los listados: `ProyectoActivo::recortar()` dentro de
+     * `getEloquentQuery()` y listo. En «Todos» devuelve la consulta intacta,
+     * que es literalmente el comportamiento de siempre — por eso una
+     * instalación de un solo proyecto no nota nada.
+     *
+     * ⚠️ NO sirve para `recibos`: esa tabla no tiene `proyecto_id` y llega a
+     * su proyecto por la venta o por el compromiso, según sea un cobro o la
+     * seña de un apartado. Para eso está `Recibo::delProyecto()`.
+     *
+     * @template TModelo of Model
+     *
+     * @param Builder<TModelo> $query
+     *
+     * @return Builder<TModelo>
+     */
+    public function recortar(Builder $query, string $columna = 'proyecto_id'): Builder
+    {
+        $id = $this->id();
+
+        return $id === null ? $query : $query->where($columna, $id);
     }
 
     /**
