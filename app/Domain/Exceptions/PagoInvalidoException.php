@@ -171,28 +171,6 @@ final class PagoInvalidoException extends GrupoOlympoException
     }
 
     /**
-     * 🔴 Un pronto pago no es un abono, aunque salga con el mismo concepto.
-     *
-     * Los dos bajan capital, pero el pronto pago además PERDONA saldo: parte
-     * de lo que el lote debía dejó de deberse sin que entrara un centavo.
-     * Anularlo tendría que devolver ese perdón, y `anular()` solo sabe
-     * devolver la mora condonada — el capital perdonado se quedaría regalado,
-     * con el recibo que lo explicaba marcado como anulado.
-     *
-     * Se reconoce por el capital condonado y no por el concepto: los dos
-     * salen como `AbonoCapital`, y el 11-sep-2026 abrir el abono abrió este
-     * también sin querer. Lo agarró `ProntoPagoTest`.
-     */
-    public static function porProntoPagoQueNoSeAnula(string $folio): self
-    {
-        return new self(
-            "El recibo {$folio} lleva un descuento por pronto pago: perdonó saldo que el lote debía. ".
-            'Anularlo tendría que volver a cobrar ese perdón, y eso es otro trámite que todavía no '.
-            'está construido. Avisá antes de tocarlo.'
-        );
-    }
-
-    /**
      * 🔴 Deshacer un abono pide que sea el ULTIMO movimiento del lote.
      *
      * ═══ POR QUE NO SE ANULA EN CADENA ═══

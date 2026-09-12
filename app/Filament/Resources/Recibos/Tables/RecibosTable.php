@@ -296,6 +296,42 @@ class RecibosTable
     }
 
     /**
+     * 🔴 El aviso cambia con lo que ESTE papel hizo — 11-sep-2026.
+     *
+     * Son tres textos y no uno porque anular no siempre hace lo mismo, y la
+     * parte que cambia es justo la que asusta si aparece sin avisar:
+     *
+     *  - Un pronto pago PERDONÓ saldo. Anularlo se lo vuelve a cobrar al
+     *    cliente, y el lote deja de estar saldado. Es lo primero que hay que
+     *    decir, y va antes que el plan porque un pronto pago no reprograma
+     *    nada: deja las cuotas que había, en cero.
+     *  - Un abono a capital reescribió el plan. El lote recupera la cuota y
+     *    los meses que tenía antes, que es lo que el cliente va a preguntar
+     *    al mes siguiente.
+     *  - Un cobro de cuota corriente no necesita más aviso que el general.
+     *
+     * ⚠️ El pronto pago se reconoce por el capital condonado y NO por el
+     * concepto: sale como `AbonoCapital`, igual que el abono. Preguntar por
+     * el concepto acá daría el texto del plan a un recibo que no reprogramó
+     * nada.
+     */
+    private static function loQueAdemasPasa(Recibo $record): string
+    {
+        if ($record->tuvoDescuento()) {
+            return ' Y como este llevaba descuento por pronto pago, ese perdón se revierte: '
+                .'el saldo que se le había rebajado al cliente vuelve a deberse y el lote deja '
+                .'de estar saldado.';
+        }
+
+        if ($record->getAttribute('concepto') === ConceptoDeRecibo::AbonoCapital) {
+            return ' Y como este bajó capital, el lote recupera el plan de cuotas que tenía antes: '
+                .'la cuota y los meses vuelven a ser los de entonces.';
+        }
+
+        return '';
+    }
+
+    /**
      * Anular un recibo mal emitido (R12).
      *
      * ═══ POR QUE ES UNA ACCION Y NO UN BOTON DE BORRAR ═══
@@ -320,23 +356,9 @@ class RecibosTable
             ->color('danger')
             ->visible(static fn (Recibo $record): bool => auth()->user()?->can('anular', $record) === true)
             ->modalHeading(static fn (Recibo $record): string => "Anular el recibo {$record->folio()}")
-            /*
-             * 🔴 El aviso cambia con el CONCEPTO — 11-sep-2026.
-             *
-             * Un abono a capital no solo devuelve saldo: le devuelve al lote
-             * el plan de cuotas que tenía antes. Quien anula tiene que saber
-             * que la cuota del mes va a volver a ser la vieja, porque es lo
-             * que el cliente va a preguntar al mes siguiente.
-             *
-             * El texto de siempre no mentía, pero decía la mitad — y la mitad
-             * que faltaba es justo la que asusta si aparece sin avisar.
-             */
             ->modalDescription(static fn (Recibo $record): string => 'El número se queda en la serie y la fila '
                 .'no se borra: se marca. Lo que este recibo aplicó vuelve a deberse. No devuelve dinero.'
-                .($record->getAttribute('concepto') === ConceptoDeRecibo::AbonoCapital
-                    ? ' Y como este bajó capital, el lote recupera el plan de cuotas que tenía antes: '
-                        .'la cuota y los meses vuelven a ser los de entonces.'
-                    : ''))
+                .self::loQueAdemasPasa($record))
             ->modalSubmitActionLabel('Anular el recibo')
             ->modalWidth('lg')
             ->schema([

@@ -3,6 +3,167 @@
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
 
+## 🔴 11-sep, tarde — Costo contra ingreso: el Escritorio ya resta
+
+«Hoy hay que sumar a mano lo cobrado y lo gastado para saber cómo va el
+proyecto» estaba anotado desde el 11-ago. Los dos números existían —los gastos
+en la pestaña del proyecto, lo cobrado en el Escritorio— pero en pantallas
+distintas, así que la resta la hacía alguien con una calculadora cuando se
+acordaba.
+
+Widget nuevo: **`ComoVanLosProyectos`** (`sort = 3`, debajo del arqueo del día).
+Cuatro cuadros: Invertido · Recuperado · Falta por recuperar (o «Ya se
+recuperó, y sobra») · Falta por cobrar.
+
+### 🔴🔴 `Monto` NO ADMITE NEGATIVOS, Y ACÁ ESO CASI CUESTA EL ESCRITORIO
+
+`Monto::restar()` **lanza** cuando el resultado daría menos de cero — es a
+propósito, en este dominio el dinero nunca es negativo. Pero un proyecto que
+todavía no recuperó lo invertido es el caso **normal**: es el estado de casi
+cualquier lotificadora a mitad de plazo.
+
+Escrito de la forma obvia —`recuperado->restar(invertido)`— este widget tumbaba
+el Escritorio **el primer día que alguien cargara un gasto mayor que lo
+cobrado**, que es el primer día. Y no solo el cuadro: un widget que revienta se
+lleva la página entera.
+
+Se encontró leyendo `Monto` antes de entregar, no corriendo la puerta: el error
+habría salido en pantalla, no en un test, si el test no hubiera existido.
+
+**La regla, y está escrita en el docblock de la clase:** cada resta va siempre
+del mayor al menor, se pregunta antes con `menorQue()`, y **el signo lo pone el
+rótulo**, no el número. Son cuatro lugares: el resultado total, el desglose por
+proyecto, «si entra todo» y el empate.
+
+### Por qué es un widget aparte y no cuatro stats más en `ComoVaElNegocio`
+
+1. `ComoVaElNegocio` lo ve **quien puede ver expedientes**, y eso incluye al
+   receptor. Cuánto costó el desarrollo y cuánto se lleva recuperado es
+   información del dueño, no de la ventanilla. Este se cuelga de
+   `ViewAny:Gasto`, que es el permiso que ya separa esa frontera.
+2. El propio docblock de `ComoVaElNegocio` dice «son cuatro y no diez a
+   propósito: un tablero con veinte cifras no se lee, se ignora».
+
+### Esto es CAJA, no utilidad contable
+
+Un proyecto recién comprado y sin vender sale en rojo, y **está bien**: la
+pregunta que contesta es «¿ya recuperé lo que puse?», no «¿cuánta utilidad
+devengué?». Para lo segundo hay que repartir el costo del terreno entre los
+lotes vendidos y los que no, que es otra cuenta y pide un contador.
+
+Por eso existe el cuarto cuadro: sin «falta por cobrar», un proyecto sano a
+mitad de plazo se ve igual que uno que no vendió nada — los dos en rojo, porque
+los dos gastaron más de lo que cobraron.
+
+### Las decisiones de qué cuenta y qué no
+
+- **Las entregas a socios NO son costo**, y eso ya estaba decidido: lo dice
+  `EntregaASocio` —«un gasto es lo que el desarrollo costó y se resta antes de
+  saber cuánto hay para repartir; esto sale de esa utilidad ya calculada»—.
+  Sumarlas lo restaría dos veces.
+- **Las devoluciones SÍ se restan** de lo recuperado: es dinero que volvió al
+  cliente. Misma cuenta que hace `CorteDeCajaDeHoy` con el egreso del día.
+- **Los recibos anulados no cuentan**, igual que en `ComoVaElNegocio`.
+- **Las cuotas de lotes rescindidos tampoco**: `deLotesVivos()`. Esa cuota no se
+  va a pagar nunca, y contarla prometería un dinero que ya no va a entrar.
+
+### ⚠️ El recibo de una seña no cuelga de una venta
+
+R13 (`recibos_cuelgan_de_un_compromiso_chk`) admite `venta_id` en NULL mientras
+haya `compromiso_id`: es la seña de un apartado, que todavía no tiene contrato.
+Un `join` contra `ventas` se las comería en silencio —dinero que entró y no
+aparecería en ningún proyecto—, así que el proyecto sale de
+`COALESCE(ventas.proyecto_id, compromisos.proyecto_id)`. Lo mismo en
+`devoluciones`, que tiene las dos columnas igual de nullables.
+
+### Qué mirar en pruebas
+
+Entrar al Escritorio con la administradora: el cuadro nuevo aparece debajo del
+arqueo. Con un solo proyecto el desglose dice su nombre; con dos, el saldo de
+cada uno. Entrar con el receptor: **no tiene que aparecer**.
+
+## 🔴 11-sep, tarde — El PRONTO PAGO ya se anula: era el último sin vuelta atrás
+
+Mauricio preguntó qué más convenía mejorar, y de la lista eligió tres. Esta es la
+primera.
+
+Por la mañana se abrió la anulación del abono a capital, y eso abrió el pronto
+pago también sin querer —comparten el concepto `AbonoCapital`—. Lo agarró
+`ProntoPagoTest` en la primera corrida y se cerró con una puerta que miraba
+`Recibo::tuvoDescuento()`. Esa puerta ya no está: lo que le faltaba a `anular()`
+ahora existe.
+
+### 🔴 Lo que faltaba era devolver el PERDÓN, no el dinero
+
+`saldarConDescuento()` sube `cuotas.monto_pagado` hasta el total de la cuota: el
+dinero que entró **más** lo condonado. El bucle de `anular()` restaba solo
+`monto_capital + monto_interes` —el dinero—, así que la cuota se quedaba
+diciendo que todavía tenía pagado el descuento.
+
+Y eso **no se ve en pantalla**: el expediente queda cuadrado consigo mismo,
+debiendo de menos, con el recibo que explicaba la rebaja marcado como anulado.
+Es la clase de error que solo aparece el día que el cliente llega con su papel.
+
+Ahora el bucle resta las dos cosas y pone `cuotas.capital_condonado` de vuelta.
+
+### 🔴🔴 LAS DOS COLUMNAS VAN EN EL MISMO `UPDATE`, Y NO ES ESTILO
+
+`cuotas_condonado_cabe_en_lo_pagado_chk` exige `capital_condonado <=
+monto_pagado`, y un CHECK de Postgres se evalúa **por sentencia**. Bajar
+`monto_pagado` en un `update()` y `capital_condonado` en otro deja un instante
+donde el perdón es mayor que lo pagado: la primera sentencia revienta y la
+anulación entera se cae.
+
+Cuota de 1,000 con 600 de dinero y 400 de perdón: `monto_pagado` baja a 0
+mientras `capital_condonado` todavía vale 400. 400 <= 0 es falso.
+
+Por eso esto **no** sigue el molde de `revertirLaCondonacion()`, que sí es un
+método aparte: `mora_condonada` no tiene CHECK cruzado contra `mora_pagada`. Si
+alguien «ordena» esto sacándolo a su propio método, lo rompe.
+
+### Lo que NO hay que deshacer
+
+Un pronto pago **no reprograma nada**: `saldarConDescuento()` no borra ni crea
+cuotas, deja las que había en cero. Así que `deshacerLasReprogramaciones()` no
+encuentra constancia y no hace nada. **Anular un pronto pago es más simple que
+anular un abono**, no más complicado — y esa asimetría confunde si no se dice.
+
+### Lo que entró
+
+- `RegistroDePagos::anular()` — se fue la puerta de `tuvoDescuento()`; el bucle
+  devuelve el capital condonado junto con el dinero, en un solo `update()`.
+- `RegistroDePagos::asentarQueVolvioElDescuento()` — asiento `pronto_pago_anulado`
+  contra la VENTA, con motivo y folio. El descuento se asentó ahí al darlo;
+  devolverlo tenía que dejar rastro en el mismo lugar, o «Actualizaciones»
+  seguiría diciendo que a ese cliente se le descontaron esos lempiras.
+- `PagoInvalidoException::porProntoPagoQueNoSeAnula()` — **borrada**.
+- `RecibosTable::loQueAdemasPasa()` — el aviso del modal ahora tiene tres textos:
+  pronto pago (el perdón se revierte), abono a capital (vuelve el plan viejo) y
+  cuota corriente (nada extra). ⚠️ El pronto pago se reconoce por el capital
+  condonado y **no** por el concepto: sale como `AbonoCapital` igual que el abono,
+  y preguntar por el concepto le daría el texto del plan a un papel que no
+  reprogramó nada.
+- `ProntoPagoTest` — el test «un pronto pago no se anula» se convirtió en el
+  describe «Anular el pronto pago», con cinco: vuelve el dinero y vuelve el
+  descuento, el lote de al lado no se toca, el expediente liquidado vuelve a
+  vigente, el asiento queda con su motivo, y sin descuento se anula igual y sin
+  asiento.
+
+### Qué mirar en pruebas
+
+Un expediente con dos lotes. Pronto pago de uno con descuento → el lote queda
+saldado. Anular ese recibo → el saldo del lote vuelve **al número exacto** de
+antes, no a uno parecido; el otro lote no se movió; y si el expediente se había
+liquidado, vuelve a decir «Vigente» con su botón de cobrar.
+
+### Lo que sigue de esta tanda
+
+1. Costo contra ingreso en el Escritorio — widget aparte, solo para quien ve
+   gastos. `ComoVaElNegocio` no se toca: lo ve el receptor, y el margen no es
+   información de ventanilla.
+2. Pago mixto en los cobros. Solo `recibos`; gastos y devoluciones siguen con
+   una sola forma.
+
 ## 🔴 11-sep — El abono a capital YA SE ANULA
 
 «Ocurrió lo que temíamos: se equivocó y era de otra manera el hacer los pagos de

@@ -269,31 +269,145 @@ describe('Lo que se rechaza', function (): void {
         ]))->toThrow(PagoInvalidoException::class);
     });
 
-    /*
-    | 🔴🔴 ESTE TEST GANO SU LUGAR EL 11-SEP-2026.
-    |
-    | Un pronto pago sale con concepto `AbonoCapital` porque dio por terminado
-    | un plan. Ese día se abrió la anulación del abono a capital —«se equivocó
-    | y era de otra manera el hacer los pagos», Mauricio— y eso abrió ESTE
-    | también sin querer, porque comparten concepto.
-    |
-    | Lo agarró este test en la primera corrida. Sin él, un pronto pago anulado
-    | habría dejado el descuento regalado: `anular()` sabe devolver la mora
-    | condonada, no el capital perdonado.
-    |
-    | Por eso ahora la puerta mira el capital condonado y no el concepto, que
-    | es lo que de verdad los separa. La aserción del mensaje es parte del
-    | test: si algún día alguien lo deja pasar por otro camino, un
-    | `PagoInvalidoException` cualquiera haría que esto siguiera en verde.
-    */
-    test('un pronto pago no se anula', function (): void {
-        $recibo = prontoPagoDe($this->venta, $this->cliente, [['lote' => $this->uno, 'descuento' => new Monto('10000.00')]])[0];
+});
 
+/*
+|--------------------------------------------------------------------------
+| Anular un pronto pago — 11-sep-2026, la tarde
+|--------------------------------------------------------------------------
+| Era el ÚNICO movimiento sin vuelta atrás que quedaba. Por la mañana se
+| abrió la anulación del abono a capital —«se equivocó y era de otra manera
+| el hacer los pagos (…) muy seguramente volverá a pasar», Mauricio— y eso
+| abrió este también sin querer, porque comparten concepto: lo agarró este
+| mismo archivo en la primera corrida y se cerró con una puerta.
+|
+| 🔴 LO QUE ESTOS TESTS CUIDAN es que vuelvan las DOS cosas. El dinero
+| que entró es la fácil; la que se olvida es el PERDÓN: `monto_pagado` de la
+| cuota subió por el dinero MÁS lo condonado, así que devolver solo el dinero
+| deja el lote con la rebaja regalada y el recibo que la explicaba marcado
+| como anulado. Eso no se ve en pantalla: el expediente queda cuadrado
+| consigo mismo, debiendo de menos.
+*/
+describe('Anular el pronto pago', function (): void {
+    test('vuelve el dinero Y vuelve el descuento', function (): void {
+        $recibo = prontoPagoDe(
+            $this->venta,
+            $this->cliente,
+            [['lote' => $this->uno, 'descuento' => new Monto('50000.00')]],
+        )[0];
+
+        // El lote quedó saldado: 250,000 de dinero y 50,000 de perdón.
         expect($recibo->getAttribute('concepto'))->toBe(ConceptoDeRecibo::AbonoCapital)
-            ->and($recibo->tuvoDescuento())->toBeTrue();
+            ->and($recibo->tuvoDescuento())->toBeTrue()
+            ->and($recibo->montoTotal())->toBeMonto('250000.00')
+            ->and(loQueDebeElLote($this->uno))->toBeMonto('0.00')
+            ->and(loQueSePerdonoDelLote($this->uno))->toBeMonto('50000.00');
 
-        expect(fn () => $this->pagos->anular($recibo, 'Me equivoqué de lote'))
-            ->toThrow(PagoInvalidoException::class, 'perdonó saldo');
+        $this->pagos->anular($recibo, 'Era el otro lote');
+
+        // Al estado exacto de antes, no a uno parecido.
+        expect(loQueDebeElLote($this->uno))->toBeMonto('300000.00')
+            ->and(loQueSePerdonoDelLote($this->uno))->toBeMonto('0.00')
+            ->and($recibo->refresh()->estaAnulado())->toBeTrue()
+            // El papel conserva su número y su monto: la serie no tiene huecos.
+            ->and($recibo->montoTotal())->toBeMonto('250000.00');
+    });
+
+    /*
+    | El otro lote no se toca. Un pronto pago de los dos lotes emite UN papel;
+    | anularlo devuelve los dos, pero si el papel cubría uno solo, el otro se
+    | queda como estaba.
+    */
+    test('anular el de un lote no toca al otro', function (): void {
+        $recibo = prontoPagoDe(
+            $this->venta,
+            $this->cliente,
+            [['lote' => $this->uno, 'descuento' => new Monto('10000.00')]],
+        )[0];
+
+        prontoPagoDe(
+            $this->venta,
+            $this->cliente,
+            [['lote' => $this->dos, 'descuento' => new Monto('40000.00')]],
+        );
+
+        $this->pagos->anular($recibo, 'Me equivoqué de lote');
+
+        expect(loQueDebeElLote($this->uno))->toBeMonto('300000.00')
+            ->and(loQueSePerdonoDelLote($this->uno))->toBeMonto('0.00')
+            ->and(loQueDebeElLote($this->dos))->toBeMonto('0.00')
+            ->and(loQueSePerdonoDelLote($this->dos))->toBeMonto('40000.00');
+    });
+
+    /*
+    | Sin esto, anular el pago que cerró el expediente dejaría un «Liquidado»
+    | que vuelve a deber dinero y sin botón para cobrarlo.
+    */
+    test('el expediente liquidado vuelve a estar vigente', function (): void {
+        $recibos = prontoPagoDe($this->venta, $this->cliente, [
+            ['lote' => $this->uno, 'descuento' => new Monto('10000.00')],
+            ['lote' => $this->dos, 'descuento' => new Monto('40000.00')],
+        ]);
+
+        expect($this->venta->refresh()->getAttribute('estado'))->toBe(EstadoVenta::Liquidada);
+
+        $this->pagos->anular($recibos[0], 'El cliente se arrepintió');
+
+        expect($this->venta->refresh()->getAttribute('estado'))->toBe(EstadoVenta::Vigente)
+            ->and($this->venta->getAttribute('cerrada_el'))->toBeNull();
+    });
+
+    /*
+    | El descuento se asentó contra la VENTA porque es ahí donde alguien lo va
+    | a buscar dentro de dos años. Devolverlo tiene que dejar rastro en el
+    | mismo lugar: sin esto, «Actualizaciones» seguiría diciendo que a este
+    | cliente se le descontaron esos lempiras y nada diría que los volvió a
+    | deber.
+    */
+    test('el descuento que volvió queda asentado con su motivo', function (): void {
+        $recibo = prontoPagoDe(
+            $this->venta,
+            $this->cliente,
+            [['lote' => $this->uno, 'descuento' => new Monto('10000.00')]],
+        )[0];
+
+        $this->pagos->anular($recibo, 'Se aplicó al expediente equivocado');
+
+        $asiento = Activity::query()->where('event', 'pronto_pago_anulado')->latest('id')->firstOrFail();
+
+        expect($asiento->getAttribute('subject_id'))->toBe($this->venta->getKey())
+            ->and($asiento->properties->get('motivo'))->toBe('Se aplicó al expediente equivocado')
+            ->and($asiento->properties->get('recibo'))->toBe($recibo->folio())
+            // 🔴 En `attribute_changes` y no en `properties`: es lo que pinta la
+            // pestaña. El asiento de ida hace lo mismo, por lo mismo.
+            /*
+             * El símbolo sale de `config('honduras.moneda.simbolo')`, así que
+             * se compara contra el mismo `formateado()` y no contra un literal:
+             * cambiar el símbolo en la configuración no debe tumbar un test de
+             * anulación.
+             */
+            ->and($asiento->attribute_changes?->get('old'))->toBe([
+                'descuento por pronto pago' => new Monto('10000.00')->formateado(),
+            ]);
+    });
+
+    /*
+    | Un pronto pago sin descuento es saldar el lote de una vez, y anularlo es
+    | un abono corriente al revés. No hay perdón que devolver, así que tampoco
+    | hay asiento: la bitácora no se ensucia con un descuento en cero, igual
+    | que al emitirlo.
+    */
+    test('sin descuento se anula igual, y sin asiento', function (): void {
+        $recibo = prontoPagoDe(
+            $this->venta,
+            $this->cliente,
+            [['lote' => $this->uno, 'descuento' => Monto::cero()]],
+        )[0];
+
+        $this->pagos->anular($recibo, 'Monto equivocado');
+
+        expect(loQueDebeElLote($this->uno))->toBeMonto('300000.00')
+            ->and(Activity::query()->where('event', 'pronto_pago_anulado')->count())->toBe(0);
     });
 });
 

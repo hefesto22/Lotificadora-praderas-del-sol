@@ -404,8 +404,9 @@ final readonly class RegistroDePagos
      * aplicado, y sin ellas «¿por qué la cuota 5 volvió a deber?» no tiene
      * respuesta.
      *
-     * ⚠️ La mora condonada en ese recibo tambien se revierte: si el cobro no
-     * debio registrarse, el perdon que venia con el tampoco.
+     * ⚠️ Lo que ese recibo PERDONO tambien se revierte —la mora condonada y
+     * el capital condonado de un pronto pago—: si el cobro no debio
+     * registrarse, el perdon que venia con el tampoco.
      *
      * ═══ QUE NO HACE ═══
      *
@@ -414,11 +415,14 @@ final readonly class RegistroDePagos
      * todavía. Si el cliente sí pagó y el error fue el monto, el camino es
      * anular y volver a cobrar con el número nuevo.
      *
-     * ═══ SOLO COBROS DE CUOTA ═══
+     * ═══ CUOTA Y ABONO A CAPITAL — LA PRIMA Y LA SEÑA NO ═══
      *
-     * Una prima o una seña consumieron el correlativo de un contrato o dejaron
-     * un lote apartado; un abono a capital reescribió un plan. Los tres se
-     * rechazan con su motivo: revertirlos es deshacer otra cosa.
+     * El abono a capital entró el 11-sep-2026, y con él el pronto pago, que
+     * comparte concepto. Los dos que siguen afuera lo están por la misma
+     * razón: una prima consumió el correlativo de un contrato y una seña dejó
+     * un lote apartado, así que revertirlas es deshacer la venta o el
+     * apartado del que salieron —otro trámite, con otras consecuencias—, no
+     * devolverle saldo a una cuota.
      *
      * @throws PagoInvalidoException
      */
@@ -459,23 +463,28 @@ final readonly class RegistroDePagos
         }
 
         /*
-         * 🔴🔴 EL PRONTO PAGO SALE CON EL MISMO CONCEPTO Y NO ES LO MISMO.
+         * 🔴🔴 EL PRONTO PAGO YA SE ANULA — 11-sep-2026, la tarde.
          *
          * Un pronto pago se emite como `AbonoCapital` —dio por terminado un
-         * plan— así que abrir el abono lo abrió a él también, sin querer. Lo
-         * agarró `ProntoPagoTest` en la primera corrida, y menos mal: un abono
-         * mueve dinero que entró, y un pronto pago además PERDONA saldo. Lo
-         * que `anular()` sabe devolver es la mora condonada
-         * —`revertirLaCondonacion()`—, no el capital perdonado: el lote habría
-         * quedado con el descuento regalado y sin el recibo que lo explicaba.
+         * plan— así que al abrir el abono, en la mañana, este quedó abierto
+         * también sin querer. Lo agarró `ProntoPagoTest` en la primera
+         * corrida y se cerró con una puerta que miraba `tuvoDescuento()`: un
+         * abono mueve dinero que entró, y un pronto pago ADEMÁS perdona
+         * saldo, y lo que `anular()` sabía devolver era la mora condonada, no
+         * el capital perdonado.
          *
-         * Se distingue por el capital condonado y no por el concepto, porque
-         * es lo que de verdad los separa. Revertir un descuento es otro
-         * trámite y sigue sin existir.
+         * Esa puerta ya no está, porque lo que faltaba ya existe: el bucle de
+         * abajo devuelve el capital condonado junto con el dinero. Era el
+         * ÚNICO movimiento sin vuelta atrás que quedaba en el sistema, y el
+         * pronto pago es justo el que más caro sale mal — da por terminado un
+         * plan entero de una sola vez.
+         *
+         * ⚠️ Y NO reprograma nada: `saldarConDescuento()` no borra ni crea
+         * cuotas, deja las que había en cero. Por eso
+         * `deshacerLasReprogramaciones()` no encuentra constancia y no hace
+         * nada — anular un pronto pago es más simple que anular un abono, no
+         * más complicado.
          */
-        if ($recibo->tuvoDescuento()) {
-            throw PagoInvalidoException::porProntoPagoQueNoSeAnula($recibo->folio());
-        }
 
         return DB::transaction(function () use ($recibo, $porQue): Recibo {
             /*
@@ -510,6 +519,14 @@ final readonly class RegistroDePagos
              */
             $this->deshacerLasReprogramaciones($vivo);
 
+            /*
+             * Lo que este papel había PERDONADO y acaba de volver a deberse.
+             * Se acumula del mismo bucle que lo devuelve, así el asiento de la
+             * bitácora dice el número exacto que se revirtió y no uno
+             * recalculado aparte que podría discrepar.
+             */
+            $devuelto = Monto::cero();
+
             foreach ($vivo->aplicaciones()->with('cuota')->get() as $aplicacion) {
                 $cuota = $aplicacion->cuota;
 
@@ -521,13 +538,40 @@ final readonly class RegistroDePagos
                  * `monto_pagado` recibe capital + interes, nunca la mora: la
                  * mora nunca entro ahi, asi que devolverla la dejaria
                  * debiendo de menos. Va a su propia columna.
+                 *
+                 * ➕ EL PERDON TAMBIEN SE DEVUELVE — 11-sep-2026.
+                 *
+                 * `saldarConDescuento()` sube `monto_pagado` hasta el total de
+                 * la cuota: el dinero MÁS lo condonado. Restar solo el dinero
+                 * dejaba la cuota diciendo que todavía tenía pagado el
+                 * descuento, y el lote se quedaba con la rebaja sin el recibo
+                 * que la explicaba. En un recibo normal `capitalCondonado()`
+                 * es cero y esto no cambia nada.
                  */
                 $aLaCuota = $aplicacion->montoCapital()->sumar($aplicacion->montoInteres());
+                $perdonado = $aplicacion->capitalCondonado();
 
+                /*
+                 * 🔴 LAS DOS COLUMNAS EN EL MISMO `UPDATE`, Y NO ES ESTILO.
+                 *
+                 * `cuotas_condonado_cabe_en_lo_pagado_chk` exige
+                 * `capital_condonado <= monto_pagado`, y un CHECK de Postgres
+                 * se evalúa por sentencia. Bajar `monto_pagado` en una y
+                 * `capital_condonado` en otra deja un instante donde el
+                 * perdon es mayor que lo pagado: la primera sentencia revienta
+                 * y la anulación entera se cae. Van juntas, o no van.
+                 *
+                 * Por eso esto NO sigue el molde de `revertirLaCondonacion()`,
+                 * que sí es un método aparte: `mora_condonada` no tiene CHECK
+                 * cruzado contra `mora_pagada`.
+                 */
                 $cuota->update([
-                    'monto_pagado' => $cuota->montoPagado()->restar($aLaCuota)->redondeado(),
-                    'mora_pagada'  => $cuota->moraPagada()->restar($aplicacion->montoMora())->redondeado(),
+                    'monto_pagado'      => $cuota->montoPagado()->restar($aLaCuota)->restar($perdonado)->redondeado(),
+                    'mora_pagada'       => $cuota->moraPagada()->restar($aplicacion->montoMora())->redondeado(),
+                    'capital_condonado' => $cuota->capitalCondonado()->restar($perdonado)->redondeado(),
                 ]);
+
+                $devuelto = $devuelto->sumar($perdonado);
             }
 
             $this->revertirLaCondonacion($vivo);
@@ -539,6 +583,7 @@ final readonly class RegistroDePagos
             ]);
 
             $this->reabrirSiVolvioADeber($vivo);
+            $this->asentarQueVolvioElDescuento($vivo, $devuelto, $porQue);
 
             /*
              * El horizonte y la cuota del contrato son un resumen de `cuotas`,
@@ -1545,6 +1590,46 @@ final readonly class RegistroDePagos
             ->withProperty('lotes', $porLote)
             ->event('pronto_pago')
             ->log('Pronto pago con descuento');
+    }
+
+    /**
+     * Anular el pronto pago deja su propio asiento — 11-sep-2026.
+     *
+     * El descuento se asentó contra la VENTA, no contra el recibo, porque es
+     * ahí donde alguien lo va a buscar dentro de dos años. Devolverlo tiene
+     * que dejar rastro en el mismo lugar: sin esto, la pestaña
+     * «Actualizaciones» seguiría diciendo que a este cliente se le
+     * descontaron L X y nada diría que volvió a deberlos.
+     *
+     * Solo cuando hubo perdón. Un recibo de cuota corriente no ensucia la
+     * bitácora con un asiento de descuento en cero, por lo mismo que
+     * `asentarElDescuento()` no lo hace al emitir.
+     */
+    private function asentarQueVolvioElDescuento(Recibo $recibo, Monto $devuelto, string $motivo): void
+    {
+        if ($devuelto->esCero()) {
+            return;
+        }
+
+        $venta = $recibo->venta;
+
+        if (! $venta instanceof Venta) {
+            return;
+        }
+
+        activity()
+            ->performedOn($venta)
+            ->causedBy(auth()->user())
+            // `withChanges()` y no `withProperties()`: es lo que pinta la
+            // pestaña. El porqué completo está en `asentarElDescuento()`.
+            ->withChanges([
+                'old'        => ['descuento por pronto pago' => $devuelto->formateado()],
+                'attributes' => ['descuento por pronto pago' => '—'],
+            ])
+            ->withProperty('motivo', $motivo)
+            ->withProperty('recibo', $recibo->folio())
+            ->event('pronto_pago_anulado')
+            ->log('Se anuló el pronto pago: el descuento volvió a deberse');
     }
 
     /**
