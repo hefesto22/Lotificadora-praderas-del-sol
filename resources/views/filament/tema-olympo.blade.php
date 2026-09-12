@@ -707,13 +707,14 @@
        abajo, que son los que hay que mirar.
     */
     .olympo-encabezado {
+        width: 100%;
         display: flex;
         flex-wrap: wrap;
-        align-items: flex-end;
+        align-items: center;
         justify-content: space-between;
-        gap: 1rem 1.5rem;
-        padding-bottom: 1rem;
-        border-bottom: 1px solid rgba(9, 9, 11, .08);
+        gap: .75rem 2rem;
+        padding-bottom: .875rem;
+        border-bottom: 1px solid rgb(228 230 235);
     }
 
     .olympo-encabezado-marca {
@@ -721,21 +722,22 @@
         align-items: center;
         gap: .875rem;
         min-width: 0;
+        flex: 1 1 auto;
     }
 
     .olympo-encabezado-logo {
-        height: 2.75rem;
+        height: 2.5rem;
         width: auto;
-        max-width: 9rem;
+        max-width: 8rem;
         object-fit: contain;
         flex-shrink: 0;
     }
 
     .olympo-encabezado-texto { min-width: 0; }
 
-    /* Versalitas chicas, como el resto de las etiquetas del sistema (§1). */
+    /* Versalitas chicas, como el resto de las etiquetas del sistema (§5). */
     .olympo-encabezado-rotulo {
-        margin: 0 0 .125rem;
+        margin: 0 0 .0625rem;
         font-size: .6875rem;
         font-weight: 600;
         letter-spacing: .09em;
@@ -745,29 +747,38 @@
 
     .olympo-encabezado-nombre {
         margin: 0;
-        font-size: 1.375rem;
+        font-size: 1.25rem;
         font-weight: 700;
-        letter-spacing: -.02em;
-        line-height: 1.15;
+        letter-spacing: -.021em;
+        line-height: 1.2;
         color: rgb(24 24 27);
     }
 
     .olympo-encabezado-dia {
         text-align: right;
-        margin-left: auto;
+        flex: 0 0 auto;
     }
 
     .olympo-encabezado-fecha {
         margin: 0;
-        font-size: .875rem;
-        font-weight: 500;
+        font-size: .8125rem;
+        font-weight: 600;
         color: rgb(63 63 70);
-        /* La fecha viene de `fechaLarga()`, que la escribe en minúsculas. */
-        text-transform: capitalize;
+        font-variant-numeric: tabular-nums;
+        /*
+           🔴 `capitalize` NO: pone mayúscula en CADA palabra, y
+           `fechaLarga()` devuelve «viernes, 11 de septiembre de 2026». Con
+           `capitalize` salía «Viernes, 11 De Septiembre De 2026» — los «De»
+           en mayúscula, que es exactamente lo contrario de verse cuidado.
+           Solo la primera letra, que es lo que pide el español.
+        */
+        text-transform: none;
     }
 
+    .olympo-encabezado-fecha::first-letter { text-transform: uppercase; }
+
     .olympo-encabezado-quien {
-        margin: .125rem 0 0;
+        margin: .0625rem 0 0;
         font-size: .75rem;
         color: rgb(113 113 122);
     }
@@ -776,10 +787,10 @@
 
     /* En pantalla angosta la fecha baja y se alinea a la izquierda: a la
        derecha quedaría colgando debajo del logo, que se lee como un error. */
-    @media (max-width: 40rem) {
+    @media (max-width: 48rem) {
         .olympo-encabezado-dia {
             text-align: left;
-            margin-left: 0;
+            flex-basis: 100%;
         }
     }
 
@@ -788,4 +799,69 @@
     .dark .olympo-encabezado-fecha { color: rgb(212 212 216); }
     .dark .olympo-encabezado-rotulo,
     .dark .olympo-encabezado-quien { color: rgb(161 161 170); }
+
+    /*
+       ── 16. 🔴 EL NUMERO NO SE PARTE, Y LAS TARJETAS MIDEN IGUAL ──────
+
+       Dos defectos que se vieron juntos el 11-sep-2026 y que son la misma
+       causa: el cuadro de cifras de Filament está pensado para números
+       cortos, y una lotificadora tiene saldos de ocho dígitos.
+
+       ═══ «L. 40,711,995.00» SE PARTIA EN DOS RENGLONES ═══
+
+       El valor salía con el tamaño fijo de Filament —1.875rem— y en cuatro
+       columnas no entra: el navegador lo cortaba después de «L.» y dejaba
+       el monto abajo. Una cifra partida en dos líneas no se lee como una
+       cifra, se lee como un error de la pantalla. Y es JUSTO el número que
+       hay que mirar.
+
+       La cifra no se parte nunca (`nowrap`) y el tamaño se acomoda al ancho
+       con `clamp()`: baja hasta 1.125rem en columnas angostas y sube hasta
+       1.875rem cuando sobra lugar. Mejor una cifra más chica y entera que
+       una grande y rota.
+
+       ═══ LAS TARJETAS TERMINABAN A DISTINTA ALTURA ═══
+
+       El pie de cada cuadro tiene largo distinto —uno dice «en 73
+       expedientes» y otro tres renglones— así que cada tarjeta medía lo que
+       medía su texto y la fila quedaba con los bordes inferiores en
+       escalera. Ahora todas estiran a la altura de la más alta y el pie se
+       apoya abajo, que es lo que hace que una fila se lea como una fila.
+    */
+    .fi-wi-stats-overview-stat-value {
+        white-space: nowrap;
+        font-size: clamp(1.125rem, 1.6vw + .45rem, 1.875rem);
+        line-height: 1.15;
+    }
+
+    .fi-wi-stats-overview-stat { height: 100%; }
+
+    .fi-wi-stats-overview-stat-content {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+
+    /* El pie se va al fondo: `auto` arriba empuja, y así los pies de toda
+       la fila quedan a la misma altura aunque los textos midan distinto. */
+    .fi-wi-stats-overview-stat-description { margin-top: auto; }
+
+    /*
+       ── 17. El título de sección de cada tablero ──────────────────────
+
+       Los cuatro cuadros de cifras ahora van agrupados bajo «El mes», «La
+       caja de hoy», «El proyecto» y «El sistema». Filament los pinta con el
+       mismo peso que el título de una ficha, que acá es demasiado: estos no
+       son secciones de un formulario, son rótulos de fila. Van al tamaño de
+       las micro-etiquetas del §5, que es el idioma que ya habla el sistema.
+    */
+    .fi-wi-stats-overview .fi-section-header-heading {
+        font-size: .6875rem;
+        font-weight: 600;
+        letter-spacing: .09em;
+        text-transform: uppercase;
+        color: rgb(113 113 122);
+    }
+
+    .dark .fi-wi-stats-overview .fi-section-header-heading { color: rgb(161 161 170); }
 </style>

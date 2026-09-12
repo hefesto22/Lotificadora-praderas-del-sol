@@ -93,13 +93,33 @@ test('cuando todavía no se recupera lo invertido, lo dice sin reventar', functi
         ->assertSee('Falta por recuperar')
         ->assertSee('L. 125,000.00')
         /*
-         * Con un proyecto solo, el desglose es su nombre. Se comprueba acá
-         * porque `porProyecto()` cae en «Un proyecto» cuando no encuentra el
-         * nombre, y ese respaldo silencioso taparía que la consulta de nombres
-         * está devolviendo vacío. En MAYUSCULAS: ver el test de dos proyectos.
+         * Con un proyecto solo el pie explica el número en vez de repetir el
+         * nombre del residencial: el encabezado del Escritorio ya lo dice, y
+         * decirlo dos veces en la misma pantalla ensucia en vez de informar.
+         * El nombre sí se comprueba en el test de dos proyectos, que es donde
+         * el desglose lo necesita.
          */
-        ->assertSee('PRADERAS DEL SOL')
-        ->assertDontSee('Un proyecto');
+        ->assertSee('Lo recuperado menos lo invertido');
+});
+
+/*
+| 🔴🔴 ESTE TEST NACIO DE MIRAR LA PANTALLA, NO DE LEER EL CODIGO.
+|
+| En pruebas, el mismo día que entró, el cuadro decía «Ya se recuperó, y
+| sobra L. 7,810,997.00» —en verde, con su palomita— sobre un proyecto donde
+| nadie había cargado un solo gasto. La resta era correcta: 7,810,997 menos
+| cero. La conclusión era falsa.
+|
+| Es la peor clase de número en un tablero: uno que está bien calculado y
+| dice algo que no es cierto, porque ese se cree.
+*/
+test('sin un solo gasto cargado no declara ningún resultado', function (): void {
+    Livewire::test(ComoVanLosProyectos::class)
+        ->assertSee('Sin gastos cargados')
+        ->assertDontSee('Ya se recuperó, y sobra')
+        ->assertDontSee('Falta por recuperar')
+        // Ni promete un cierre que no tiene contra qué cerrar.
+        ->assertDontSee('el proyecto cierra en');
 });
 
 test('cuando ya se recuperó, cambia el rótulo y no el signo', function (): void {

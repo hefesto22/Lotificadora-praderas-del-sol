@@ -160,10 +160,27 @@ class ComoVanLosProyectos extends StatsOverviewWidget
                 ->descriptionIcon('heroicon-m-arrow-down-tray')
                 ->color($totalRecuperado->esCero() ? 'gray' : 'success'),
 
-            Stat::make($this->rotuloDelResultado($alcanzo, $diferencia), $diferencia->formateado())
-                ->description($this->porProyecto($invertido, $recuperado))
-                ->descriptionIcon($alcanzo ? 'heroicon-m-check-circle' : 'heroicon-m-minus-circle')
-                ->color($alcanzo ? 'success' : 'danger'),
+            /*
+             * 🔴 SIN GASTOS CARGADOS NO HAY RESULTADO, Y DECIRLO IMPORTA.
+             *
+             * Con `invertido` en cero la resta da todo lo cobrado, así que
+             * el cuadro decía «Ya se recuperó, y sobra L. 7,810,997.00» —en
+             * verde, con su palomita— sobre un proyecto donde **nadie
+             * cargó un solo gasto todavía**. Es una cifra correcta y una
+             * conclusión falsa, que es la peor clase de número en un
+             * tablero: se cree.
+             *
+             * Se vio en pruebas el 11-sep-2026, el mismo día que entró.
+             */
+            $totalInvertido->esCero()
+                ? Stat::make('Sin gastos cargados', '—')
+                    ->description('Hasta que se registren los gastos del proyecto no hay contra qué comparar lo cobrado')
+                    ->descriptionIcon('heroicon-m-exclamation-circle')
+                    ->color('gray')
+                : Stat::make($this->rotuloDelResultado($alcanzo, $diferencia), $diferencia->formateado())
+                    ->description($this->porProyecto($invertido, $recuperado))
+                    ->descriptionIcon($alcanzo ? 'heroicon-m-check-circle' : 'heroicon-m-minus-circle')
+                    ->color($alcanzo ? 'success' : 'danger'),
 
             Stat::make('Falta por cobrar', $totalPorCobrar->formateado())
                 ->description($this->siEntraTodo($totalInvertido, $totalRecuperado, $totalPorCobrar))
@@ -202,10 +219,10 @@ class ComoVanLosProyectos extends StatsOverviewWidget
     {
         $nota = $devuelto->esCero()
             ? ''
-            : sprintf(' · ya descontadas %s en devoluciones', $devuelto->formateado());
+            : sprintf(' · menos %s devueltos', $devuelto->formateado());
 
         if ($invertido->esCero()) {
-            return 'Sin gastos cargados, no hay contra qué compararlo'.$nota;
+            return 'Cobrado en toda la vida del proyecto'.$nota;
         }
 
         /*
@@ -238,8 +255,13 @@ class ComoVanLosProyectos extends StatsOverviewWidget
             return 'Sin movimientos todavía';
         }
 
+        /*
+         * Con un solo proyecto se explica el número en vez de repetir el
+         * nombre: el encabezado del Escritorio ya dice de qué residencial
+         * es, y decirlo dos veces en la misma pantalla no informa, ensucia.
+         */
         if (count($ids) === 1) {
-            return $nombres[$ids[0]] ?? 'Un proyecto';
+            return 'Lo recuperado menos lo invertido';
         }
 
         $partes = [];
@@ -274,6 +296,12 @@ class ComoVanLosProyectos extends StatsOverviewWidget
     {
         if ($porCobrar->esCero()) {
             return 'No queda saldo pendiente en expedientes vigentes';
+        }
+
+        // Sin gastos cargados, «cierra en +X» sería la misma conclusión
+        // falsa del cuadro de al lado: no hay contra qué cerrar.
+        if ($invertido->esCero()) {
+            return 'En cuotas de expedientes vigentes';
         }
 
         $conTodo = $recuperado->sumar($porCobrar);

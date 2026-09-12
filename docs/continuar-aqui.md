@@ -3,6 +3,57 @@
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
 
+## 🔴 11-sep, noche — Lo que encontró MIRAR la pantalla, y no leer el código
+
+Se desplegó el Escritorio nuevo a pruebas y Mauricio contestó: «se ve feo, no
+tiene orden ni tamaños correctos, se deforma todo». Tenía razón en tres cosas
+distintas, y ninguna de las tres la habría encontrado un test.
+
+### 1. 🔴🔴 «Ya se recuperó, y sobra L. 7,810,997.00» sobre un proyecto SIN GASTOS
+
+El peor de los tres, y no es visual. Con `invertido` en cero la resta da todo
+lo cobrado, así que el cuadro declaraba un triunfo —en verde, con palomita—
+sobre un proyecto donde **nadie había cargado un solo gasto todavía**.
+
+La cifra estaba bien calculada. La conclusión era falsa. **Es la peor clase de
+número en un tablero: uno que está bien y dice algo que no es cierto, porque
+ese se cree.**
+
+Ahora, sin gastos cargados, el cuadro dice «Sin gastos cargados» en gris, con
+un pie que explica que no hay contra qué comparar; y «falta por cobrar» deja
+de prometer un cierre. Tiene su test, y el test dice de dónde salió.
+
+### 2. El número se partía en dos renglones
+
+`L. 40,711,995.00` salía con el tamaño fijo de Filament —1.875rem— y en cuatro
+columnas no entra: el navegador cortaba después de «L.» y dejaba el monto
+abajo. **Una cifra partida en dos líneas no se lee como una cifra: se lee como
+un error de la pantalla** — y es justo el número que hay que mirar.
+
+`white-space: nowrap` y el tamaño con `clamp()`, que baja a 1.125rem en
+columnas angostas y sube a 1.875rem cuando sobra lugar. Mejor una cifra más
+chica y entera que una grande y rota.
+
+### 3. Las tarjetas terminaban en escalera
+
+El pie de cada cuadro tiene largo distinto —uno dice «en 73 expedientes» y
+otro tres renglones—, así que cada tarjeta medía lo que medía su texto. Ahora
+estiran todas a la altura de la más alta y el pie se apoya abajo con un
+`margin-top: auto`, que es lo que hace que una fila se lea como una fila.
+
+### De paso: «Viernes, 11 De Septiembre De 2026»
+
+El `text-transform: capitalize` del encabezado ponía mayúscula en CADA palabra
+—los «De» incluidos—, que es exactamente lo contrario de verse cuidado. Se
+cambió por `::first-letter`, que es lo que pide el español.
+
+### La lección, otra vez
+
+Es la misma que el documento repite desde el 14-ago: **el bug más grave del
+día no lo encontró ninguno de los 1,292 tests. Lo encontró abrir la pantalla.**
+Los tests cuidaban que la aritmética cerrara, y cerraba. Lo que no podían ver
+es que el resultado correcto estaba diciendo una mentira.
+
 ## 🔴🔴 11-sep, noche — LA CACHE DE COMPONENTES SE COMIO UN WIDGET ENTERO
 
 El widget de costo contra ingreso se desplegó a pruebas y **no apareció**. El
