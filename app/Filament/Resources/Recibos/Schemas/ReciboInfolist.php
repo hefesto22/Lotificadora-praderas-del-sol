@@ -126,7 +126,10 @@ class ReciboInfolist
                     ]),
 
                 Section::make('Impresiones')
-                    ->description('El original sale limpio; de la segunda vez en adelante el papel dice COPIA.')
+                    // Desde el 15-sep-2026 el papel NO se marca: reimprimir
+                    // es rutina. Este historial es lo único que queda, y es
+                    // donde alguien vendría a preguntar quién reimprimió.
+                    ->description('Quién sacó este papel y cuándo. El recibo impreso sale igual todas las veces.')
                     ->schema([
                         TextEntry::make('impresiones')
                             ->hiddenLabel()

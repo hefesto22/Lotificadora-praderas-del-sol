@@ -52,23 +52,22 @@ class RecibosTable
              * por un camino en el que el builder llega SIN MODELO. `getModel()`
              * devuelve null y el `->impresiones()` explota sobre él.
              *
-             * ⚠️ Por eso los dos conteos son subqueries escritos a mano: no le
-             * piden nada al modelo, dicen en SQL exactamente lo que hacen, y no
-             * se rompen porque la página gane una pestaña. Si alguien los
-             * "limpia" volviendo a `withCount()`, esto se cae otra vez — y la
-             * segunda vez tampoco va a parecer culpa de este archivo.
+             * ⚠️ Por eso el conteo es un subquery escrito a mano: no le pide
+             * nada al modelo, dice en SQL exactamente lo que hace, y no se
+             * rompe porque la página gane una pestaña. Si alguien lo "limpia"
+             * volviendo a `withCount()`, esto se cae otra vez — y la segunda
+             * vez tampoco va a parecer culpa de este archivo.
+             *
+             * (Eran DOS hasta el 15-sep-2026, cuando el conteo de impresiones
+             * se fue con el sello «COPIA» del papel.)
              *
              * El `select` explícito es obligatorio: sin él, `addSelect()` deja
-             * la consulta con SOLO las dos columnas contadas y los modelos se
-             * hidratan vacíos. Es lo que `withCount()` hacía por su cuenta.
+             * la consulta con SOLO la columna contada y los modelos se hidratan
+             * vacíos. Es lo que `withCount()` hacía por su cuenta.
              */
             ->modifyQueryUsing(static fn (Builder $query): Builder => $query->with([
                 'cliente', 'venta', 'compromiso.lote', 'aplicaciones.cuota.compromiso.lote',
             ])->select('recibos.*')->addSelect([
-                'impresiones_count' => DB::table('impresiones_de_recibo')
-                    ->selectRaw('count(*)')
-                    ->whereColumn('impresiones_de_recibo.recibo_id', 'recibos.id'),
-
                 /*
                  * ⚠️ `emision_id` en null no cuenta ni consigo mismo, porque en
                  * SQL `null = null` no es verdadero. Es justo lo que hace falta:
@@ -457,30 +456,24 @@ class RecibosTable
     }
 
     /**
-     * La segunda línea del folio: si el papel vale, con qué número salió, y
-     * cuántas veces se imprimió.
+     * La segunda línea del folio: si el papel vale, con qué número salió, y si
+     * vino acompañado de otros del mismo cobro.
      *
-     * Las tres pueden estar juntas —un recibo anulado que había salido con CAI
-     * y del que circulan copias— y en ese orden: lo que cambia si el papel vale
-     * o no vale se lee antes que su numeración.
+     * Pueden estar juntas —un recibo anulado que había salido con CAI— y en
+     * ese orden: lo que cambia si el papel vale o no vale se lee antes que su
+     * numeración.
      *
-     * ═══ 🔴 «IMPRESO» DEJO DE SER COLUMNA (27-ago-2026) ═══
+     * ═══ 🔴 LO QUE SE FUE DE ACA, Y CUANDO ═══
      *
-     * Era una columna entera —encabezado, ancho y badge— para decir «original»
-     * en casi todas las filas. Se fue por lo mismo que se fue «Estado» el
-     * 23-ago y con el mismo criterio: acá ocupa cero cuando no aplica, y ese
-     * ancho es el que le faltaba al monto.
-     *
-     * Lo que NO se fue es la señal, porque aplica en dos casos y los dos
-     * importan:
-     *
-     * - **sin imprimir**: el pago se registró y el cliente se fue sin papel.
-     * - **copias**: dos papeles con el mismo número no pueden hacerse pasar por
-     *   dos cobros, y notarlo antes de que sea un problema es justo para lo que
-     *   está este renglón.
-     *
-     * El caso normal —salió una vez, el original— no dice nada. Es el 99 % de
-     * las filas.
+     * - **La columna «Impreso»** (27-ago-2026): un encabezado y un ancho para
+     *   decir «original» en casi todas las filas. Pasó a ser este renglón, que
+     *   ocupa cero cuando no aplica.
+     * - **El renglón de impresiones** (15-sep-2026): «sin imprimir», «1 copia»,
+     *   «N copias». «Eso de copias de impresión hay que quitarlas, no nos
+     *   aporta en nada» —Mauricio—. Se fue junto con el sello «COPIA» del
+     *   papel: reimprimir es rutina en el mostrador, así que señalarlo
+     *   convertía lo normal en sospechoso. El historial completo —quién y
+     *   cuándo— sigue en la ficha del recibo.
      */
     private static function debajoDelFolio(Recibo $record): ?string
     {
@@ -494,12 +487,6 @@ class RecibosTable
 
         if ($record->esFactura()) {
             $renglones[] = 'Factura '.$record->numeroDelPapel();
-        }
-
-        $papel = self::comoSalioElPapel($record);
-
-        if ($papel !== null) {
-            $renglones[] = $papel;
         }
 
         $cobro = self::conCuantosSalio($record);
@@ -549,24 +536,5 @@ class RecibosTable
         // Cero es un recibo de antes del 11-sep —sin emisión— y uno es un
         // cobro de un solo papel. En los dos casos no hay nada que agrupar.
         return $cuantos < 2 ? null : $cuantos.' papeles del mismo cobro';
-    }
-
-    /**
-     * Cuántas veces salió impreso, y solo cuando eso dice algo.
-     *
-     * ⚠️ Depende del subquery `impresiones_count` de `modifyQueryUsing()`: sin
-     * él la columna no existe y esto diría «sin imprimir» en todas las filas.
-     * Es un subquery y no un `withCount()` — el porqué está allá arriba.
-     */
-    private static function comoSalioElPapel(Recibo $record): ?string
-    {
-        $veces = (int) $record->getAttribute('impresiones_count');
-
-        return match (true) {
-            $veces === 0 => 'sin imprimir',
-            $veces === 1 => null,
-            $veces === 2 => '1 copia',
-            default      => ($veces - 1).' copias',
-        };
     }
 }

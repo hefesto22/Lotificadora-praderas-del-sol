@@ -312,9 +312,10 @@ class Recibo extends Model
     /**
      * Cada vez que este recibo salió impreso, de la más vieja a la más nueva.
      *
-     * La primera es el original; de la segunda en adelante el papel lleva la
-     * marca COPIA. Dos papeles con el mismo número no pueden hacerse pasar por
-     * dos cobros distintos, que es lo que un correlativo viene a evitar.
+     * ⚠️ El PAPEL sale igual todas las veces desde el 15-sep-2026: el sello
+     * «COPIA» se quitó porque reimprimir es rutina en el mostrador y marcarlo
+     * convertía un papel normal en uno que parece sospechoso. Lo que queda es
+     * este asiento —quién y cuándo—, que se muestra en la ficha del recibo.
      *
      * @return HasMany<ImpresionDeRecibo, $this>
      */

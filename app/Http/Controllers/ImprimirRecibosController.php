@@ -34,10 +34,12 @@ use Illuminate\Support\Facades\Gate;
  *
  * ═══ ABRIR ESTO ES IMPRIMIR, UNA VEZ POR RECIBO ═══
  *
- * Cada hoja anota su impresión y cada una dice COPIA por su cuenta a partir de
- * la segunda vez. Es lo correcto: salieron cuatro papeles, no uno — y la
- * pregunta que `impresiones_de_recibo` contesta es cuántas veces se pidió CADA
- * papel, no cuántas veces se abrió una pantalla.
+ * Cada hoja anota su impresión por separado. Es lo correcto: salieron cuatro
+ * papeles, no uno — y la pregunta que `impresiones_de_recibo` contesta es
+ * cuántas veces se pidió CADA papel, no cuántas veces se abrió una pantalla.
+ *
+ * ⚠️ El papel no dice «COPIA» desde el 15-sep-2026. El asiento se guarda
+ * igual; lo que cambió es que ya no se imprime.
  *
  * ═══ EL PERMISO SE PREGUNTA POR CADA UNO ═══
  *

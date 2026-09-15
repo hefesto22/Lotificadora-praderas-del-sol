@@ -60,10 +60,22 @@
                     <small>{{ $recibo->anulado_el?->format('d/m/Y') }} · {{ $recibo->getAttribute('motivo_anulacion') }}</small>
                 </div>
             @endif
-            @if ($impresion->esCopia())
-                {{-- Dos papeles con el mismo número no pueden pasar por dos cobros. --}}
-                <div class="copia">COPIA · {{ $impresion->numero_de_impresion }}.ª impresión</div>
-            @endif
+            {{--
+                🔴 ACA IBA EL SELLO «COPIA · N.ª impresión» — se fue el 15-sep-2026.
+
+                «Eso de copias de impresión hay que quitarlas, no nos aporta en
+                nada» —Mauricio—. Nació el 6-ago para que dos papeles con el
+                mismo número no pudieran hacerse pasar por dos cobros, pero en
+                el mostrador reimprimir es rutina —se traba la impresora, el
+                cliente pide otra— y el sello rojo convertía un papel normal en
+                uno que parece sospechoso.
+
+                ⚠️ La IMPRESION SE SIGUE REGISTRANDO: `$impresion` llega igual y
+                `ImprimirReciboController` sigue asentando quién imprimió y
+                cuándo. Lo que se quitó es mostrarlo en el papel; el historial
+                completo sigue en la ficha del recibo, que es donde alguien lo
+                buscaría si algún día hace falta.
+            --}}
         </div>
     </div>
 

@@ -187,7 +187,20 @@ test('lleva la leyenda fiscal con las palabras del contrato (g-i, R10)', functio
         ->assertSee('Documento de uso interno.');
 });
 
-describe('El original y las copias', function (): void {
+/*
+| 🔴 EL SELLO «COPIA» SE FUE EL 15-SEP-2026, EL REGISTRO NO.
+|
+| «Eso de copias de impresión hay que quitarlas, no nos aporta en nada»
+| —Mauricio—. El sello nació el 6-ago para que dos papeles con el mismo número
+| no pudieran hacerse pasar por dos cobros. En el mostrador, reimprimir es
+| rutina —se traba la impresora, el cliente pide otra copia— y el sello rojo
+| convertía un papel normal en uno que parece sospechoso.
+|
+| Estos dos tests cuidan la mitad que SIGUE viva: reimprimir no marca el papel,
+| pero sí deja asiento. Ese historial —quién imprimió y cuándo— sale en la
+| ficha del recibo, que es donde alguien iría a buscarlo.
+*/
+describe('Reimprimir no marca el papel, pero queda asentado', function (): void {
     test('la primera vez sale limpio', function (): void {
         ($this->papel)()
             ->assertOk()
@@ -196,17 +209,13 @@ describe('El original y las copias', function (): void {
         expect(ImpresionDeRecibo::query()->count())->toBe(1);
     });
 
-    /*
-    | Dos papeles con el mismo número no pueden hacerse pasar por dos cobros,
-    | que es exactamente lo que un correlativo viene a evitar.
-    */
-    test('de la segunda en adelante dice COPIA', function (): void {
+    test('la segunda sale igual de limpia, y se registra', function (): void {
         ($this->papel)();
 
         ($this->papel)()
             ->assertOk()
-            ->assertSee('COPIA')
-            ->assertSee('2.ª impresión');
+            ->assertDontSee('COPIA')
+            ->assertDontSee('2.ª impresión');
 
         expect(ImpresionDeRecibo::query()->count())->toBe(2);
     });

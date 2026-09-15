@@ -13,8 +13,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * Una salida impresa de un recibo.
  *
- * La numero 1 es el original; de la 2 en adelante el papel lleva la marca
- * COPIA. Quien y cuando los traen `created_by` y `created_at`.
+ * Quien y cuando los traen `created_by` y `created_at`.
+ *
+ * ⚠️ `esCopia()` y `numero_de_impresion` siguen existiendo, pero desde el
+ * 15-sep-2026 NO marcan el papel: el sello «COPIA» se quito. Son para el
+ * historial de la ficha del recibo, que es donde se pregunta quien reimprimio.
  *
  * ═══ EL NOMBRE DE LA TABLA VA ESCRITO ═══
  *

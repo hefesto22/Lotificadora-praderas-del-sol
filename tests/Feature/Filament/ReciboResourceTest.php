@@ -112,13 +112,19 @@ describe('La lista general', function (): void {
     });
 
     /*
-    | «Impreso» dejó de ser columna: el ancho se lo llevaba el monto. La señal
-    | sigue, debajo del folio, y solo cuando dice algo.
+    | 🔴 EL LISTADO YA NO DICE NADA DE IMPRESIONES — 15-sep-2026.
+    |
+    | Decía «sin imprimir», «1 copia», «N copias» debajo del folio. Se fue con
+    | el sello del papel, por lo mismo: reimprimir es rutina y señalarlo
+    | convertía lo normal en sospechoso.
+    |
+    | El asiento sigue guardándose; lo que se quitó es mostrarlo acá.
     */
-    test('el recibo que se registró y nadie imprimió lo dice debajo del folio', function (): void {
+    test('el listado no dice nada de impresiones', function (): void {
         Livewire::test(ListRecibos::class)
             ->assertSuccessful()
-            ->assertSee('sin imprimir');
+            ->assertDontSee('sin imprimir')
+            ->assertDontSee('copias');
     });
 
     test('la ficha se abre sin imprimir nada', function (): void {
@@ -138,7 +144,10 @@ test('la pestaña del expediente muestra los recibos de ese contrato', function 
     ])
         ->assertSuccessful()
         ->assertCanSeeTableRecords(Recibo::query()->get())
-        ->assertSee('nunca');
+        // La columna «Impreso» —«nunca», «original», «N copias»— se fue el
+        // 15-sep-2026 junto con el sello del papel.
+        ->assertDontSee('nunca')
+        ->assertDontSee('original');
 });
 
 describe('Quién entra', function (): void {

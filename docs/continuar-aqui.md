@@ -1,7 +1,49 @@
-# Continuar acá — 11-sep-2026
+# Continuar acá — 15-sep-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 🔴 15-sep — Se fue el sello «COPIA» del recibo
+
+«Eso de copias de impresión hay que quitarlas, no nos aporta en nada»
+—Mauricio, mirando un recibo reimpreso en producción—.
+
+### Por qué nació, y por qué el mostrador lo desmintió
+
+El sello es del 6-ago y la razón era buena: dos papeles con el mismo número no
+pueden hacerse pasar por dos cobros, que es justo lo que un correlativo viene
+a evitar.
+
+Lo que no se vio entonces es que **reimprimir es rutina**: se traba la
+impresora, el papel sale torcido, el cliente pide otra copia. El sello rojo
+convertía un papel perfectamente normal en uno que parece sospechoso, y eso
+sale a manos del cliente.
+
+### Qué se quitó, y qué NO
+
+**Se fue lo que se MUESTRA**, en los tres lados donde salía:
+
+- El sello `COPIA · N.ª impresión` del papel impreso, y su CSS.
+- La columna «Impreso» de la pestaña de recibos del expediente —«nunca»,
+  «original», «1 copia»— y su `withCount('impresiones')`.
+- El renglón debajo del folio en el listado general —«sin imprimir», «N
+  copias»— y su subquery `impresiones_count`.
+
+**Se queda el REGISTRO.** `impresiones_de_recibo` se sigue escribiendo en cada
+impresión, y el historial completo —quién y cuándo— sigue en la sección
+«Impresiones» de la ficha del recibo, que es donde alguien iría a preguntar si
+algún día hace falta. Borrar la tabla no ahorraba nada y sí era irreversible.
+
+### ⚠️ Cuatro textos quedaban mintiendo
+
+La descripción de esa sección decía literalmente «de la segunda vez en
+adelante el papel dice COPIA», y tres docblocks —`Recibo::impresiones()`,
+`ImpresionDeRecibo` y `ImprimirRecibosController`— afirmaban lo mismo.
+Corregidos los cuatro: un comentario que describe un comportamiento que ya no
+existe es peor que no tener comentario.
+
+`esCopia()` y `numero_de_impresion` siguen existiendo —los usa el historial—
+pero ya no marcan nada.
 
 ## 🔴 12-sep — Todas las tarjetas del Escritorio miden lo mismo
 

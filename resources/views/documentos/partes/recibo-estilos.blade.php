@@ -83,12 +83,6 @@
         .folio .numero { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
         .folio .fecha { font-size: 12px; color: #52525b; }
 
-        .copia {
-            display: inline-block; margin-top: .375rem;
-            padding: .2rem .55rem; border: 1px solid #dc2626; border-radius: 9999px;
-            color: #dc2626; font-size: 10px; font-weight: 700; letter-spacing: .1em;
-        }
-
         /* Un recibo anulado se puede seguir imprimiendo —hace falta para
            mostrar que ese número no vale— pero el papel tiene que gritarlo,
            no susurrarlo en una esquina. */
@@ -169,6 +163,5 @@
             .barra { display: none !important; }
             .hoja { max-width: none; border: 0; border-radius: 0; padding: 0; }
             .total { background: transparent; }
-            .copia { border-width: 2px; }
         }
     </style>

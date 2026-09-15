@@ -50,9 +50,13 @@ class RecibosRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('numero')
-            ->modifyQueryUsing(static fn (Builder $query): Builder => $query
-                ->with('compromiso.lote')
-                ->withCount('impresiones'))
+            /*
+             * Sin `withCount('impresiones')` desde el 15-sep-2026: la columna
+             * «Impreso» —«nunca», «original», «N copias»— se fue con el sello
+             * del papel, y un conteo que nadie lee es una subconsulta por fila
+             * que no paga nada. El historial sigue en la ficha del recibo.
+             */
+            ->modifyQueryUsing(static fn (Builder $query): Builder => $query->with('compromiso.lote'))
             ->columns([
                 /*
                  * 🔴 La descripcion con el numero de FACTURA no es adorno.
@@ -104,16 +108,6 @@ class RecibosRelationManager extends RelationManager
                     ->weight('bold')
                     ->formatStateUsing(static fn (Recibo $record): string => $record->montoTotal()->formateado()),
 
-                TextColumn::make('impresiones_count')
-                    ->label('Impreso')
-                    ->badge()
-                    ->color(static fn (Recibo $record): string => (int) $record->getAttribute('impresiones_count') > 1 ? 'danger' : 'gray')
-                    ->formatStateUsing(static fn (Recibo $record): string => match ((int) $record->getAttribute('impresiones_count')) {
-                        0       => 'nunca',
-                        1       => 'original',
-                        2       => '1 copia',
-                        default => ((int) $record->getAttribute('impresiones_count') - 1).' copias',
-                    }),
             ])
             ->recordActions([
                 ImprimirRecibo::accion(),
