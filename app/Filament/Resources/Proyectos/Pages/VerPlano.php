@@ -2809,9 +2809,9 @@ class VerPlano extends Page
             ->visible(fn (): bool => auth()->user()?->can('importarPlano', Proyecto::class) === true)
             ->modalHeading('Importar el plano desde AutoCAD')
             ->modalDescription(
-                'Lee las polilineas cerradas del archivo y crea un lote por cada una, con su '.
-                'area real y el numero que diga el rotulo de adentro. El plano deja de estar '.
-                'marcado como esquematico.'
+                'Lee las polilineas cerradas del archivo -o arma los contornos, si el plano viene '.
+                'dibujado con lineas sueltas- y crea un lote por cada una, con su area real y el '.
+                'numero que diga el rotulo de adentro. El plano deja de estar marcado como esquematico.'
             )
             ->modalSubmitActionLabel('Importar')
             ->schema([
@@ -2830,6 +2830,13 @@ class VerPlano extends Page
                                  'que falten se crean solos. El plano entero se importa de UNA vez: '.
                                  'partirlo en varios archivos apilaria las manzanas una encima de otra.'),
 
+                Toggle::make('lineas_sueltas')
+                    ->label('El plano esta dibujado con lineas sueltas')
+                    ->default(false)
+                    ->helperText('Para el plano que no trae cada lote como una polilinea cerrada. Prendido, los lotes '.
+                                 'se arman siguiendo las lineas, y entra como lote el contorno que tenga un numero adentro. '.
+                                 'Si el plano nombra las manzanas con un texto aparte («BLOQUE A»), cada lote entra en la suya.'),
+
                 Select::make('bloque_id')
                     ->label('Bloque donde entran los lotes')
                     ->options(fn (): array => Bloque::query()
@@ -2838,8 +2845,8 @@ class VerPlano extends Page
                         ->pluck('nombre', 'id')
                         ->all())
                     ->required()
-                    ->helperText('Con la opcion de arriba prendida, este es solo el destino de los '.
-                                 'lotes cuyo rotulo NO traiga letra.'),
+                    ->helperText('Cuando el plano dice la manzana de cada lote -con la letra en el rotulo o con un '.
+                                 'texto «BLOQUE A»-, este es solo el destino de los que queden sin manzana.'),
 
                 Select::make('unidad')
                     ->label('¿En que unidad esta dibujado el plano?')
@@ -2886,30 +2893,63 @@ class VerPlano extends Page
 
                 $bloque = Bloque::query()->findOrFail($this->entero($data, 'bloque_id', 0));
                 $importador = new ImportadorDeDxf;
-                $analisis = $importador->analizar($contenido);
 
-                $capaDeLotes = $this->texto($data, 'capa_lotes', '') ?: ($analisis->capaSugeridaDeLotes() ?? '');
+                /*
+                 * Lo que el importador no puede leer lo dice con una
+                 * excepcion del dominio, y el mensaje ya viene escrito para
+                 * quien subio el archivo: que capa no tenia contornos, que
+                 * opcion probar. Sin atajarla aca, ese mensaje no lo leia
+                 * nadie: la pantalla mostraba un error 500.
+                 */
+                try {
+                    $analisis = $importador->analizar($contenido);
+                } catch (GrupoOlympoException $problema) {
+                    $this->avisarQueNoSeImporto($problema);
+
+                    return;
+                }
+
+                /*
+                 * Con lineas sueltas el vocabulario no ayuda a adivinar la
+                 * capa: quien dibuja asi suele dejar todo en la «0». Se
+                 * sugiere la que tenga mas tramos.
+                 */
+                $lineasSueltas = $this->booleano($data, 'lineas_sueltas');
+                $capaSugerida = $lineasSueltas ? $analisis->capaSugeridaDeTramos() : $analisis->capaSugeridaDeLotes();
+
+                $capaDeLotes = $this->texto($data, 'capa_lotes', '') ?: ($capaSugerida ?? '');
                 $unidadElegida = $this->texto($data, 'unidad', (string) UnidadDxf::Metros->value);
 
-                $resultado = $importador->importar($bloque, $contenido, new OpcionesDeImportacion(
-                    capaDeLotes: $capaDeLotes,
-                    precioVara: $this->texto($data, 'precio_vara', '0'),
-                    capaDeRotulos: $this->texto($data, 'capa_rotulos', '') ?: $analisis->capaSugeridaDeRotulos(),
-                    capaDeCalles: $this->texto($data, 'capa_calles', '') ?: $analisis->capaSugeridaDeCalles(),
-                    unidad: UnidadDxf::desde($unidadElegida === 'varas' ? null : (int) $unidadElegida),
-                    dibujadoEnVaras: $unidadElegida === 'varas',
-                    /*
-                     * La vara es del DESARROLLO, no del sistema: de este
-                     * factor sale cuantas varas² tiene cada lote, y el
-                     * precio es por vara². Si el topografo de este proyecto
-                     * levanto con otra vara, el area de todo el residencial
-                     * sale corrida. Se configura en la ficha del proyecto,
-                     * pestaña «Estado» → «Medidas del plano»; vacio usa la
-                     * del sistema.
-                     */
-                    varaEnMetros: $proyecto->varaEnMetros(),
-                    bloquePorRotulo: $this->booleano($data, 'bloque_por_rotulo'),
-                ));
+                // Adentro del try tambien las opciones: una capa en blanco o
+                // un precio mal escrito los rechaza el propio Value Object.
+                try {
+                    $opciones = new OpcionesDeImportacion(
+                        capaDeLotes: $capaDeLotes,
+                        precioVara: $this->texto($data, 'precio_vara', '0'),
+                        capaDeRotulos: $this->texto($data, 'capa_rotulos', '') ?: $analisis->capaSugeridaDeRotulos(),
+                        capaDeCalles: $this->texto($data, 'capa_calles', '') ?: $analisis->capaSugeridaDeCalles(),
+                        unidad: UnidadDxf::desde($unidadElegida === 'varas' ? null : (int) $unidadElegida),
+                        dibujadoEnVaras: $unidadElegida === 'varas',
+                        /*
+                         * La vara es del DESARROLLO, no del sistema: de este
+                         * factor sale cuantas varas² tiene cada lote, y el
+                         * precio es por vara². Si el topografo de este proyecto
+                         * levanto con otra vara, el area de todo el residencial
+                         * sale corrida. Se configura en la ficha del proyecto,
+                         * pestaña «Estado» → «Medidas del plano»; vacio usa la
+                         * del sistema.
+                         */
+                        varaEnMetros: $proyecto->varaEnMetros(),
+                        bloquePorRotulo: $this->booleano($data, 'bloque_por_rotulo'),
+                        armarContornos: $lineasSueltas,
+                    );
+
+                    $resultado = $importador->importar($bloque, $contenido, $opciones);
+                } catch (GrupoOlympoException $problema) {
+                    $this->avisarQueNoSeImporto($problema);
+
+                    return;
+                }
 
                 $cuerpo = sprintf(
                     'Capa de lotes: %s. Area total: %s '.$proyecto->unidadDeArea()->plural().'. %s%s%s',
@@ -2931,6 +2971,16 @@ class VerPlano extends Page
 
                 $this->redirect(ProyectoResource::getUrl('plano', ['record' => $this->getRecord()]));
             });
+    }
+
+    private function avisarQueNoSeImporto(GrupoOlympoException $problema): void
+    {
+        Notification::make()
+            ->title('No se importo nada')
+            ->body($problema->getMessage())
+            ->danger()
+            ->persistent()
+            ->send();
     }
 
     /**

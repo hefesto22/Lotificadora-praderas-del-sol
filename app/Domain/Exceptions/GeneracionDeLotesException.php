@@ -34,8 +34,18 @@ final class GeneracionDeLotesException extends GrupoOlympoException
         return new self(
             "La capa \"{$capa}\" no tiene ningun contorno cerrado. ".
             'Puede ser que los lotes esten en otra capa, o que en el plano esten '.
-            'dibujados con lineas sueltas en vez de polilineas cerradas: en ese caso '.
-            'hay que cerrarlos en AutoCAD antes de exportar.'
+            'dibujados con lineas sueltas en vez de polilineas cerradas: en ese caso, '.
+            'volve a importarlo con la opcion «El plano esta dibujado con lineas sueltas» prendida.'
+        );
+    }
+
+    public static function porLineasSinLotes(string $capa): self
+    {
+        return new self(
+            "Siguiendo las lineas de la capa \"{$capa}\" no se armo ningun lote. ".
+            'Es lote el contorno que tiene un numero de lote adentro: puede ser que las lineas '.
+            'esten en otra capa, que la capa de los numeros no sea la correcta, o que los '.
+            'linderos no lleguen a tocarse.'
         );
     }
 

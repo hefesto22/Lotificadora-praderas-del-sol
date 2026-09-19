@@ -164,6 +164,72 @@ test('sin vara propia, importar cae en la vara del sistema', function (): void {
 });
 
 /*
+| ═══ EL PLANO DIBUJADO CON LINEAS SUELTAS, DESDE EL PANEL — 18-sep-2026 ═══
+|
+| La mecanica esta probada en Dominio/Dxf/LineasSueltasTest. El seam que
+| cubre este es el del formulario: que el interruptor llegue al importador
+| y que, sin escribir ninguna capa, el panel sepa sola de donde armar los
+| lotes. Con lineas sueltas el vocabulario no ayuda -todo esta en la «0»-
+| y la sugerencia sale de contar tramos.
+|
+| El mismo cuadro de 10 x 10, pero como lo dibuja quien no cierra
+| polilineas: cuatro LINE, y el numero del lote adentro.
+*/
+function dxfDeUnCuadroDeLineas(float $lado): string
+{
+    $medida = number_format($lado, 4, '.', '');
+    $centro = number_format($lado / 2, 4, '.', '');
+
+    return implode("\r\n", [
+        '  0', 'SECTION', '  2', 'HEADER', '  9', '$INSUNITS', ' 70', '     6', '  0', 'ENDSEC',
+        '  0', 'SECTION', '  2', 'ENTITIES',
+        '  0', 'LINE', '  8', '0', ' 10', '0.0000', ' 20', '0.0000', ' 11', $medida, ' 21', '0.0000',
+        '  0', 'LINE', '  8', '0', ' 10', $medida, ' 20', '0.0000', ' 11', $medida, ' 21', $medida,
+        '  0', 'LINE', '  8', '0', ' 10', $medida, ' 20', $medida, ' 11', '0.0000', ' 21', $medida,
+        '  0', 'LINE', '  8', '0', ' 10', '0.0000', ' 20', $medida, ' 11', '0.0000', ' 21', '0.0000',
+        '  0', 'TEXT', '  8', 'TEXTOS', ' 10', $centro, ' 20', $centro, ' 40', '1.0', '  1', '7',
+        '  0', 'ENDSEC', '  0', 'EOF',
+    ])."\r\n";
+}
+
+test('con el interruptor de lineas sueltas, el panel arma el lote sin que nadie le diga la capa', function (): void {
+    $this->proyecto->update(['vara_en_metros' => '1.000000']);
+
+    Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+        ->callAction('importarDxf', [
+            'archivo'        => UploadedFile::fake()->createWithContent('lineas.dxf', dxfDeUnCuadroDeLineas(10.0)),
+            'lineas_sueltas' => true,
+            'bloque_id'      => $this->bloque->getKey(),
+            'unidad'         => (string) UnidadDxf::Metros->value,
+            'precio_vara'    => '1200.00',
+            'capa_lotes'     => '',
+            'capa_rotulos'   => '',
+            'capa_calles'    => '',
+        ])
+        ->assertHasNoActionErrors();
+
+    $lote = Lote::query()->where('bloque_id', $this->bloque->getKey())->sole();
+
+    expect($lote->getAttribute('numero'))->toBe('7')
+        ->and($lote->getAttribute('area_varas'))->toBe('100.0000');
+});
+
+test('sin el interruptor, ese mismo plano no tiene ningun contorno y no entra nada', function (): void {
+    Livewire::test(VerPlano::class, ['record' => $this->proyecto->getKey()])
+        ->callAction('importarDxf', [
+            'archivo'      => UploadedFile::fake()->createWithContent('lineas.dxf', dxfDeUnCuadroDeLineas(10.0)),
+            'bloque_id'    => $this->bloque->getKey(),
+            'unidad'       => (string) UnidadDxf::Metros->value,
+            'precio_vara'  => '1200.00',
+            'capa_lotes'   => '0',
+            'capa_rotulos' => '',
+            'capa_calles'  => '',
+        ]);
+
+    expect(Lote::query()->where('bloque_id', $this->bloque->getKey())->count())->toBe(0);
+});
+
+/*
 |--------------------------------------------------------------------------
 | Quién puede cargar el plano — 23-ago-2026
 |--------------------------------------------------------------------------

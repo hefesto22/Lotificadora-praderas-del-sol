@@ -43,10 +43,36 @@ use App\Domain\Plano\ValidaMedidas;
  * a proposito: el rotulo que el propio sistema dibuja en el mapa es
  * `numero.bloque` ("12B"), y leer eso como bloque "12" seria peor que no
  * leer nada. Ver RotuloDxf::bloqueDeLote().
+ *
+ * `armarContornos` es para el plano que NO trae cada lote como una
+ * polilinea cerrada: el perimetro de la manzana es una polilinea abierta
+ * y las divisiones son LINE sueltas que mueren contra el. Prendida, los
+ * lotes se arman siguiendo las lineas de `capaDeLotes`, y es lote la cara
+ * que tenga un numero adentro -nada mas: la calle, el cajetin y el
+ * membrete tambien son caras y no entran-. De yapa, si el plano nombra las
+ * manzanas con un texto aparte («BLOQUE A»), cada isla de lotes que
+ * comparten lindero toma ese nombre. Ver LotesDeLineasSueltas.
+ *
+ * `capaDeAreas` es para el plano que rotula el area en una capa y el
+ * numero en otra. Vacia -lo normal- las areas se buscan en la misma capa
+ * que los numeros.
  */
 final readonly class OpcionesDeImportacion
 {
     use ValidaMedidas;
+
+    /**
+     * A que distancia dos extremos son el mismo punto, en METROS.
+     *
+     * Medido sobre los dos planos del 18-sep-2026: uno cerraba exacto y
+     * el otro tenia huecos de entre 5 y 10 milimetros -el dibujante cerro
+     * a ojo, con el snap apagado-. Con menos de un centimetro de
+     * tolerancia, en ese plano se fundian lotes vecinos; de uno a veinte
+     * centimetros el resultado es identico, lote por lote. Tres
+     * centimetros queda holgado de los dos lados, y sigue siendo cien
+     * veces menos que el lado mas corto de un lote.
+     */
+    private const float CIERRE_EN_METROS = 0.03;
 
     /** @var numeric-string */
     public string $precioVara;
@@ -67,6 +93,8 @@ final readonly class OpcionesDeImportacion
         string $varaEnMetros = '0.8359',
         public bool $bloquePorRotulo = false,
         public array $sufijosDeArea = [],
+        public bool $armarContornos = false,
+        public ?string $capaDeAreas = null,
     ) {
         if (trim($capaDeLotes) === '') {
             throw ValueObjectInvalidoException::paraCampo(
@@ -114,6 +142,31 @@ final readonly class OpcionesDeImportacion
     public function leeElAreaDelRotulo(): bool
     {
         return $this->sufijosDeArea !== [];
+    }
+
+    /**
+     * La capa donde estan las areas rotuladas: la suya si el plano las
+     * separa, y si no la de los numeros.
+     */
+    public function capaDeLasAreas(): ?string
+    {
+        return $this->capaDeAreas ?? $this->capaDeRotulos;
+    }
+
+    /**
+     * La tolerancia para armar contornos, en unidades del DIBUJO.
+     *
+     * La constante esta en metros porque es una medida del mundo -cuanto
+     * se le perdona a la mano del dibujante- y no del archivo: tres
+     * centimetros son 0.03 en un plano en metros y 30 en uno en milimetros.
+     */
+    public function toleranciaDeCierre(): float
+    {
+        $metrosPorUnidad = $this->dibujadoEnVaras
+            ? (float) $this->varaEnMetros
+            : ($this->unidad->enMetros() ?? 1.0);
+
+        return self::CIERRE_EN_METROS / $metrosPorUnidad;
     }
 
     /**

@@ -49,15 +49,29 @@ use Illuminate\Support\Facades\DB;
  * relativas sobrevivan, los 84 tienen que pasar por la MISMA
  * transformacion, y entonces el reparto en bloques tiene que hacerlo el
  * importador leyendo la letra del rotulo.
+ *
+ * ═══ EL PLANO DIBUJADO CON LINEAS SUELTAS ═══
+ *
+ * No todos los topografos cierran cada lote en una polilinea. El
+ * 18-sep-2026 llegaron dos planos -83 y 95 lotes- sin un solo contorno
+ * cerrado, con los numeros sin letra ("1", "2", "3") y el nombre de la
+ * manzana en un texto aparte («BLOQUE A»). Con `armarContornos` los lotes
+ * se arman siguiendo las lineas y la manzana sale de la vecindad. Todo
+ * eso vive en LotesDeLineasSueltas; de aca para abajo un lote armado es
+ * un PoligonoDxf como cualquier otro.
  */
 final readonly class ImportadorDeDxf
 {
     /** Contornos con menos area que esto, en varas cuadradas, se descartan. */
     private const float AREA_MINIMA_VARAS = 0.5;
 
+    /** Cuantos lotes se nombran, como mucho, en un aviso que los lista. */
+    private const int LOTES_POR_AVISO = 5;
+
     public function __construct(
         private LectorDxf $lector = new LectorDxf,
         private ExtractorDeGeometria $extractor = new ExtractorDeGeometria,
+        private LotesDeLineasSueltas $deLineasSueltas = new LotesDeLineasSueltas,
     ) {}
 
     public function analizar(string $contenido): AnalisisDeDxf
@@ -66,7 +80,8 @@ final readonly class ImportadorDeDxf
         $poligonos = $this->extractor->poligonos($archivo);
         $rotulos = $this->extractor->rotulos($archivo);
 
-        /** @var array<string, array{contornos: int, rotulos: int, area: float}> $capas */
+        // int|string: una capa que se llama «0» queda con clave entera. Ver AnalisisDeDxf.
+        /** @var array<int|string, array{contornos: int, rotulos: int, area: float}> $capas */
         $capas = [];
         $puntos = [];
         $espejados = 0;
@@ -92,6 +107,13 @@ final readonly class ImportadorDeDxf
 
         uasort($capas, static fn (array $a, array $b): int => $b['contornos'] <=> $a['contornos']);
 
+        /** @var array<int|string, int> $tramosPorCapa */
+        $tramosPorCapa = [];
+
+        foreach ($this->extractor->segmentos($archivo) as $segmento) {
+            $tramosPorCapa[$segmento->capa] = ($tramosPorCapa[$segmento->capa] ?? 0) + 1;
+        }
+
         return new AnalisisDeDxf(
             unidadDeclarada: $archivo->unidades(),
             capas: $capas,
@@ -99,6 +121,7 @@ final readonly class ImportadorDeDxf
             caja: GeometriaPlana::caja($puntos),
             bloquesInsertados: $archivo->bloquesInsertados(),
             contornosEspejados: $espejados,
+            tramosPorCapa: $tramosPorCapa,
         );
     }
 
@@ -108,10 +131,26 @@ final readonly class ImportadorDeDxf
         $poligonos = $this->extractor->poligonos($archivo);
         $rotulos = $this->extractor->rotulos($archivo);
 
-        $deLotes = array_values(array_filter(
-            $poligonos,
-            static fn (PoligonoDxf $p): bool => $opciones->usaCapa($p->capa, $opciones->capaDeLotes)
-        ));
+        $candidatos = $this->candidatos($rotulos, $opciones);
+        $areasRotuladas = $this->areasRotuladas($rotulos, $opciones);
+        $areasSinUnidad = $this->areasSinUnidad($rotulos, $opciones);
+
+        $advertencias = [];
+        /** @var array<int, string> $manzanaDe el bloque de cada lote armado, por su posicion */
+        $manzanaDe = [];
+
+        if ($opciones->armarContornos) {
+            $armados = $this->armarLotes($archivo, $rotulos, $candidatos, $areasRotuladas, $opciones);
+
+            $deLotes = $armados->poligonos;
+            $manzanaDe = $armados->manzanas;
+            $advertencias = $armados->advertencias;
+        } else {
+            $deLotes = array_values(array_filter(
+                $poligonos,
+                static fn (PoligonoDxf $p): bool => $opciones->usaCapa($p->capa, $opciones->capaDeLotes)
+            ));
+        }
 
         $deCalles = $opciones->capaDeCalles === null ? [] : array_values(array_filter(
             $poligonos,
@@ -119,7 +158,9 @@ final readonly class ImportadorDeDxf
         ));
 
         if ($deLotes === []) {
-            throw GeneracionDeLotesException::porCapaSinContornos($opciones->capaDeLotes);
+            throw $opciones->armarContornos
+                ? GeneracionDeLotesException::porLineasSinLotes($opciones->capaDeLotes)
+                : GeneracionDeLotesException::porCapaSinContornos($opciones->capaDeLotes);
         }
 
         $transformar = $this->transformacion($deLotes, $deCalles, $opciones->varasPorUnidad());
@@ -127,23 +168,23 @@ final readonly class ImportadorDeDxf
         $proyectoId = (int) $bloque->getAttribute('proyecto_id');
         $bloquePorDefecto = (string) $bloque->getAttribute('nombre');
 
-        $candidatos = $this->candidatos($rotulos, $opciones);
-        $areasRotuladas = $this->areasRotuladas($rotulos, $opciones);
         $bloquesDelProyecto = $this->bloquesDelProyecto($proyectoId);
         $usados = $this->numerosOcupadosPorBloque($bloquesDelProyecto);
 
-        $advertencias = [];
         $sinRotulo = 0;
         $descartados = 0;
         $repetidos = 0;
         $conLetra = 0;
         $sinAreaRotulada = 0;
+        $sinManzana = 0;
         $areaTotal = 0.0;
+        /** @var list<string> $contradichos los lotes cuyo dibujo no mide lo que dice su rotulo */
+        $contradichos = [];
 
         /** @var list<array{bloque: string, numero: string, area: string, puntos: list<array{float, float}>}> $planificados */
         $planificados = [];
 
-        foreach ($deLotes as $poligono) {
+        foreach ($deLotes as $posicion => $poligono) {
             $puntos = array_map($transformar, $poligono->puntos);
             $area = GeometriaPlana::area($puntos);
 
@@ -166,6 +207,14 @@ final readonly class ImportadorDeDxf
             if ($opciones->bloquePorRotulo && $rotulo !== null && $rotulo['bloque'] !== null) {
                 $destino = $rotulo['bloque'];
                 $conLetra++;
+            } elseif (isset($manzanaDe[$posicion])) {
+                // El plano nombra la manzana con un texto aparte y este
+                // lote comparte lindero con el que lo tiene adentro. Ver
+                // LotesDeLineasSueltas.
+                $destino = $manzanaDe[$posicion];
+                $conLetra++;
+            } elseif ($manzanaDe !== []) {
+                $sinManzana++;
             }
 
             $usados[$destino] ??= [];
@@ -197,11 +246,21 @@ final readonly class ImportadorDeDxf
              * unidad del negocio. El que se transforma es el DIBUJO.
              */
             $rotulada = $opciones->leeElAreaDelRotulo()
-                ? $this->areaPara($poligono, $areasRotuladas)
+                ? $this->areaPara($poligono, $areasRotuladas) ?? $this->areaSinUnidadPara($poligono, $areasSinUnidad, $area)
                 : null;
 
             if ($opciones->leeElAreaDelRotulo() && $rotulada === null) {
                 $sinAreaRotulada++;
+            }
+
+            if ($rotulada !== null && $this->seContradicen($area, (float) $rotulada)) {
+                $contradichos[] = sprintf(
+                    '%s-%s (el dibujo mide %s y el rotulo dice %s)',
+                    $destino,
+                    $numero,
+                    number_format($area, 2, '.', ''),
+                    $rotulada,
+                );
             }
 
             // El total suma lo que se va a guardar, no otra cosa.
@@ -233,7 +292,7 @@ final readonly class ImportadorDeDxf
 
         if ($repetidos > 0) {
             $advertencias[] = "{$repetidos} numeros ya estaban ocupados en su bloque y se renumeraron. ".
-                'Suele significar que el plano se importo dos veces.';
+                'O el plano repite un numero adentro de una misma manzana, o se importo dos veces.';
         }
 
         if ($sinRotulo > 0) {
@@ -248,6 +307,26 @@ final readonly class ImportadorDeDxf
             $advertencias[] = "{$sinAreaRotulada} lotes no traian el area rotulada adentro y entraron ".
                 'con la medida del dibujo, que en un lado curvo queda corta. '.
                 'Cotejalos contra el plano impreso.';
+        }
+
+        if ($contradichos !== []) {
+            $muestra = implode(', ', array_slice($contradichos, 0, self::LOTES_POR_AVISO));
+            $resto = count($contradichos) - self::LOTES_POR_AVISO;
+
+            $advertencias[] = sprintf(
+                'En %d lote(s) el dibujo contradice al area rotulada en mas del %s%%: %s%s. '.
+                'Entraron con el area del rotulo; o el rotulo esta mal copiado o el lindero esta corrido, '.
+                'y eso lo contesta el topografo.',
+                count($contradichos),
+                Lote::TOLERANCIA_DE_AREA,
+                $muestra,
+                $resto > 0 ? " y {$resto} mas" : '',
+            );
+        }
+
+        if ($sinManzana > 0) {
+            $advertencias[] = "{$sinManzana} lotes estan en una manzana a la que el plano no le pone nombre ".
+                "y entraron en {$bloquePorDefecto}.";
         }
 
         if ($opciones->bloquePorRotulo && $conLetra === 0) {
@@ -432,9 +511,10 @@ final readonly class ImportadorDeDxf
         }
 
         $areas = [];
+        $capa = $opciones->capaDeLasAreas();
 
         foreach ($rotulos as $rotulo) {
-            if ($opciones->capaDeRotulos !== null && ! $opciones->usaCapa($rotulo->capa, $opciones->capaDeRotulos)) {
+            if ($capa !== null && ! $opciones->usaCapa($rotulo->capa, $capa)) {
                 continue;
             }
 
@@ -484,6 +564,133 @@ final readonly class ImportadorDeDxf
         }
 
         return $mejor;
+    }
+
+    /**
+     * Las areas a las que el dibujante les olvido la unidad: «A=447.08».
+     *
+     * Van aparte de areasRotuladas() porque NO se les cree sin mas. Ver
+     * areaSinUnidadPara().
+     *
+     * @param list<RotuloDxf> $rotulos
+     *
+     * @return list<array{area: numeric-string, x: float, y: float}>
+     */
+    private function areasSinUnidad(array $rotulos, OpcionesDeImportacion $opciones): array
+    {
+        if (! $opciones->leeElAreaDelRotulo()) {
+            return [];
+        }
+
+        $areas = [];
+        $capa = $opciones->capaDeLasAreas();
+
+        foreach ($rotulos as $rotulo) {
+            if ($capa !== null && ! $opciones->usaCapa($rotulo->capa, $capa)) {
+                continue;
+            }
+
+            $area = $rotulo->areaSinUnidad();
+
+            if ($area === null) {
+                continue;
+            }
+
+            $areas[] = ['area' => $area, 'x' => $rotulo->x, 'y' => $rotulo->y];
+        }
+
+        return $areas;
+    }
+
+    /**
+     * El area sin unidad de adentro del contorno, SI el dibujo la confirma.
+     *
+     * Un numero con decimales y sin unidad es un area con un descuido de
+     * tipeo... o la medida de un lado. Lo que los distingue es el propio
+     * dibujo: «447.08» adentro de un lote que mide 447.1 es su area, y
+     * «17.40» no lo es de ningun lote. Se acepta solo dentro de la misma
+     * tolerancia con la que el sistema despues marca un lote como
+     * desalineado, y asi esta puerta no puede dejar entrar nada que la
+     * otra vaya a rechazar.
+     *
+     * @param list<array{area: numeric-string, x: float, y: float}> $areas
+     * @param float $medida el area del dibujo, ya en la unidad del negocio
+     *
+     * @return numeric-string|null
+     */
+    private function areaSinUnidadPara(PoligonoDxf $poligono, array $areas, float $medida): ?string
+    {
+        $confirmadas = array_values(array_filter(
+            $areas,
+            fn (array $candidata): bool => ! $this->seContradicen($medida, (float) $candidata['area']),
+        ));
+
+        return $this->areaPara($poligono, $confirmadas);
+    }
+
+    /**
+     * ¿El dibujo y el rotulo estan contando cosas distintas?
+     *
+     * La vara es Lote::TOLERANCIA_DE_AREA y no una propia: es la misma
+     * pregunta que despues contesta Lote::poligonoDesalineado(), y dos
+     * tolerancias para una sola pregunta terminan discrepando.
+     */
+    private function seContradicen(float $dibujada, float $rotulada): bool
+    {
+        if ($rotulada <= 0.0) {
+            return true;
+        }
+
+        return abs($dibujada - $rotulada) / $rotulada * 100.0 > Lote::TOLERANCIA_DE_AREA;
+    }
+
+    /**
+     * Los lotes de un plano dibujado con lineas sueltas.
+     *
+     * Aca solo se junta lo que LotesDeLineasSueltas necesita: los tramos
+     * de la capa de lotes, los textos «BLOQUE X» y el factor que lleva un
+     * area del dibujo a la unidad del negocio -al cuadrado, porque es un
+     * area-. Las reglas viven alla.
+     *
+     * @param list<RotuloDxf> $rotulos
+     * @param list<array{numero: string, bloque: ?string, x: float, y: float}> $candidatos
+     * @param list<array{area: numeric-string, x: float, y: float}> $areasRotuladas
+     */
+    private function armarLotes(
+        ArchivoDxf $archivo,
+        array $rotulos,
+        array $candidatos,
+        array $areasRotuladas,
+        OpcionesDeImportacion $opciones,
+    ): LotesArmados {
+        $tramos = [];
+
+        foreach ($this->extractor->segmentos($archivo) as $segmento) {
+            if ($opciones->usaCapa($segmento->capa, $opciones->capaDeLotes)) {
+                $tramos[] = $segmento->extremos();
+            }
+        }
+
+        $bloques = [];
+
+        foreach ($rotulos as $rotulo) {
+            $nombre = $rotulo->nombreDeBloque();
+
+            if ($nombre !== null) {
+                $bloques[] = ['nombre' => $nombre, 'x' => $rotulo->x, 'y' => $rotulo->y];
+            }
+        }
+
+        return $this->deLineasSueltas->armar(
+            $tramos,
+            $opciones->toleranciaDeCierre(),
+            $candidatos,
+            $areasRotuladas,
+            $bloques,
+            $opciones->varasPorUnidad() ** 2,
+            Lote::TOLERANCIA_DE_AREA,
+            $opciones->capaDeLotes,
+        );
     }
 
     /**

@@ -39,6 +39,21 @@ final readonly class RotuloDxf
      */
     private const array PALABRAS_DE_LOTE = ['LOTE', 'LOT', 'LT'];
 
+    /**
+     * El texto que le pone nombre a una manzana entera: «BLOQUE A».
+     *
+     * Solo las palabras LARGAS. «MZ 3» tambien seria razonable, pero con
+     * cuatro letras o menos ya calza en FORMA_DE_ROTULO como "el lote 3
+     * del bloque MZ", y un mismo texto no puede ser las dos cosas.
+     */
+    private const string FORMA_DE_BLOQUE = '/^(?:BLOQUE|BLOCK|MANZANA)[\s\-.:#]*(?<nombre>\p{L}{1,4}|\d{1,3})$/iu';
+
+    /**
+     * Un numero con decimales y nada mas, con o sin el «A=» adelante.
+     * Los decimales son obligatorios: «12» es un numero de lote.
+     */
+    private const string FORMA_DE_AREA_SIN_UNIDAD = '/^(?:A\s*=\s*)?(?<numero>\d{1,3}(?:,\d{3})+\.\d{1,4}|\d+\.\d{1,4})$/iu';
+
     public function __construct(
         public string $capa,
         public string $texto,
@@ -139,6 +154,57 @@ final readonly class RotuloDxf
             }
 
             return $numero;
+        }
+
+        return null;
+    }
+
+    /**
+     * El AREA que dice un rotulo al que el dibujante le olvido la unidad.
+     *
+     * En los dos planos del 18-sep-2026, seis de 178 lotes dicen
+     * «A=447.08» o «260.00» a secas donde sus vecinos dicen «A=447.08v2».
+     * Es el mismo dato con un descuido de tipeo, y dejarlo afuera hace que
+     * ese lote entre con la medida del dibujo.
+     *
+     * 🔴 ESTE METODO SOLO NO ALCANZA, y por eso es aparte de
+     * areaRotulada(): un numero con decimales y sin unidad es tambien como
+     * se escribe la medida de un lado -«17.40»-. Quien lo use tiene que
+     * cotejarlo contra el area del dibujo antes de creerle; el importador
+     * lo acepta solo si coinciden dentro de Lote::TOLERANCIA_DE_AREA.
+     *
+     * @return numeric-string|null
+     */
+    public function areaSinUnidad(): ?string
+    {
+        foreach ($this->lineas() as $linea) {
+            if (preg_match(self::FORMA_DE_AREA_SIN_UNIDAD, $linea, $partes) !== 1) {
+                continue;
+            }
+
+            $numero = str_replace(',', '', $partes['numero']);
+
+            if (is_numeric($numero)) {
+                return $numero;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * El nombre de manzana que anuncia el rotulo: «BLOQUE A» -> "A".
+     *
+     * Es para los planos que numeran los lotes "1", "2", "3" y ponen el
+     * nombre de la manzana en un texto aparte. Ese texto no dice de que
+     * lotes habla; eso lo decide la vecindad. Ver LotesDeLineasSueltas.
+     */
+    public function nombreDeBloque(): ?string
+    {
+        foreach ($this->lineas() as $linea) {
+            if (preg_match(self::FORMA_DE_BLOQUE, $linea, $partes) === 1) {
+                return mb_strtoupper($partes['nombre'], 'UTF-8');
+            }
         }
 
         return null;

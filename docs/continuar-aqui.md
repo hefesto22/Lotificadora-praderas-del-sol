@@ -1,7 +1,90 @@
-# Continuar acá — 15-sep-2026
+# Continuar acá — 18-sep-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 🔴 18-sep — El importador aprendió a leer planos dibujados con líneas sueltas
+
+Llegaron dos planos de La Unión, Copán, del mismo ingeniero (Gerson Menjívar):
+**COLONIA RÍO BLANCO** (`CRB`, 83 lotes, de Elder Dionel Pinto) y
+**LOTIFICACIÓN LA UNIÓN** (`LLU`, 95 lotes, de Omar Leiva y Leo Mejía). Con el
+importador de ese día entraban **cero lotes**.
+
+### Las tres cosas que ese ingeniero hace distinto
+
+1. **No hay un solo lote cerrado.** Todo está en la capa `0` —lotes, calles,
+   cajetín y hasta el carrito de la sección típica—: el perímetro de la manzana
+   es una polilínea ABIERTA y las divisiones son `LINE` sueltas.
+2. **El número no trae letra** («1», «2», «3») y la manzana va en un texto
+   aparte, «BLOQUE A».
+3. **Seis áreas sin unidad** («A=447.08», «260.00»).
+
+### Cómo quedó (producto, no parche)
+
+- `ArmadorDeContornos` — las caras de un grafo plano: corta cada tramo donde
+  otro lo toca, funde extremos a menos de **3 cm**, poda lo que cuelga y
+  recorre. Uno de los dos planos tenía huecos de 5 a 10 mm; con tolerancia
+  cero se fundían lotes vecinos.
+- `LotesDeLineasSueltas` — **es lote la cara que tiene un número adentro**, y
+  nada más. La manzana sale de la VECINDAD: los lotes que comparten lindero
+  son una isla, y se llama como el «BLOQUE X» que cayó adentro. Y funde las
+  dos mitades de un lote partido por una línea sobrante, **solo si juntas
+  suman lo que dice el rótulo**.
+- `OpcionesDeImportacion`: `armarContornos` y `capaDeAreas`, al FINAL de la
+  firma. `PlanoDeclarado`: `lineasSueltas`, `capaDeAreas`, `manzanaSinNombre`.
+- Un área sin unidad entra **solo si el dibujo la confirma** dentro de
+  `Lote::TOLERANCIA_DE_AREA`; «17.40» no pasa por área de ningún lote.
+- Aviso nuevo, para cualquier plano: los lotes cuyo dibujo contradice a su
+  rótulo en más del 2 %, con nombre y los dos números.
+- Panel: interruptor **«El plano está dibujado con líneas sueltas»** en
+  Proyecto → Ver plano → Importar plano DXF.
+
+### 🔴 Dos bugs viejos que destapó, y que NO eran de hoy
+
+- **La capa «0» tumbaba el análisis.** PHP guarda como ENTERO toda clave de
+  texto que parezca número, así que `$capas['0']` queda con la clave `0`, y con
+  `strict_types` pasarla a `normalizar(string)` es un TypeError: un 500 al
+  subir el archivo. Vivió escondido porque en los planos anteriores la «0» no
+  tenía ni contornos ni textos. Las claves son `int|string` y se leen por
+  `AnalisisDeDxf::nombre()`.
+- **`importarDxf` no atajaba las excepciones del dominio.** El mensaje de «esa
+  capa no tiene contornos» estaba escrito para el usuario y no lo leía nadie:
+  salía un 500. Ahora sale como aviso rojo, y dice qué opción probar.
+
+### Lo que dice cada plano, verificado contra el importador de producción
+
+| | `CRB` | `LLU` |
+|---|---|---|
+| Lotes | **83** — A 17 · B 15 · C 14 · D 17 · E 20 | **95** — A 8 · B 21 · C 26 · D 24 · E 6 · F 6 · **G 4** |
+| Área | **36,431.17 v²** = suma de los 83 rótulos | **34,578.87 v²** = suma de los 95 |
+| Vara | **0.8350 m**, la del ingeniero (no 0.8359) | la misma |
+
+⚠️ Los conteos salieron de leer los TEXTOS del archivo, no de un plano
+impreso. Cuando llegue el PDF del ingeniero, se cotejan.
+
+### Lo que hay que preguntarle al ingeniero
+
+- **`LLU`, manzana G — PROVISIONAL.** Cuatro lotes de 1,109.88 v² numerados
+  «1», «1», «1» y «1», sin nombre de manzana. Entraron como G-1…G-4 (norte a
+  sur, oeste a este) por decisión de Mauricio, para ver el plano completo.
+  **Esa letra y esos números los puso el sistema.** No se vende ninguno sin
+  confirmarlos.
+- **`CRB`, lote E-10.** El rótulo dice 312.00 v² y el dibujo mide 320.81
+  (2.8 %). Entró con 312.00 y queda marcado como desalineado.
+
+### Falta
+
+1. Precio y planes de pago de los dos.
+2. Mirar los dos mapas contra el PDF del ingeniero cuando llegue.
+3. Altamira (`RAL`) y El Bambú (`REB`) se borraron de la base LOCAL a pedido
+   de Mauricio («no es necesario»). Sus seeders, sus DXF y
+   `PlanoDesdeDxfSeederTest` **siguen en el repo**: si también se van, esos 12
+   tests se reescriben sobre los planos de La Unión.
+
+```bash
+herd php artisan db:seed --class="Database\Seeders\Clientes\ColoniaRioBlancoSeeder"
+herd php artisan db:seed --class="Database\Seeders\Clientes\LotificacionLaUnionSeeder"
+```
 
 ## 🔴 15-sep — Se fue el sello «COPIA» del recibo
 

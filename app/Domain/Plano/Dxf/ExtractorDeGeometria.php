@@ -17,6 +17,10 @@ namespace App\Domain\Plano\Dxf;
  *  3. En TEXT, si hay justificacion (72 o 73 distintos de cero), la
  *     posicion real es 11/21 y no 10/20.
  *  4. En MTEXT los trozos del codigo 3 vienen ANTES del codigo 1.
+ *
+ * Desde el 18-sep-2026 entrega ademas los TRAMOS sueltos del dibujo
+ * -segmentos()-, para los planos que no traen los lotes como contornos
+ * cerrados. Ver ArmadorDeContornos.
  */
 final readonly class ExtractorDeGeometria
 {
@@ -102,7 +106,106 @@ final readonly class ExtractorDeGeometria
         return $rotulos;
     }
 
+    /**
+     * Todos los tramos rectos del dibujo, vengan de donde vengan.
+     *
+     * Una LINE es un tramo. Una polilinea -abierta o cerrada- son tantos
+     * como lados tenga, y un lado curvo entra teselado igual que en
+     * poligonos(). Un ARC suelto tambien: la ochava de una esquina suele
+     * dibujarse asi, y sin ella el lote de la esquina no cierra.
+     *
+     * A diferencia de poligonos(), aca NO se exige que la polilinea este
+     * cerrada: el perimetro de una manzana dibujado como polilinea abierta
+     * es justo el caso que hay que leer.
+     *
+     * @return list<SegmentoDxf>
+     */
+    public function segmentos(ArchivoDxf $archivo): array
+    {
+        $entidades = $archivo->delDibujo();
+        $total = count($entidades);
+        $segmentos = [];
+
+        for ($i = 0; $i < $total; $i++) {
+            $entidad = $entidades[$i];
+
+            if ($entidad->tipo === 'LINE') {
+                $x1 = $entidad->numero(10);
+                $y1 = $entidad->numero(20);
+                $x2 = $entidad->numero(11);
+                $y2 = $entidad->numero(21);
+
+                if ($x1 !== null && $y1 !== null && $x2 !== null && $y2 !== null) {
+                    $segmentos[] = new SegmentoDxf($entidad->capa(), $x1, $y1, $x2, $y2);
+                }
+
+                continue;
+            }
+
+            if ($entidad->tipo === 'ARC') {
+                foreach ($this->tramosDeArco($entidad) as $tramo) {
+                    $segmentos[] = $tramo;
+                }
+
+                continue;
+            }
+
+            if ($entidad->tipo === 'LWPOLYLINE') {
+                $vertices = $this->verticesDeLwpolyline($entidad);
+
+                foreach ($this->tramos($entidad->capa(), $vertices, $entidad->tieneBandera(70, 1)) as $tramo) {
+                    $segmentos[] = $tramo;
+                }
+
+                continue;
+            }
+
+            if ($entidad->tipo !== 'POLYLINE') {
+                continue;
+            }
+
+            // Trampa 2, igual que en poligonos(): los vertices siguen a la
+            // POLYLINE hasta SEQEND.
+            $deVertice = [];
+            $j = $i + 1;
+
+            while ($j < $total && $entidades[$j]->tipo !== 'SEQEND') {
+                if ($entidades[$j]->tipo === 'VERTEX') {
+                    $deVertice[] = $entidades[$j];
+                }
+
+                $j++;
+            }
+
+            if ($this->esContorno2D($entidad)) {
+                $vertices = $this->verticesDePolyline($deVertice);
+
+                foreach ($this->tramos($entidad->capa(), $vertices, $entidad->tieneBandera(70, 1)) as $tramo) {
+                    $segmentos[] = $tramo;
+                }
+            }
+
+            $i = $j;
+        }
+
+        return $segmentos;
+    }
+
     private function desdeLwpolyline(EntidadDxf $entidad): ?PoligonoDxf
+    {
+        return $this->armar(
+            $entidad->capa(),
+            $this->verticesDeLwpolyline($entidad),
+            $entidad->tieneBandera(70, 1),
+            'LWPOLYLINE',
+            ($entidad->numero(230) ?? 1.0) < 0
+        );
+    }
+
+    /**
+     * @return list<array{x: float, y: float, bulge: float}>
+     */
+    private function verticesDeLwpolyline(EntidadDxf $entidad): array
     {
         /** @var list<array{x: float, y: float, bulge: float}> $vertices */
         $vertices = [];
@@ -147,15 +250,7 @@ final readonly class ExtractorDeGeometria
             $vertices[] = $abierto;
         }
 
-        $cerrada = $entidad->tieneBandera(70, 1);
-
-        return $this->armar(
-            $entidad->capa(),
-            $vertices,
-            $cerrada,
-            'LWPOLYLINE',
-            ($entidad->numero(230) ?? 1.0) < 0
-        );
+        return $vertices;
     }
 
     /**
@@ -163,12 +258,34 @@ final readonly class ExtractorDeGeometria
      */
     private function desdePolyline(EntidadDxf $entidad, array $entidadesVertice): ?PoligonoDxf
     {
-        foreach ([self::POLILINEA_3D, self::MALLA_POLIGONAL, self::MALLA_DE_CARAS] as $bit) {
-            if ($entidad->tieneBandera(70, $bit)) {
-                return null;
-            }
+        if (! $this->esContorno2D($entidad)) {
+            return null;
         }
 
+        return $this->armar(
+            $entidad->capa(),
+            $this->verticesDePolyline($entidadesVertice),
+            $entidad->tieneBandera(70, 1),
+            'POLYLINE'
+        );
+    }
+
+    /**
+     * Una POLYLINE 3D o una malla comparten el nombre de la entidad y nada
+     * mas: no son un contorno en el plano.
+     */
+    private function esContorno2D(EntidadDxf $entidad): bool
+    {
+        return array_all([self::POLILINEA_3D, self::MALLA_POLIGONAL, self::MALLA_DE_CARAS], fn (int $bit): bool => ! $entidad->tieneBandera(70, $bit));
+    }
+
+    /**
+     * @param list<EntidadDxf> $entidadesVertice
+     *
+     * @return list<array{x: float, y: float, bulge: float}>
+     */
+    private function verticesDePolyline(array $entidadesVertice): array
+    {
         $vertices = [];
 
         foreach ($entidadesVertice as $vertice) {
@@ -190,7 +307,93 @@ final readonly class ExtractorDeGeometria
             $vertices[] = ['x' => $x, 'y' => $y, 'bulge' => $vertice->numero(42) ?? 0.0];
         }
 
-        return $this->armar($entidad->capa(), $vertices, $entidad->tieneBandera(70, 1), 'POLYLINE');
+        return $vertices;
+    }
+
+    /**
+     * Los lados de una polilinea como tramos sueltos, con las curvas ya
+     * teseladas. Cerrada, suma el lado que vuelve al primer vertice.
+     *
+     * @param list<array{x: float, y: float, bulge: float}> $vertices
+     *
+     * @return list<SegmentoDxf>
+     */
+    private function tramos(string $capa, array $vertices, bool $cerrada): array
+    {
+        $total = count($vertices);
+
+        if ($total < 2) {
+            return [];
+        }
+
+        $tramos = [];
+        $lados = $cerrada ? $total : $total - 1;
+
+        for ($i = 0; $i < $lados; $i++) {
+            $actual = $vertices[$i];
+            $siguiente = $vertices[($i + 1) % $total];
+
+            $camino = [
+                [$actual['x'], $actual['y']],
+                ...GeometriaPlana::arcoPorBulge($actual['x'], $actual['y'], $siguiente['x'], $siguiente['y'], $actual['bulge']),
+                [$siguiente['x'], $siguiente['y']],
+            ];
+
+            for ($paso = 1, $pasos = count($camino); $paso < $pasos; $paso++) {
+                $tramos[] = new SegmentoDxf(
+                    $capa,
+                    $camino[$paso - 1][0],
+                    $camino[$paso - 1][1],
+                    $camino[$paso][0],
+                    $camino[$paso][1],
+                );
+            }
+        }
+
+        return $tramos;
+    }
+
+    /**
+     * Un ARC suelto, teselado.
+     *
+     * Los angulos del DXF van en grados y SIEMPRE en sentido antihorario
+     * del 50 al 51; si el final es menor que el principio, el arco cruza
+     * el cero. Con la extrusion hacia abajo (230 negativo) la entidad esta
+     * espejada: el centro cambia de signo en X y los angulos se reflejan.
+     *
+     * @return list<SegmentoDxf>
+     */
+    private function tramosDeArco(EntidadDxf $entidad): array
+    {
+        $centroX = $entidad->numero(10);
+        $centroY = $entidad->numero(20);
+        $radio = $entidad->numero(40);
+        $desde = $entidad->numero(50);
+        $hasta = $entidad->numero(51);
+
+        if ($centroX === null || $centroY === null || $radio === null || $desde === null || $hasta === null) {
+            return [];
+        }
+
+        if (($entidad->numero(230) ?? 1.0) < 0) {
+            $centroX = -$centroX;
+            [$desde, $hasta] = [180.0 - $hasta, 180.0 - $desde];
+        }
+
+        $camino = GeometriaPlana::arco($centroX, $centroY, $radio, $desde, $hasta);
+        $tramos = [];
+
+        for ($paso = 1, $pasos = count($camino); $paso < $pasos; $paso++) {
+            $tramos[] = new SegmentoDxf(
+                $entidad->capa(),
+                $camino[$paso - 1][0],
+                $camino[$paso - 1][1],
+                $camino[$paso][0],
+                $camino[$paso][1],
+            );
+        }
+
+        return $tramos;
     }
 
     /**

@@ -229,6 +229,47 @@ final class GeometriaPlana
     }
 
     /**
+     * Un arco dado por su centro, su radio y sus dos angulos, como una
+     * sucesion de puntos. Es la forma en que el DXF guarda la entidad ARC.
+     *
+     * Los angulos van en GRADOS y el arco corre SIEMPRE en sentido
+     * antihorario del primero al segundo: si el final es menor que el
+     * principio, cruza el cero y se le suma una vuelta. Un ARC de 350 a 10
+     * mide 20 grados, no 340 para atras.
+     *
+     * A diferencia de arcoPorBulge(), aca los extremos SI se incluyen: un
+     * ARC es una entidad suelta y no hay vertices vecinos que los pongan.
+     *
+     * @return list<array{float, float}>
+     */
+    public static function arco(float $centroX, float $centroY, float $radio, float $desdeGrados, float $hastaGrados): array
+    {
+        if ($radio < 1e-9) {
+            return [];
+        }
+
+        $barrido = fmod($hastaGrados - $desdeGrados, 360.0);
+
+        if ($barrido <= 0.0) {
+            $barrido += 360.0;
+        }
+
+        $segmentos = (int) min(
+            self::SEGMENTOS_MAXIMOS,
+            max(2, ceil($barrido / self::GRADOS_POR_SEGMENTO))
+        );
+
+        $puntos = [];
+
+        for ($paso = 0; $paso <= $segmentos; $paso++) {
+            $t = deg2rad($desdeGrados + ($barrido * ($paso / $segmentos)));
+            $puntos[] = [$centroX + ($radio * cos($t)), $centroY + ($radio * sin($t))];
+        }
+
+        return $puntos;
+    }
+
+    /**
      * Convierte un segmento con bulge en una sucesion de puntos rectos.
      *
      * El bulge de DXF es la tangente de un cuarto del angulo del arco, y

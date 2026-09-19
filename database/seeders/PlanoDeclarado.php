@@ -41,6 +41,11 @@ final readonly class PlanoDeclarado
      * @param array<string, int> $lotesPorBloque lo que dice el plano impreso, manzana por manzana
      * @param float $areaTotal suma de las areas rotuladas, en la unidad del proyecto
      * @param array<string, mixed> $datos columnas extra de `proyectos` (municipio, direccion, ...)
+     * @param string|null $capaDeAreas la capa de las areas rotuladas, cuando NO es la de los numeros
+     * @param bool $lineasSueltas el plano no trae los lotes como polilineas cerradas: se arman
+     *                            siguiendo las lineas de `capaDeLotes`. Ver LotesDeLineasSueltas
+     * @param string|null $manzanaSinNombre a que manzana van los lotes de una isla a la que el plano
+     *                                      no le puso nombre. Tiene que estar en `lotesPorBloque`
      */
     public function __construct(
         public string $codigo,
@@ -56,11 +61,21 @@ final readonly class PlanoDeclarado
         public string $varaEnMetros = '1.000000',
         public float $toleranciaDeArea = 0.05,
         public array $datos = [],
+        public ?string $capaDeAreas = null,
+        public bool $lineasSueltas = false,
+        public ?string $manzanaSinNombre = null,
     ) {
         if ($lotesPorBloque === []) {
             throw new RuntimeException(
                 "El plano de {$codigo} no declara ni una manzana. ".
                 'Sin eso no hay contra que comparar la lectura del DXF.'
+            );
+        }
+
+        if ($manzanaSinNombre !== null && ! array_key_exists(mb_strtoupper($manzanaSinNombre, 'UTF-8'), $this->manzanas())) {
+            throw new RuntimeException(
+                "El plano de {$codigo} manda los lotes sin manzana a «{$manzanaSinNombre}», ".
+                'pero esa manzana no esta entre las declaradas. Hay que decir cuantos lotes lleva.'
             );
         }
     }
@@ -99,9 +114,18 @@ final readonly class PlanoDeclarado
      * transformacion al origen se calcula UNA vez sobre el plano entero, y
      * por eso un plano de varias manzanas entra de una sola importacion
      * con `bloquePorRotulo`, nunca partido en un archivo por manzana.
+     *
+     * Casi siempre da igual cual sea, porque todos los lotes traen su
+     * manzana. Deja de dar igual cuando el plano tiene una isla de lotes
+     * SIN nombre: van a parar aca, y si la semilla fuera la A terminarian
+     * mezclados con los de la A de verdad. Para eso `manzanaSinNombre`.
      */
     public function manzanaSemilla(): string
     {
+        if ($this->manzanaSinNombre !== null) {
+            return mb_strtoupper($this->manzanaSinNombre, 'UTF-8');
+        }
+
         return (string) array_key_first($this->manzanas());
     }
 
@@ -137,6 +161,8 @@ final readonly class PlanoDeclarado
             // un lado curvo entra teselado y el poligono mide de menos.
             // Ver OpcionesDeImportacion::$sufijosDeArea.
             sufijosDeArea: $this->unidadesDelRotulo(),
+            armarContornos: $this->lineasSueltas,
+            capaDeAreas: $this->capaDeAreas,
         );
     }
 
