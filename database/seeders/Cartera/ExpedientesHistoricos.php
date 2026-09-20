@@ -96,6 +96,14 @@ namespace Database\Seeders\Cartera;
  *   'observaciones' → lo que el cuaderno dice al margen. Va al expediente.
  *   'pagos'         → los renglones del historial. La prima NO va acá: la emite
  *                     el propio `activar()` al firmar la venta.
+ *   'correccion_de_valor' → SOLO si el expediente entró con un valor que no era
+ *                     el del cuaderno y después se corrigió. Trae el valor de
+ *                     verdad de cada lote —«bloque-numero» => valor— y el
+ *                     motivo. El seeder la aplica al final, por
+ *                     `CorreccionDeValor`: la MISMA puerta que se usó en
+ *                     producción (`olympo:corregir-valor`), así una carga nueva
+ *                     termina idéntica a la instalación real. Hoy la lleva un
+ *                     solo expediente, el 0028 — leer su nota antes de copiarla.
  *
  * Y cada pago:
  *
@@ -1346,10 +1354,29 @@ final class ExpedientesHistoricos
                     'dni'      => '0406200200046',
                     'telefono' => '87459973',
                 ],
+                /*
+                 * 🔴 ESTOS VALORES NO SON LOS DEL CUADERNO, Y SE QUEDAN ASI A
+                 * PROPOSITO. El cuaderno dice L 325,000.00 por lote. Así entró
+                 * a producción el 23-ago-2026 —«respetando la cuota», que fue
+                 * el error— y el 20-sep-2026 se corrigió con
+                 * `olympo:corregir-valor`, cuando el cliente preguntó por los
+                 * L 8.00 que el sistema no le mostraba.
+                 *
+                 * Poner 325,000.00 acá le calcularía a una carga nueva OTRA
+                 * cuota (L 6,534.72 por lote, no L 6,534.67) y dejaría de
+                 * parecerse a producción. Se repite el camino entero: entra
+                 * como entró, y `correccion_de_valor` —abajo— lo corrige por la
+                 * misma puerta. El resultado es el de producción: la cuota de
+                 * siempre y el residuo en la última.
+                 */
                 'lotes' => [
                     ['bloque' => 'H', 'numero' => '9', 'valor' => '324997.33'],
                     ['bloque' => 'H', 'numero' => '15', 'valor' => '324997.33'],
                     ['bloque' => 'H', 'numero' => '16', 'valor' => '324997.34'],
+                ],
+                'correccion_de_valor' => [
+                    'motivo' => 'El cuaderno (pág. 63) dice L 975,000.00: L 325,000.00 por lote. Se había cargado en L 974,992.00 para respetar la cuota de L 19,604.00; los L 8.00 de diferencia van en la última cuota.',
+                    'lotes'  => ['H-9' => '325000.00', 'H-15' => '325000.00', 'H-16' => '325000.00'],
                 ],
                 'prima'         => '34000.00',
                 'plazo'         => 48,
@@ -1358,7 +1385,7 @@ final class ExpedientesHistoricos
                 'ref_prima'     => 'RECIBIÓ DIONEL PINTO',
                 'recibo_prima'  => '0044',
                 'vendedor'      => 'WILIAM LOPEZ',
-                'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 63. Nota al margen: fecha 20 de cada mes serà la fecha de pago por solicitud del cliente.Área 1012.50 vr². Observaciones: Se unificaron los lotes. Fecha 07/07/2026. Se conserva la validez de los recibos y pagos anteriores. Detalle de pagos anteriores unificados: Primas L. 34,000.00. Cuotas de julio:13,000.00 L segun recibo 0047  Total aplicado a cuenta unificada L. 47,000.00. Saldo unificado L. 928,000.00. ⚠️ El cuaderno anota valor L 975,000.00 (valor redondeado) y cuota L 19,604.00; se respetó la CUOTA, así que el valor cargado es L 974,992.00 y los saldos quedan 8 lempiras por debajo de los del papel. ⚠️ La prima se registro en fechas distintas por lo que se extendieron recibos con numeraciòn 0044,0046 y 0048  corresponden a los talonarios de las tres cuentas previas a la unificación.',
+                'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 63. Nota al margen: fecha 20 de cada mes serà la fecha de pago por solicitud del cliente.Área 1012.50 vr². Observaciones: Se unificaron los lotes. Fecha 07/07/2026. Se conserva la validez de los recibos y pagos anteriores. Detalle de pagos anteriores unificados: Primas L. 34,000.00. Cuotas de julio:13,000.00 L segun recibo 0047  Total aplicado a cuenta unificada L. 47,000.00. Saldo unificado L. 928,000.00. ⚠️ El cuaderno anota valor L 975,000.00 y cuota L 19,604.00, pero 48 cuotas de L 19,604.00 dan L 940,992.00: faltan L 8.00 para los L 941,000.00 financiados. Vale el valor del cuaderno, y esos L 8.00 van en la última cuota. (Se había cargado en L 974,992.00; corregido el 20/09/2026.) ⚠️ La prima se registro en fechas distintas por lo que se extendieron recibos con numeraciòn 0044,0046 y 0048  corresponden a los talonarios de las tres cuentas previas a la unificación.',
                 'pagos'         => [
                     [
                         'recibo'        => '00000002',

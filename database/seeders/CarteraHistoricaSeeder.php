@@ -12,6 +12,7 @@ use App\Domain\Exceptions\ValueObjectInvalidoException;
 use App\Domain\Pagos\RegistroDePagos;
 use App\Domain\ValueObjects\DNI;
 use App\Domain\ValueObjects\Monto;
+use App\Domain\Ventas\CorreccionDeValor;
 use App\Domain\Ventas\PrecioPactado;
 use App\Domain\Ventas\RegistroDeVentas;
 use App\Models\Cliente;
@@ -422,6 +423,64 @@ class CarteraHistoricaSeeder extends Seeder
         foreach ($pagos as $pago) {
             $this->pagar($venta, $cliente, $lotes, $pago);
         }
+
+        $this->corregirElValor($venta, $lotes, $datos);
+    }
+
+    /**
+     * El expediente que entró con un valor que no era el del cuaderno.
+     *
+     * ═══ POR QUE NO SE CORRIGE EL DATO Y LISTO ═══
+     *
+     * Porque no daría lo mismo. El exp. 0028 entró a producción con
+     * L 974,992.00 —ver su nota en `ExpedientesHistoricos`— y ahí nacieron sus
+     * cuotas de L 6,534.67 por lote. El 20-sep-2026 se le corrigió el valor a
+     * los L 975,000.00 del cuaderno con `olympo:corregir-valor`, que deja la
+     * cuota mensual como estaba y manda el residuo a la última.
+     *
+     * Escribir el valor corregido en el dato haría que una carga nueva calcule
+     * OTRA cuota —L 6,534.72— y pruebas dejaría de parecerse a producción
+     * justo en el expediente que ya dio un reclamo. Repitiendo el camino
+     * —cargar como entró, corregir por la misma puerta— las dos quedan
+     * idénticas, y de paso el Service se ejercita contra un caso de verdad.
+     *
+     * Va DESPUES de los pagos, como pasó en producción. El resultado no depende
+     * del momento —la diferencia vive siempre en la última cuota y en el plan
+     * guardado de cada abono— pero el camino sí se parece más.
+     *
+     * @param array<string, Lote> $lotes
+     * @param array<string, mixed> $datos
+     */
+    private function corregirElValor(Venta $venta, array $lotes, array $datos): void
+    {
+        $correccion = $datos['correccion_de_valor'] ?? null;
+
+        if (! is_array($correccion)) {
+            return;
+        }
+
+        /** @var array<string, string> $declarados */
+        $declarados = is_array($correccion['lotes'] ?? null) ? $correccion['lotes'] : [];
+
+        $valores = [];
+
+        foreach ($declarados as $clave => $valor) {
+            if (! array_key_exists($clave, $lotes)) {
+                throw new RuntimeException(sprintf(
+                    'Exp. %04d: la corrección de valor nombra el lote %s, que no está en la venta.',
+                    (int) ($datos['expediente'] ?? 0),
+                    $clave,
+                ));
+            }
+
+            $valores[(string) $lotes[$clave]->getAttribute('codigo')] = new Monto($valor);
+        }
+
+        resolve(CorreccionDeValor::class)->corregir(
+            $venta,
+            $valores,
+            is_string($correccion['motivo'] ?? null) ? $correccion['motivo'] : '',
+        );
     }
 
     /**

@@ -1,7 +1,136 @@
-# Continuar acá — 18-sep-2026
+# Continuar acá — 20-sep-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 20-sep — Los L 8.00 del expediente 0028: nace `olympo:corregir-valor`
+
+**El reclamo.** El cliente del RPS-2026-0028 (tres lotes H de 337.50 vr²) pagó
+hoy L 20,000.00 y preguntó por qué el sistema le mostraba L 8.00 menos que el
+cuaderno. Tenía razón.
+
+**La causa.** El cuaderno dice valor **L 975,000.00** (L 325,000.00 por lote —
+el mismo precio que ya se había confirmado el 11-ago para los de 337.50) y
+cuota **L 19,604.00** a 48 meses. La cuota no cierra: 48 × 19,604 = 940,992 y
+lo financiado son 941,000. Al cargar la cartera se «respetó la cuota»
+**bajándole el valor al contrato** a L 974,992.00. Era al revés: el valor es el
+dato del contrato y el residuo va a la última cuota (R1), que es lo que el
+sistema hace en toda venta nueva.
+
+**Se auditó la cartera entera**, no solo el caso que llegó: de los 114
+expedientes, el 0028 es el único al que se le tocó el valor. (El 0066 tuvo el
+caso inverso —cuota del cuaderno L 13,605.00 contra L 13,604.17 del valor— y
+ahí sí se respetó el valor.)
+
+**Lo que entró:**
+
+- `App\Domain\Ventas\CorreccionDeValor` (Service) + `ValorCorregido` +
+  `CorreccionDeValorInvalidaException`, y el comando **`olympo:corregir-valor`**
+  con `--ensayo`. Acepta el **número de contrato** (igual en local, pruebas y
+  producción) o el id de la URL.
+- Mueve UNA diferencia por lote: valor congelado y precio por vara² (seis
+  decimales) · la **última cuota** · valor y saldo financiado del expediente.
+  **No toca recibos, aplicaciones ni la prima**, y la cuota mensual del cliente
+  no cambia.
+- 🔴 **Tampoco toca la FICHA del lote, y no puede.** La primera versión la
+  llevaba al día por el query builder para esquivar `LoteInmutableException`, y
+  la puerta devolvió **11 tests en rojo, todos «exit code 1»**: la base tiene
+  el trigger `lotes_proteger_vendido` (migración `create_lotes_table`), que
+  rechaza cambiarle área, precio o valor a un lote vendido venga de donde
+  venga. Yo había leído el guard del MODELO y grepeado los `_chk`; un trigger
+  no aparece en ninguno de los dos. Está bien que gane: lo que vale para una
+  venta es lo congelado en `compromisos` (§8.2). **Consecuencia visible:** en
+  el listado de Lotes, H-9, H-15 y H-16 siguen mostrando 324,997.33 / .33 / .34
+  como valor de ficha; el expediente, el estado de cuenta y los recibos dicen
+  325,000.00.
+- El otro rojo de esa vuelta: el comando leía el argumento con `is_string` y
+  los tests lo pasan como ENTERO (`ArrayInput` no lo convierte) → «no encontré
+  ese expediente». Por la terminal nunca habría fallado; desde un
+  `Artisan::call()` sí.
+- 🔴 **También corre el `plan_anterior` de cada reprogramación** (y sus dos
+  saldos, que el CHECK obliga a mover juntos). No es prolijidad:
+  `RegistroDePagos::anular()` deshace un abono REESCRIBIENDO ese plan tal cual,
+  así que sin esto anular un abono se volvería a comer la diferencia en
+  silencio. `plan_anterior` no es solo historia: es una instrucción.
+- Se niega si: la diferencia es más grande que una cuota (la red contra un cero
+  de más), el lote lleva interés, el expediente no está vigente, el lote ya
+  terminó de pagarse, o **el lote ya no cuadraba desde antes** (valor − prima −
+  pagado a cuotas − abonos a capital = lo que deben sus cuotas). Esa igualdad
+  se verifica antes y después, adentro de la transacción.
+- Un solo asiento en la bitácora (evento `correccion`, con el motivo): se ve en
+  la pestaña **Actualizaciones** del expediente.
+- `ExpedientesHistoricos`: la nota del 0028 dice la verdad, y la clave nueva
+  `correccion_de_valor` hace que el seeder repita el camino de producción —
+  entra como entró y se corrige por la misma puerta—. Poner 325,000.00 en el
+  dato le calcularía a una carga nueva OTRA cuota (6,534.72 en vez de 6,534.67).
+
+**La puerta, en verde a la segunda vuelta:** 1370 tests / 6125 assertions
+(18 nuevos en `CorregirValorTest`), PHPStan 502/502 sin errores, Pint 905
+archivos, Rector sin cambios pendientes. Sin migración y sin permisos nuevos.
+
+**Cómo queda el 0028:** valor 975,000.00 · financiado 941,000.00 · cuota 48 de
+cada lote 1,273.19 / 1,273.19 / 877.18 (mes 48: 3,415.56 → 3,423.56) · saldo
+**L 866,000.00**, que es lo que da el cuaderno (928,000 − 11,500 − 30,500 −
+20,000). Al reimprimir el RPS-00000106 el saldo ya sale bien: el papel lo lee
+de las cuotas.
+
+⚠️ **Las observaciones del expediente NO se editan desde el panel.** La nota
+vieja («se respetó la CUOTA…») hay que cambiarla en producción con un tinker
+que lee el texto nuevo del propio `ExpedientesHistoricos`. Propuesta L5 abajo.
+
+**Propuestas esperando decisión (L5):**
+
+1. **«Editar observaciones» en la ficha del expediente** — hoy no hay forma de
+   corregir una nota sin SSH. Una acción chica en `ViewVenta`, con su asiento.
+   Le sirve a la administradora; es del producto. ~2 horas.
+2. **Que la carga de una cartera vieja AVISE cuando valor − prima no es
+   múltiplo de la cuota del papel**, en vez de decidir sola a quién creerle. El
+   0028 se habría cargado bien el primer día. Es del producto (todo cliente
+   nuevo trae cuaderno). ~1 hora, en `revisarTodoAntesDeCargar()`.
+
+## 19-sep — Desplegado a pruebas y a PRODUCCIÓN, con Río Blanco y La Unión cargados en las dos
+
+`c645816` está en `pruebas.praderasdelsol.cloud` y en `praderasdelsol.cloud`
+(«Nothing to migrate», «Todos cuadran», CI #63 verde antes de producción).
+
+**CRB y LLU se cargaron también en producción** —decisión de Mauricio— con sus
+seeders de `Database\Seeders\Clientes\…`: 83 lotes / 36,431.17 v² y 95 lotes /
+34,578.87 v², los mismos números que en local y en pruebas. Desde hoy Rosa
+Elena y los receptores ven el interruptor con tres proyectos.
+
+🔴 **Lo que eso deja abierto EN PRODUCCIÓN, con datos reales al lado:**
+
+- Los 178 lotes nuevos están en **L 0.00 y sin plan de pago**: no se pueden
+  vender, pero **sí apartar**. Faltan los precios y los planes de los dos.
+- La **manzana G de LLU es provisional** (letra y números 1–4 puestos por el
+  sistema) y el **E-10 de CRB** dice 312.00 v² contra 320.81 del dibujo. Las
+  dos respuestas son del Ing. Gerson Menjívar. Nadie debería apartar un lote de
+  la G hasta tenerlas.
+
+**Lo que se aprendió desplegando** (detalle en la memoria del proyecto,
+`desplegar-praderas`):
+
+- A la cadena se le antepuso una guarda que frena ANTES del `down` si el repo
+  del servidor está sucio. La primera vez frenó por los `.gitignore` de
+  `storage/`: era el bit de permisos del `chmod -R` del montaje. Se curó con
+  `git config core.fileMode false`, local a cada carpeta (pruebas y producción).
+- En producción, antes del `down`: lista de commits que entran + `pg_dump` con
+  `pipefail` y su `ls`. El volcado pesa **163 KB** comprimido; los archivos
+  llevan fecha UTC (el servidor está en UTC: a las 8:24 p.m. de acá ya es 20-sep).
+- **El deploy mueve código, no datos**, y con un solo proyecto el interruptor no
+  se dibuja: pruebas se veía idéntica hasta correr los seeders.
+- La puerta marcó «el cron nunca latió» y un minuto después «hace 0 minutos»:
+  el falso positivo de siempre tras `optimize:clear`. Quedan 3 FALTA de
+  montaje: `MAIL_MAILER=log`, `BACKUP_DISKS=local` y un usuario con `12345678`
+  (Mauricio: «eso se cambia después»).
+
+**L4 — deuda nueva:** la ayuda de `olympo:verificar-produccion` sugiere la línea
+de cron `cd … && php artisan schedule:run`, que en este servidor correría como
+root y con PHP 8.4: exactamente la causa del 500 del 27-ago. Tiene que proponer
+`sudo -u www-data` y la ruta completa del PHP.
+
+**Propuestas esperando decisión (L5):** el test guardián de contadores
+(§9.E6), y que el atajo «Plano» aparezca también con UN solo proyecto.
 
 ## 18-sep — El interruptor de proyecto quedó como el de Maya: diseño, atajo al plano y filtro global
 
