@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Livewire;
 
+use App\Filament\Resources\Proyectos\ProyectoResource;
 use App\Support\ProyectoActivo;
 use Illuminate\Contracts\View\View;
 use Livewire\Component;
@@ -50,9 +51,42 @@ class SelectorDeProyecto extends Component
 
     public function updatedElegido(): void
     {
-        app(ProyectoActivo::class)->elegir($this->elegido === '' ? null : (int) $this->elegido);
+        $id = $this->elegido === '' ? null : (int) $this->elegido;
 
-        $this->js('window.location.reload()');
+        app(ProyectoActivo::class)->elegir($id);
+
+        /*
+         * 🔴 Si estás viendo el PLANO de un proyecto y cambiás de proyecto, hay
+         * que saltar al plano del NUEVO, no recargar la URL vieja: esa apunta a
+         * un proyecto que ya no es el que mirás, y con la lista recortada
+         * confunde (antes, además, daba 404). El resto de las pantallas se
+         * recargan y se recortan solas.
+         *
+         * La decisión se toma en el navegador —la petición de Livewire no sabe
+         * en qué ruta está la pestaña— comparando el pathname contra el patrón
+         * del plano y cambiándole el id.
+         */
+        $destino = $id === null ? null : ProyectoResource::getUrl('plano', ['record' => $id]);
+
+        $this->js(<<<JS
+            (function () {
+                var destino = {$this->comoJs($destino)};
+                if (destino && /^\/proyectos\/\d+\/plano\/?$/.test(window.location.pathname)) {
+                    window.location.href = destino;
+                } else {
+                    window.location.reload();
+                }
+            })();
+        JS);
+    }
+
+    /**
+     * Un string PHP como literal seguro para incrustar en el JS de arriba, o
+     * `null` cuando no hay destino (se eligió «Todos»).
+     */
+    private function comoJs(?string $valor): string
+    {
+        return $valor === null ? 'null' : json_encode($valor, JSON_THROW_ON_ERROR);
     }
 
     public function render(): View

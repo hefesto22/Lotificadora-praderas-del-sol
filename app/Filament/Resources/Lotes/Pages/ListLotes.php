@@ -6,7 +6,6 @@ namespace App\Filament\Resources\Lotes\Pages;
 
 use App\Domain\Enums\EstadoLote;
 use App\Filament\Resources\Lotes\LoteResource;
-use App\Models\Lote;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -39,17 +38,23 @@ class ListLotes extends ListRecords
      * el rol receptor con visibilidad recortada, un contador sin scope le
      * estaría filtrando lo que no le toca.
      *
+     * 🔴 Y «la misma» es `LoteResource::getEloquentQuery()`, no
+     * `Lote::query()` (18-sep-2026). Este docblock ya lo decía y el código
+     * no lo cumplía: desde que el interruptor de la barra recorta el listado,
+     * las pestañas seguían contando los lotes de TODOS los proyectos encima
+     * de una tabla que mostraba los de uno.
+     *
      * @return array<string, Tab>
      */
     #[Override]
     public function getTabs(): array
     {
-        $pestanas = ['todos' => Tab::make('Todos')->badge(fn (): int => Lote::query()->count())];
+        $pestanas = ['todos' => Tab::make('Todos')->badge(fn (): int => LoteResource::getEloquentQuery()->count())];
 
         foreach (EstadoLote::cases() as $estado) {
             $pestanas[$estado->value] = Tab::make($estado->etiquetaInterna())
                 ->modifyQueryUsing(fn (Builder $query): Builder => $query->where('estado', $estado->value))
-                ->badge(fn (): int => Lote::query()->where('estado', $estado->value)->count())
+                ->badge(fn (): int => LoteResource::getEloquentQuery()->where('estado', $estado->value)->count())
                 ->badgeColor($estado->color());
         }
 

@@ -10,6 +10,7 @@ use App\Models\Cuota;
 use App\Models\Gasto;
 use App\Models\Proyecto;
 use App\Models\Recibo;
+use App\Support\ProyectoActivo;
 use BackedEnum;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
@@ -120,7 +121,8 @@ class EstadoMensual extends Page
         $meses = $this->meses();
 
         $this->form->fill([
-            'proyecto' => Proyecto::query()->reorder()->orderBy('id')->value('id'),
+            // Abre con el proyecto del interruptor de la barra, si hay uno.
+            'proyecto' => app(ProyectoActivo::class)->id() ?? Proyecto::query()->reorder()->orderBy('id')->value('id'),
             // El mes corriente si está en la lista; si no, el más reciente.
             'mes' => array_key_first($meses),
         ]);

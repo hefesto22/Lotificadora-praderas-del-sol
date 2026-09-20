@@ -70,11 +70,14 @@ class ProspectoResource extends Resource
      *
      * Null y no '0' cuando no hay ninguno: un cero permanente se vuelve parte
      * del decorado y dentro de un mes ya nadie lo mira.
+     *
+     * Recortado al proyecto que se está mirando, igual que el listado
+     * (18-sep-2026, §9.E6).
      */
     #[Override]
     public static function getNavigationBadge(): ?string
     {
-        $pendientes = Prospecto::query()->sinAtender()->count();
+        $pendientes = app(ProyectoActivo::class)->recortar(Prospecto::query()->sinAtender())->count();
 
         return $pendientes === 0 ? null : (string) $pendientes;
     }

@@ -4,19 +4,24 @@ declare(strict_types=1);
 
 namespace App\Providers\Filament;
 
+use App\Filament\Resources\Proyectos\ProyectoResource;
 use App\Filament\Support\Menu;
 use App\Http\Middleware\SuspensionPorMora;
 use App\Models\BrandingSetting;
+use App\Models\Proyecto;
+use App\Support\ProyectoActivo;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Navigation\NavigationGroup;
+use Filament\Navigation\NavigationItem;
 use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\Support\Icons\Heroicon;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
@@ -116,7 +121,7 @@ class AdminPanelProvider extends PanelProvider
              * inventarios de los tres y la lista de a quién llamar mezclaría
              * sus clientes; quien cobra trabaja un desarrollo a la vez.
              *
-             * `TOPBAR_START` y no la barra lateral: es un estado de la
+             * En la barra superior y no en la lateral: es un estado de la
              * pantalla entera, no una sección del menú, y arriba está a la
              * vista siempre — que es lo que hace que nadie olvide en qué
              * proyecto está mirando un número.
@@ -124,7 +129,19 @@ class AdminPanelProvider extends PanelProvider
              * Con UN solo proyecto el componente no dibuja nada.
              */
             ->renderHook(
-                PanelsRenderHook::TOPBAR_START,
+                // 🔴 Después del logo, no antes — 18-sep-2026, igual que en la
+                // otra instalación: primero la marca, luego el interruptor.
+                // Nació en `TOPBAR_START` y quedaba a la izquierda de TODO,
+                // antes incluso del botón que pliega el menú: lo primero que
+                // se leía de la pantalla era un filtro, y el logo de la
+                // lotificadora quedaba en el medio de la barra.
+                //
+                // ⚠️ No sirve colgarlo de la cabecera de la barra lateral: con
+                // la lateral colapsable y una barra superior presente, Filament
+                // esconde `.fi-sidebar-header` (display: none) y muestra el logo
+                // arriba. Ahí adentro el selector se arma con tamaño cero y no
+                // se ve. `TOPBAR_LOGO_AFTER` cae justo después del logo visible.
+                PanelsRenderHook::TOPBAR_LOGO_AFTER,
                 static fn (): string => Blade::render('@livewire(\'selector-de-proyecto\')'),
             )
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
@@ -207,6 +224,34 @@ class AdminPanelProvider extends PanelProvider
                     ->collapsed(in_array($nombre, Menu::deFondo(), true)),
                 Menu::grupos(),
             ))
+            /*
+             * 🔴 Acceso directo al PLANO del proyecto elegido — 14-sep-2026,
+             * traído a esta instalación el 18-sep.
+             *
+             * «Que se pueda ver el plano de mejor manera, un acceso más fácil»
+             * —Mauricio—. El plano es a lo que se entra todos los días, y hasta
+             * hoy había que pasar por Proyectos y buscar el botón. Con el
+             * interruptor de la barra ya se sabe qué desarrollo se está mirando,
+             * así que este atajo abre su plano directo, al lado de «Proyectos».
+             *
+             * Solo aparece con un proyecto elegido: en «Todos» no hay UN plano
+             * que abrir, y el atajo llevaría a adivinar cuál.
+             */
+            ->navigationItems([
+                NavigationItem::make('Plano')
+                    ->group(Menu::DESARROLLO)
+                    ->icon(Heroicon::OutlinedMap)
+                    ->sort(0)
+                    ->visible(static fn (): bool => app(ProyectoActivo::class)->hayUno())
+                    ->url(static function (): string {
+                        $proyecto = app(ProyectoActivo::class)->proyecto();
+
+                        return $proyecto instanceof Proyecto
+                            ? ProyectoResource::getUrl('plano', ['record' => $proyecto])
+                            : ProyectoResource::getUrl();
+                    })
+                    ->isActiveWhen(static fn (): bool => request()->routeIs('filament.admin.resources.proyectos.plano')),
+            ])
             ->plugins([
                 /*
                  * ⚠️ 🔴 SIN ESTO, EL CLIENTE LEE EL NOMBRE DEL PAQUETE

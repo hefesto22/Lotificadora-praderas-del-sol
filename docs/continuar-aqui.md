@@ -3,6 +3,96 @@
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
 
+## 18-sep — El interruptor de proyecto quedó como el de Maya: diseño, atajo al plano y filtro global
+
+Dos pedidos de Mauricio el mismo día, con las dos instalaciones abiertas una al
+lado de la otra: «que el filtrado de proyecto tenga el mismo diseño que tiene
+la Inmobiliaria Maya» y, al verlo, «falta eso del plano y lo del filtro
+global». Todo se trajo del repo de Maya —sus commits `c674833`, `a664e9d` y
+`73420ae`—, no se adivinó de las capturas.
+
+### El diseño
+
+Nació acá el 11-sep colgado de `TOPBAR_START`, y quedaba a la izquierda de
+TODO, antes incluso del botón que pliega el menú: lo primero que se leía de la
+pantalla era un filtro, y el logo quedaba en el medio de la barra.
+
+- `AdminPanelProvider`: `TOPBAR_START` → **`TOPBAR_LOGO_AFTER`**.
+- `tema-olympo.blade.php` §18: `margin-left: 1.5rem` en `.olympo-selector`,
+  para que la píldora no quede pegada al logo. Con eso la sección 18 del CSS
+  queda idéntica a la de Maya.
+
+⚠️ La cabecera de la barra lateral NO sirve para esto: con la lateral
+colapsable y una barra superior presente, Filament esconde `.fi-sidebar-header`
+(`display: none`) y el selector se arma con tamaño cero.
+
+### Lo que faltaba del filtro global
+
+Acá el interruptor YA recortaba Lotes, Bloques, Ventas, Apartados, Recibos,
+Prospectos y el Escritorio (eso llegó con la historia compartida). Tres lugares
+seguían sin enterarse de qué proyecto se estaba mirando:
+
+1. **La lista de Proyectos** mostraba todos. Ahora muestra solo el elegido.
+   🔴 El recorte va en la **tabla** (`ProyectosTable`, `modifyQueryUsing`) y
+   NO en `ProyectoResource::getEloquentQuery()`: con esa consulta el resource
+   resuelve el record de TODAS sus páginas, y recortarla ahí hace que el plano
+   o la ficha de un proyecto den **404** en cuanto el elegido es otro. En Maya
+   pasó exactamente eso. Hay un test que lo dice con ese nombre.
+2. **El atajo «Plano»** en el menú, arriba de «Proyectos» en *El desarrollo*
+   (`->navigationItems()` del panel). Solo se dibuja con un proyecto elegido:
+   en «Todos» no hay UN plano que abrir. Lo ven todos los roles operativos —el
+   receptor tiene `ViewAny`/`View` de Proyecto y cobra desde el plano—.
+3. **El Estado mensual** abría siempre en el proyecto más viejo. Ahora abre en
+   el elegido, y sin elegir sigue como antes.
+
+Y un cuarto que es consecuencia del primero: **cambiar de proyecto estando en
+el PLANO de otro salta al plano del nuevo** (`SelectorDeProyecto::
+updatedElegido`). La decisión la toma el navegador —la petición de Livewire no
+sabe en qué ruta está la pestaña— comparando el `pathname` contra
+`/proyectos/{id}/plano`. El resto de las pantallas se recargan y se recortan
+solas. ⚠️ Ese patrón está escrito en el JS: si algún día cambia el `path` del
+panel o el slug del recurso, el salto deja de dispararse y vuelve a ser una
+recarga común — no rompe, pero deja de saltar.
+
+Tests: cuatro nuevos en `SelectorDeProyectoTest`. El salto NO tiene
+test propio —habría que afirmar sobre el JS que Livewire manda, y eso se rompe
+con cada versión—; los tests viejos que hacen `set('elegido', …)` pasan por ese
+código y lo cubren de que no reviente.
+
+### 🔴 Los contadores también (§9.E6) — y esto Maya NO lo tiene
+
+Mauricio, con LLU elegida y la lista de Ventas vacía: «no debería de aparecer
+Ventas 95 si no son de ese proyecto». El 11-sep se recortaron los LISTADOS y
+cuatro contadores quedaron contando la empresa entera:
+
+| Contador | Antes | Ahora |
+|---|---|---|
+| Menú · Ventas (expedientes atrasados) | `Venta::query()` | `ProyectoActivo::recortar(...)` sobre la subconsulta de ventas |
+| Menú · Apartados (vencidos) | `Compromiso::query()->vencidos()` | recortado por `compromisos.proyecto_id` |
+| Menú · Prospectos (sin atender) | `Prospecto::query()->sinAtender()` | recortado por `prospectos.proyecto_id` |
+| Pestañas de Lotes | `Lote::query()` | `LoteResource::getEloquentQuery()` — la misma del listado |
+
+Ya estaban bien: «Por cobrar hoy» y las pestañas de Ventas y de Recibos, que
+cuentan con el `getEloquentQuery()` de su resource.
+
+La regla, para el próximo contador: **un badge cuenta con la MISMA consulta
+que la lista a la que lleva.** El docblock de `ListLotes` ya lo decía desde
+agosto y el código no lo cumplía; nadie lo vio porque con un solo proyecto
+recortar y no recortar dan el mismo número.
+
+⚠️ **Maya tiene el mismo bug** en los cuatro (su `VentaResource` es idéntico).
+Cuando se toque Maya, son estos cuatro parches tal cual.
+
+Tests: otros cuatro en `SelectorDeProyectoTest`, uno por contador.
+
+### Cómo se trae algo de Maya (para la próxima)
+
+El diálogo para conectar la carpeta de Maya a la sesión no llegó nunca (tres
+intentos). Lo que funcionó: Mauricio corre un `cp` / `git show` que deja los
+archivos de Maya en `storage/app/_analisis/maya/` —gitignoreado— y desde ahí se
+comparan con `diff`. Los dos repos comparten historia, así que casi siempre el
+`diff` de un archivo son SOLO los cambios que se buscan.
+
 ## 🔴 18-sep — El importador aprendió a leer planos dibujados con líneas sueltas
 
 Llegaron dos planos de La Unión, Copán, del mismo ingeniero (Gerson Menjívar):

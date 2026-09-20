@@ -7,9 +7,14 @@ use App\Domain\Enums\FormaDePago;
 use App\Domain\Pagos\RegistroDePagos;
 use App\Domain\ValueObjects\Monto;
 use App\Domain\Ventas\RegistroDeVentas;
+use App\Filament\Pages\EstadoMensual;
 use App\Filament\Pages\PorCobrarHoy;
 use App\Filament\Resources\Apartados\ApartadoResource;
 use App\Filament\Resources\Lotes\LoteResource;
+use App\Filament\Resources\Lotes\Pages\ListLotes;
+use App\Filament\Resources\Prospectos\ProspectoResource;
+use App\Filament\Resources\Proyectos\Pages\ListProyectos;
+use App\Filament\Resources\Proyectos\ProyectoResource;
 use App\Filament\Resources\Recibos\ReciboResource;
 use App\Filament\Resources\Ventas\VentaResource;
 use App\Filament\Widgets\ComoVaElNegocio;
@@ -22,9 +27,12 @@ use App\Models\Cliente;
 use App\Models\Compromiso;
 use App\Models\Gasto;
 use App\Models\Lote;
+use App\Models\Prospecto;
 use App\Models\Proyecto;
 use App\Models\Recibo;
 use App\Support\ProyectoActivo;
+use Filament\Facades\Filament;
+use Filament\Navigation\NavigationItem;
 use Livewire\Livewire;
 
 /*
@@ -329,5 +337,183 @@ describe('Los listados', function (): void {
 
         ($this->elegir)(null);
         expect(ReciboResource::getEloquentQuery()->count())->toBe(2);
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| Lo que faltaba traer de Maya — 18-sep-2026
+|--------------------------------------------------------------------------
+| Mauricio, con las dos instalaciones abiertas una al lado de la otra: «falta
+| eso del plano y lo del filtro global». Acá el interruptor ya recortaba
+| Lotes, Ventas, Recibos y el Escritorio, pero tres lugares seguían sin
+| enterarse de qué proyecto se estaba mirando:
+|
+|  - la lista de Proyectos mostraba los tres aunque hubiera uno elegido;
+|  - al plano había que llegar pasando por esa lista y buscando el botón;
+|  - el Estado mensual abría siempre en el proyecto más viejo.
+*/
+describe('la lista de Proyectos, el atajo al plano y el Estado mensual', function (): void {
+    test('la lista de Proyectos muestra solo el elegido, y en «Todos» los dos', function (): void {
+        ($this->elegir)((int) $this->altamira->getKey());
+
+        Livewire::test(ListProyectos::class)
+            ->assertCanSeeTableRecords([$this->altamira])
+            ->assertCanNotSeeTableRecords([$this->praderas]);
+
+        ($this->elegir)(null);
+
+        Livewire::test(ListProyectos::class)
+            ->assertCanSeeTableRecords([$this->praderas, $this->altamira]);
+    });
+
+    /*
+    | 🔴 EL TEST QUE DICE POR QUE EL RECORTE VA EN LA TABLA.
+    |
+    | El resource resuelve con `getEloquentQuery()` el record de TODAS sus
+    | páginas. Recortar ahí esconde de la lista, sí, pero también hace que el
+    | plano o la ficha de un proyecto den 404 en cuanto el elegido es otro: un
+    | enlace guardado, una pestaña que quedó abierta, el botón «Atrás». En Maya
+    | pasó exactamente eso y se corrigió mudando el recorte a la tabla.
+    */
+    test('el plano de OTRO proyecto se sigue abriendo: se recorta la lista, no el recurso', function (): void {
+        ($this->elegir)((int) $this->altamira->getKey());
+
+        expect(ProyectoResource::getEloquentQuery()->count())->toBe(2);
+
+        $this->get(ProyectoResource::getUrl('plano', ['record' => $this->praderas]))
+            ->assertOk();
+    });
+
+    test('el atajo «Plano» aparece solo con un proyecto elegido, y abre el plano de ese', function (): void {
+        $atajo = static function (): NavigationItem {
+            foreach (Filament::getPanel('admin')->getNavigationItems() as $item) {
+                if ($item->getLabel() === 'Plano') {
+                    return $item;
+                }
+            }
+
+            throw new RuntimeException('El panel no tiene el atajo «Plano».');
+        };
+
+        // En «Todos» no hay UN plano que abrir: el atajo no se dibuja.
+        expect($atajo()->isVisible())->toBeFalse();
+
+        ($this->elegir)((int) $this->altamira->getKey());
+
+        $planoDeAltamira = ProyectoResource::getUrl('plano', ['record' => $this->altamira]);
+
+        expect($atajo()->isVisible())->toBeTrue()
+            ->and($atajo()->getUrl())->toBe($planoDeAltamira);
+
+        // Y no es solo el objeto: está en el menú de una página de verdad. Se
+        // mira desde el plano de PRADERAS, que por su cuenta no enlaza al de
+        // Altamira: si la dirección aparece, la puso el menú.
+        $this->get(ProyectoResource::getUrl('plano', ['record' => $this->praderas]))
+            ->assertOk()
+            ->assertSee($planoDeAltamira, escape: false);
+
+        ($this->elegir)((int) $this->praderas->getKey());
+
+        expect($atajo()->getUrl())->toBe(ProyectoResource::getUrl('plano', ['record' => $this->praderas]));
+    });
+
+    test('el Estado mensual abre en el proyecto elegido, y sin elegir en el primero', function (): void {
+        Livewire::test(EstadoMensual::class)
+            ->assertSet('data.proyecto', $this->praderas->getKey());
+
+        ($this->elegir)((int) $this->altamira->getKey());
+
+        Livewire::test(EstadoMensual::class)
+            ->assertSet('data.proyecto', $this->altamira->getKey());
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| 🔴 Los contadores también — 18-sep-2026 (§9.E6)
+|--------------------------------------------------------------------------
+| Mauricio, con un desarrollo recién cargado elegido y la lista de Ventas
+| vacía: «no debería de aparecer Ventas 95 si no son de ese proyecto».
+|
+| Tenía razón, y no era solo ese. El 11-sep se recortaron los LISTADOS y
+| cuatro contadores quedaron contando la empresa entera: el de Ventas, el de
+| Apartados y el de Prospectos en el menú, y las pestañas de Lotes. Un
+| número rojo que no coincide con la lista a la que lleva manda a buscar
+| algo que no está ahí — y la segunda vez ya nadie le cree al número.
+|
+| «Por cobrar hoy» y las pestañas de Ventas y de Recibos ya estaban bien.
+*/
+describe('los contadores cuentan lo mismo que la lista a la que llevan', function (): void {
+    test('el de Ventas: los atrasados del proyecto elegido, no los de todos', function (): void {
+        ($this->armar)();
+
+        // La venta de Praderas es a doce meses: en tres ya debe cuotas.
+        $this->travel(3)->months();
+
+        ($this->elegir)((int) $this->altamira->getKey());
+        expect(VentaResource::getNavigationBadge())->toBeNull();
+
+        ($this->elegir)((int) $this->praderas->getKey());
+        expect(VentaResource::getNavigationBadge())->toBe('1');
+
+        ($this->elegir)(null);
+        expect(VentaResource::getNavigationBadge())->toBe('1');
+    });
+
+    test('el de Apartados: los vencidos del proyecto elegido', function (): void {
+        ($this->armar)();
+
+        // §9.C11: un apartado vencido solo existe viajando al día en que se
+        // apartó. El CHECK `vence_el >= fecha` no deja fabricarlo desde hoy.
+        $this->travelTo(today()->subDays(30));
+
+        Compromiso::factory()->paraLote($this->loteAltamira)->create([
+            'vence_el' => today()->addDays(15)->toDateString(),
+        ]);
+
+        $this->travelBack();
+
+        ($this->elegir)((int) $this->praderas->getKey());
+        expect(ApartadoResource::getNavigationBadge())->toBeNull();
+
+        ($this->elegir)((int) $this->altamira->getKey());
+        expect(ApartadoResource::getNavigationBadge())->toBe('1');
+
+        ($this->elegir)(null);
+        expect(ApartadoResource::getNavigationBadge())->toBe('1');
+    });
+
+    test('el de Prospectos: los que esperan una llamada en el proyecto elegido', function (): void {
+        Prospecto::factory()->create(['proyecto_id' => $this->altamira->getKey()]);
+
+        ($this->elegir)((int) $this->praderas->getKey());
+        expect(ProspectoResource::getNavigationBadge())->toBeNull();
+
+        ($this->elegir)((int) $this->altamira->getKey());
+        expect(ProspectoResource::getNavigationBadge())->toBe('1');
+
+        ($this->elegir)(null);
+        expect(ProspectoResource::getNavigationBadge())->toBe('1');
+    });
+
+    test('las pestañas de Lotes cuentan los lotes del proyecto elegido', function (): void {
+        ($this->armar)();
+
+        ($this->elegir)((int) $this->altamira->getKey());
+
+        $pestanas = app(ListLotes::class)->getTabs();
+
+        // Altamira tiene UN lote y está libre; el vendido es de Praderas.
+        expect($pestanas['todos']->getBadge())->toBe('1')
+            ->and($pestanas['disponible']->getBadge())->toBe('1')
+            ->and($pestanas['vendido']->getBadge())->toBe('0');
+
+        ($this->elegir)(null);
+
+        $pestanas = app(ListLotes::class)->getTabs();
+
+        expect($pestanas['todos']->getBadge())->toBe('2')
+            ->and($pestanas['vendido']->getBadge())->toBe('1');
     });
 });

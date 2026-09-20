@@ -125,11 +125,15 @@ class ApartadoResource extends Resource
      *
      * Null y no '0' cuando no hay nada: un cero en rojo permanente se vuelve
      * parte del decorado y dentro de un mes ya nadie lo ve.
+     *
+     * Recortado al proyecto que se está mirando, igual que el listado
+     * (18-sep-2026, §9.E6): un contador que cuenta más que la lista a la que
+     * lleva manda a buscar apartados que no están ahí.
      */
     #[Override]
     public static function getNavigationBadge(): ?string
     {
-        $vencidos = Compromiso::query()->vencidos()->count();
+        $vencidos = app(ProyectoActivo::class)->recortar(Compromiso::query()->vencidos())->count();
 
         return $vencidos === 0 ? null : (string) $vencidos;
     }

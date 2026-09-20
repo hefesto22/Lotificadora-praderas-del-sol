@@ -6,6 +6,7 @@ namespace App\Filament\Resources\Proyectos\Tables;
 
 use App\Filament\Resources\Proyectos\ProyectoResource;
 use App\Models\Proyecto;
+use App\Support\ProyectoActivo;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteAction;
@@ -16,6 +17,7 @@ use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * §10.7: columnas explícitas, filtros con la misma fuente que el scoping,
@@ -29,6 +31,14 @@ class ProyectosTable
     public static function configure(Table $table): Table
     {
         return $table
+            // Solo el proyecto elegido en el interruptor de la barra; en
+            // «Todos», la lista completa (18-sep-2026, traído de Maya).
+            //
+            // 🔴 Va en la TABLA y no en `getEloquentQuery()`: el resource
+            // resuelve con esa consulta el record de TODAS sus páginas, y
+            // recortarla ahí hace que el plano o la ficha de un proyecto den
+            // 404 en cuanto el elegido es otro. En Maya pasó exactamente eso.
+            ->modifyQueryUsing(static fn (Builder $query): Builder => app(ProyectoActivo::class)->recortar($query, 'id'))
             ->columns([
                 TextColumn::make('nombre')
                     ->label('Proyecto')

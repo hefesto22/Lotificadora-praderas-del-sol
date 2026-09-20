@@ -907,6 +907,9 @@
         display: inline-flex;
         align-items: center;
         gap: .5rem;
+        /* Aire a la izquierda para que la píldora no quede pegada al logo:
+           la separa y la corre a la derecha (pedido de Mauricio). */
+        margin-left: 1.5rem;
         padding: .3125rem .5rem .3125rem .625rem;
         border: 1px solid rgb(228 230 235);
         border-radius: .5rem;

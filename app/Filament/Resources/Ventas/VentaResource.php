@@ -97,6 +97,10 @@ class VentaResource extends Resource
      *  - `vencidas()` — pendiente Y con fecha pasada, con `today()` de PHP y
      *    no de Postgres (§7.5.1: el servidor puede estar en UTC).
      *  - solo ventas VIGENTES — una liquidada o anulada no debe nada.
+     *  - solo del PROYECTO que se está mirando (18-sep-2026, §9.E6) — el
+     *    listado ya se recortaba y este contador no: con un desarrollo recién
+     *    cargado elegido, el menú decía «95» en rojo al lado de una lista
+     *    vacía. Eran los atrasados de OTRO proyecto. En «Todos», los de todos.
      *
      * `reorder()` antes del agregado: un `orderBy` heredado sobrevive al
      * COUNT y Postgres lo rechaza con 42803.
@@ -108,7 +112,9 @@ class VentaResource extends Resource
             ->reorder()
             ->vencidas()
             ->deLotesVivos()
-            ->whereIn('venta_id', Venta::query()->reorder()->select('id')->where('estado', EstadoVenta::Vigente))
+            ->whereIn('venta_id', app(ProyectoActivo::class)->recortar(
+                Venta::query()->reorder()->select('id')->where('estado', EstadoVenta::Vigente),
+            ))
             ->distinct()
             ->count('venta_id');
 
