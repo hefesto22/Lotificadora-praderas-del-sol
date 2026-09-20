@@ -64,6 +64,24 @@ ahí sí se respetó el valor.)
   entra como entró y se corrige por la misma puerta—. Poner 325,000.00 en el
   dato le calcularía a una carga nueva OTRA cuota (6,534.72 en vez de 6,534.67).
 
+**✅ APLICADO EN PRODUCCIÓN el 20-sep, 11:40 a.m.** Commit `46572e5`, CI #64
+verde (5m 25s). Primero en pruebas —ensayo, corrección, mirar la pantalla— y
+después en producción con el mismo comando, pidiéndolo por número de contrato:
+
+    olympo:corregir-valor RPS-2026-0028 --lote=RPS-H-009:325000.00 --lote=RPS-H-015:325000.00 --lote=RPS-H-016:325000.00 --motivo="…"
+
+El ensayo de producción dio EXACTAMENTE lo calculado de antemano contra la foto
+de la base (865,992.00 → 866,000.00). Después: «Todos los recibos cuadran» y
+`olympo:verificar-produccion` con los 3 FALTA de montaje de siempre (mail en
+log, respaldo en disco local, usuario con `12345678`). La reimpresión del
+RPS-00000106 ya dice «total L. 866,000.00», que es el papel para el cliente.
+Respaldos en el servidor: `/root/praderas_produccion_2026-09-20_1739.sql.gz`
+(antes del deploy) y `…_1740_antes_del_0028.sql.gz` (justo antes de escribir).
+
+La nota de Observaciones se cambió en las dos instalaciones con un tinker que
+lee el texto nuevo del propio `ExpedientesHistoricos` —así no viaja un acento
+por la terminal— y solo escribe si encuentra la nota vieja.
+
 **La puerta, en verde a la segunda vuelta:** 1370 tests / 6125 assertions
 (18 nuevos en `CorregirValorTest`), PHPStan 502/502 sin errores, Pint 905
 archivos, Rector sin cambios pendientes. Sin migración y sin permisos nuevos.
