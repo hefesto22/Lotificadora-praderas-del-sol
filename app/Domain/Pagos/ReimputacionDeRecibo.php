@@ -41,7 +41,9 @@ use Throwable;
  *
  *   1. ANULA el recibo, con su motivo. Eso devuelve a las cuotas lo que les
  *      había aplicado y deshace las reprogramaciones que había hecho (el plan
- *      viejo de cada lote vuelve tal cual lo guardó la constancia).
+ *      viejo de cada lote vuelve tal cual lo guardó la constancia). Es un paso
+ *      INTERNO: se anula para deshacer sus efectos por la puerta que ya está
+ *      probada, y al final esa fila se borra (ver abajo).
  *   2. Vuelve a REGISTRAR el mismo dinero —misma fecha, misma forma, misma
  *      referencia, misma nota, mismo receptor— contra los lotes pedidos, por
  *      la misma puerta por la que entró: un recibo de cuotas se vuelve a
@@ -50,18 +52,28 @@ use Throwable;
  *   3. COMPRUEBA que no se creó ni se perdió un centavo, y lo asienta en la
  *      bitácora del expediente con el antes y el después de cada lote.
  *
- * ═══ 🔴 POR QUE SE ANULA Y NO SE EDITA ═══
+ * ═══ 🔴 EL RECIBO VIEJO SE BORRA, NO QUEDA ANULADO — 21-sep-2026 ═══
  *
- * Un recibo no se edita: se anula y se emite otro, y las dos filas cuentan la
- * historia completa (R12, y el docblock de la migración `anular_recibos`).
- * Editar las aplicaciones en el lugar obligaría además a copiar acá el FIFO,
- * el tope del abono y la reescritura del plan — la matemática del dinero en
- * dos lugares, que es la forma segura de que un día diverjan.
+ * «No hay anulados: directamente se borran esas transacciones de ahí» —
+ * Mauricio, mirando el expediente con un 000089 anulado que en el cuaderno
+ * nunca existió. Tiene razón, y por eso esta es la UNICA puerta del sistema
+ * que borra un recibo:
  *
- * El costo es un número más en la serie vieja, y es barato: esos números no
- * están impresos en ningún papel del cliente. Lo que el cliente tiene en la
- * mano es el recibo del talonario, y ese número viaja en las observaciones,
- * que se conservan.
+ *   · Un recibo de la cartera vieja es la TRANSCRIPCION de un renglón del
+ *     cuaderno. En el cuaderno hay un solo pago y nadie anuló nada: un
+ *     «anulado» en el estado de cuenta contaría una historia que no pasó.
+ *   · Su número —la serie sin prefijo— no está impreso en ningún papel del
+ *     cliente. Lo que el cliente tiene en la mano es el talonario, y ese
+ *     número viaja en las observaciones, que se conservan. R12 cuida la serie
+ *     que IMPRIME el sistema, y esa acá no se toca.
+ *
+ * El rastro no se pierde: queda en «Actualizaciones» del expediente, con el
+ * folio que se fue, el que lo reemplaza, el antes y el después de cada lote y
+ * el motivo.
+ *
+ * ⚠️ Se sigue pasando por `anular()` y no se editan las aplicaciones en el
+ * lugar: eso obligaría a copiar acá el FIFO, el tope del abono y la
+ * reescritura del plan — la matemática del dinero en dos lugares.
  *
  * ═══ QUE NO HACE ═══
  *
@@ -155,7 +167,11 @@ final readonly class ReimputacionDeRecibo
     {
         // Se relee bloqueando: dos personas re-imputando el mismo recibo lo
         // anularían una y registrarían el dinero las dos.
-        $vivo = Recibo::query()->whereKey($recibo->getKey())->lockForUpdate()->firstOrFail();
+        $vivo = Recibo::query()->whereKey($recibo->getKey())->lockForUpdate()->first();
+
+        if (! $vivo instanceof Recibo) {
+            throw ReimputacionInvalidaException::porReciboQueYaNoExiste($recibo->folio());
+        }
 
         $this->verificarElRecibo($venta, $vivo);
 
@@ -193,13 +209,17 @@ final readonly class ReimputacionDeRecibo
 
         $hecha = new ReimputacionHecha(
             escrita: $escribir,
-            folioAnulado: $vivo->folio(),
+            folioViejo: $vivo->folio(),
             foliosNuevos: array_map(static fn (Recibo $papel): string => $papel->folio(), $nuevos),
             monto: $vivo->montoTotal(),
             lotes: $this->retratos($lotes, $imputadoAntes, $imputadoDespues, $capitalDespues, $antes, $despues),
         );
 
         $this->asentar($venta, $hecha, $motivo);
+
+        // Ver el docblock de la clase: la fila anulada era un paso interno.
+        // Sus aplicaciones y sus impresiones se van con ella (cascade).
+        $vivo->delete();
 
         return $hecha;
     }
@@ -553,19 +573,18 @@ final readonly class ReimputacionDeRecibo
     }
 
     /**
-     * La nota del recibo viejo, entera, y de dónde sale el nuevo.
+     * La nota del recibo viejo, tal cual.
      *
-     * La nota es donde viaja el número del talonario de papel —que es lo que
-     * el cliente tiene en la mano—, así que no se toca: se le agrega.
+     * Es donde viaja el número del talonario de papel —lo que el cliente tiene
+     * en la mano—, así que pasa entera al recibo nuevo. No se le agrega de
+     * dónde sale: el viejo se borra, y una nota que nombre un recibo que ya no
+     * existe manda a buscarlo a quien la lea. Ese rastro vive en la bitácora.
      */
-    private function notaDe(Recibo $viejo): string
+    private function notaDe(Recibo $viejo): ?string
     {
         $nota = $viejo->getAttribute('observaciones');
-        $origen = sprintf('Reemplaza al recibo %s, anulado al re-imputarlo entre lotes.', $viejo->folio());
 
-        return is_string($nota) && trim($nota) !== ''
-            ? trim($nota).' '.$origen
-            : $origen;
+        return is_string($nota) && trim($nota) !== '' ? trim($nota) : null;
     }
 
     // ─── El antes y el después ────────────────────────────────────────
@@ -737,7 +756,7 @@ final readonly class ReimputacionDeRecibo
      */
     private function asentar(Venta $venta, ReimputacionHecha $hecha, string $motivo): void
     {
-        $viejos = ['recibo' => $hecha->folioAnulado];
+        $viejos = ['recibo' => $hecha->folioViejo];
         $nuevos = ['recibo' => implode(', ', $hecha->foliosNuevos)];
 
         foreach ($hecha->lotes as $lote) {

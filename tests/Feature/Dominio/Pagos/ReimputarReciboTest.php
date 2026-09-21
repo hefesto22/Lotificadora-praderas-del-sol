@@ -159,7 +159,7 @@ test('todo el recibo va al primer lote, y el segundo vuelve a su plan sin un pag
     $hecha = ($this->reimputar)();
 
     expect($hecha->escrita)->toBeTrue()
-        ->and($hecha->folioAnulado)->toBe($this->recibo->folio())
+        ->and($hecha->folioViejo)->toBe($this->recibo->folio())
         ->and($hecha->foliosNuevos)->toHaveCount(1);
 
     // El primer lote: tres cuotas al día y L 67,500.00 menos de capital.
@@ -223,15 +223,18 @@ test('ni se crea ni se pierde un lempira', function (): void {
         ->assertSuccessful();
 });
 
-test('el recibo viejo queda anulado con su motivo y el nuevo conserva todo lo demás', function (): void {
+/*
+| 🔴 «No hay anulados, directamente se borran esas transacciones» — Mauricio.
+| En el cuaderno hay UN pago y nadie anuló nada: el recibo viejo se va entero,
+| y el rastro queda en la bitácora del expediente (el test de más abajo).
+*/
+test('el recibo viejo se borra —no queda anulado— y el nuevo conserva todo lo demás', function (): void {
     ($this->reimputar)(motivo: 'Lo confirmó el cliente en ventanilla');
 
-    $viejo = $this->recibo->fresh();
     $nuevo = reciboQueReemplaza($this->recibo);
 
-    expect($viejo?->estaAnulado())->toBeTrue()
-        ->and((string) $viejo?->getAttribute('motivo_anulacion'))->toContain('Re-imputación entre lotes')
-        ->and((string) $viejo?->getAttribute('motivo_anulacion'))->toContain('Lo confirmó el cliente en ventanilla');
+    expect(Recibo::query()->whereKey($this->recibo->getKey())->exists())->toBeFalse()
+        ->and(Recibo::query()->where('venta_id', $this->venta->getKey())->whereNotNull('anulado_el')->count())->toBe(0);
 
     expect($nuevo->esDeLaCarteraVieja())->toBeTrue()
         ->and($nuevo->montoTotal())->toBeMonto('105000.00')
@@ -241,9 +244,9 @@ test('el recibo viejo queda anulado con su motivo y el nuevo conserva todo lo de
         ->and($nuevo->getAttribute('fecha')?->format('Y-m-d'))->toBe($this->fechaDelPago->format('Y-m-d'))
         ->and($nuevo->getAttribute('recibido_por'))->toBe($this->elder->getKey())
         ->and($nuevo->getAttribute('compromiso_id'))->toBe($this->uno->getKey())
-        // El número del talonario de papel viaja en la nota, y no se pierde.
-        ->and((string) $nuevo->getAttribute('observaciones'))->toContain('Recibo 00000377 del talonario')
-        ->and((string) $nuevo->getAttribute('observaciones'))->toContain('Reemplaza al recibo '.$this->recibo->folio());
+        // El número del talonario de papel viaja en la nota, y llega tal cual:
+        // no nombra al recibo viejo, que ya no existe.
+        ->and($nuevo->getAttribute('observaciones'))->toBe('Recibo 00000377 del talonario. Cuaderno: abono a capital.');
 
     // La constancia nueva dice lo que decía la vieja.
     $constancia = Reprogramacion::query()->where('recibo_id', $nuevo->getKey())->firstOrFail();
@@ -335,13 +338,13 @@ test('pedir el reparto que ya tiene no hace nada', function (): void {
     expect($this->recibo->fresh()?->estaAnulado())->toBeFalse();
 });
 
-test('la segunda corrida encuentra el recibo anulado y no vuelve a mover nada', function (): void {
+test('la segunda corrida ya no encuentra el recibo viejo y no vuelve a mover nada', function (): void {
     ($this->reimputar)();
 
     $recibos = Recibo::query()->count();
 
     expect(fn () => ($this->reimputar)())
-        ->toThrow(ReimputacionInvalidaException::class, 'ya está anulado');
+        ->toThrow(ReimputacionInvalidaException::class, 'ya no existe');
 
     expect(Recibo::query()->count())->toBe($recibos)
         ->and(saldoTrasReimputar($this->uno))->toBeMonto('195000.00');
@@ -416,7 +419,7 @@ test('el comando escribe, y pegarlo dos veces no hace daño', function (): void 
     $recibos = Recibo::query()->count();
 
     $this->artisan('olympo:reimputar-recibo', $pedido)
-        ->expectsOutputToContain('ya está anulado')
+        ->expectsOutputToContain('No encontré ese recibo')
         ->assertFailed();
 
     expect(Recibo::query()->count())->toBe($recibos)

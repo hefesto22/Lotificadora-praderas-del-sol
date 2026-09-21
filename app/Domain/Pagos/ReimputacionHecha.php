@@ -23,7 +23,7 @@ final readonly class ReimputacionHecha
      */
     public function __construct(
         public bool $escrita,
-        public string $folioAnulado,
+        public string $folioViejo,
         public array $foliosNuevos,
         public Monto $monto,
         public array $lotes,

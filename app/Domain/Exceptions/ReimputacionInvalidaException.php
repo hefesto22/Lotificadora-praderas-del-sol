@@ -42,8 +42,9 @@ final class ReimputacionInvalidaException extends GrupoOlympoException
     public static function porReciboYaAnulado(string $folio, string $motivo): self
     {
         return new self(
-            "El recibo {$folio} ya está anulado («{$motivo}»). Si fue por una re-imputación, ya está "
-            .'hecha: el recibo que lo reemplaza está en el expediente. No se escribió nada.'
+            "El recibo {$folio} está anulado («{$motivo}»): ya no aplica nada, así que no hay qué "
+            .'re-imputar. Si es de la cartera vieja y no debe quedar como anulado, se borra con '
+            .'olympo:acomodar-recibos-viejos --borrar-anulado. No se escribió nada.'
         );
     }
 
@@ -144,6 +145,49 @@ final class ReimputacionInvalidaException extends GrupoOlympoException
         return new self(
             "El recibo {$folio} no tiene {$queFalta}, y sin eso no se puede volver a registrar igual "
             .'que como entró. No se escribió nada.'
+        );
+    }
+
+    public static function porReciboQueYaNoExiste(string $folio): self
+    {
+        return new self(
+            "El recibo {$folio} ya no existe. Si se re-imputó, ya está hecho: el que lo reemplaza está "
+            .'en el expediente y el rastro en su pestaña «Actualizaciones». No se escribió nada.'
+        );
+    }
+
+    public static function porNoEstarAnulado(string $folio): self
+    {
+        return new self(
+            "El recibo {$folio} está vigente: tiene dinero aplicado a cuotas. Por acá solo se borra un "
+            .'recibo de la cartera vieja que YA está anulado. No se escribió nada.'
+        );
+    }
+
+    public static function porNoTenerUnaSolaPrima(int $cuantas): self
+    {
+        return new self(
+            $cuantas === 0
+                ? 'Este expediente no tiene un recibo de prima vigente: no hay nada que partir.'
+                : "Este expediente ya tiene {$cuantas} recibos de prima: ya está partida, o hay que mirarla a mano."
+        );
+    }
+
+    public static function porTenerUnSoloNombre(): self
+    {
+        return new self(
+            'Todos los lotes de este expediente sacan el recibo a un mismo nombre, así que la prima va '
+            .'en un solo papel. Primero se pone el titular del recibo de cada lote —botón «Titular de '
+            .'los recibos» del expediente— y después se parte.'
+        );
+    }
+
+    public static function porPrimaQueNoSuma(Monto $recibo, Monto $lotes): self
+    {
+        return new self(
+            "El recibo de la prima es de {$recibo->formateado()} y las primas de los lotes suman "
+            ."{$lotes->formateado()}. No se puede partir sin inventar o perder dinero: suele ser una "
+            .'seña de apartado descontada de la prima. Se mira a mano.'
         );
     }
 

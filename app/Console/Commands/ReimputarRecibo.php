@@ -38,10 +38,10 @@ use RuntimeException;
  * se ve es lo que va a quedar — incluidas las cuotas vencidas con que amanece
  * el lote que pierde el dinero, que es lo que hay que mirar antes de escribir.
  *
- * Correrlo dos veces no hace daño: la segunda encuentra el recibo ya anulado,
- * lo dice, y no escribe nada.
+ * Correrlo dos veces no hace daño: la segunda ya no encuentra el recibo viejo
+ * —se borró, ver `ReimputacionDeRecibo`—, lo dice, y no escribe nada.
  */
-#[Description('Re-imputa un recibo de la cartera vieja entre los lotes de su expediente: anula el viejo y registra el mismo dinero bien repartido.')]
+#[Description('Re-imputa un recibo de la cartera vieja entre los lotes de su expediente: el mismo dinero, bien repartido, sin dejar anulados.')]
 #[Signature('olympo:reimputar-recibo
     {venta : El número de contrato del expediente, o el id de la venta}
     {recibo : El folio del recibo tal como sale en pantalla. Ejemplo: 000089}
@@ -96,8 +96,8 @@ final class ReimputarRecibo extends Command
         }
 
         $this->components->info(sprintf(
-            'Re-imputado. El %s quedó anulado con su motivo y lo reemplaza el %s.',
-            $hecha->folioAnulado,
+            'Re-imputado. El %s se borró y lo reemplaza el %s. El rastro quedó en «Actualizaciones» del expediente.',
+            $hecha->folioViejo,
             implode(', ', $hecha->foliosNuevos),
         ));
 
@@ -258,8 +258,8 @@ final class ReimputarRecibo extends Command
         );
 
         $this->line(sprintf(
-            '  Se anula el %s y lo reemplaza el %s, con la misma fecha, forma, referencia y nota.',
-            $hecha->folioAnulado,
+            '  Se borra el %s y lo reemplaza el %s, con la misma fecha, forma, referencia y nota.',
+            $hecha->folioViejo,
             implode(', ', $hecha->foliosNuevos),
         ));
 
