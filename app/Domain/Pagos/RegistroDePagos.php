@@ -2809,16 +2809,16 @@ final readonly class RegistroDePagos
     }
 
     /**
-     * Borra las cuotas que nadie tocó y escribe el plan nuevo (R21).
+     * Reescribe las cuotas que nadie tocó con el plan nuevo (R21).
      *
-     * ═══ POR QUE SE PUEDE BORRAR SIN MIEDO ═══
+     * ═══ 🔴 «SE PUEDE BORRAR SIN MIEDO» ERA FALSO — 21-sep-2026 ═══
      *
-     * Solo se borran las que tienen `monto_pagado = 0`, y una cuota sin nada
-     * pagado no tiene aplicaciones de pago —el CHECK
-     * `aplicaciones_monto_positivo_chk` no admite renglones de L 0.00—. Por eso
-     * el `restrictOnDelete` de `aplicaciones_de_pago.cuota_id` nunca se
-     * dispara acá: es la red por si algún día esta invariante se rompe, no un
-     * obstáculo que haya que esquivar.
+     * Hasta hoy esto decía que una cuota con `monto_pagado = 0` no tiene
+     * aplicaciones de pago, y por eso se borraba. No es verdad: un recibo
+     * ANULADO devuelve el dinero pero conserva sus aplicaciones como traza, así
+     * que una cuota en cero puede seguir referenciada. El `restrictOnDelete`
+     * de `aplicaciones_de_pago.cuota_id` sí se disparaba, y con el error crudo
+     * de Postgres. El porqué del arreglo está adentro del método.
      *
      * ⚠️ Con interés, cada cuota nueva se escribe con su capital y su interés
      * ya separados: el CHECK `cuotas_partes_suman_el_monto_chk` no deja pasar
@@ -2826,25 +2826,32 @@ final readonly class RegistroDePagos
      */
     private function reescribirElPlan(Venta $venta, Compromiso $lote, EfectoDelAbono $efecto, PlanDeCuotas $plan): void
     {
-        Cuota::query()
+        /*
+         * 🔴 SE PISAN EN EL LUGAR, NO SE BORRAN — 21-sep-2026. Es el mismo
+         * arreglo de `reescribirElPlanViejo()`, en el otro sentido: una cuota
+         * pendiente puede conservar la TRAZA de un recibo anulado —su
+         * aplicación no se borra nunca—, y borrarla reventaba con un error
+         * crudo de llave foránea. Se alcanzaba desde el mostrador: cobrar una
+         * cuota, anular ese cobro y después abonar a capital.
+         *
+         * La cuota que sigue existiendo en el plan nuevo —mismo número— se
+         * actualiza y conserva su id. Es seguro: las reemplazables no tienen
+         * un centavo pagado ni están vencidas (ver `EfectoDelAbono`).
+         */
+
+        /** @var array<int, int> $existentes numero → id */
+        $existentes = Cuota::query()
             ->where('compromiso_id', $lote->getKey())
             ->whereIn('numero', $efecto->numerosReemplazados)
-            ->delete();
-
-        if ($plan->cuotas === []) {
-            // El abono canceló lo que quedaba: no hay cuotas nuevas y no queda
-            // ninguna de L 0.00 colgando (R3).
-            return;
-        }
+            ->pluck('id', 'numero')
+            ->all();
 
         $ahora = now();
         $filas = [];
+        $conservadas = [];
 
         foreach ($plan->cuotas as $cuota) {
-            $filas[] = [
-                'venta_id'          => $venta->getKey(),
-                'compromiso_id'     => $lote->getKey(),
-                'numero'            => $cuota->numero,
+            $datos = [
                 'fecha_vencimiento' => $cuota->vencimientoParaBase(),
                 'monto'             => $cuota->montoParaBase(),
                 'monto_capital'     => $cuota->capitalParaBase(),
@@ -2852,12 +2859,64 @@ final readonly class RegistroDePagos
                 'monto_pagado'      => '0.00',
                 'mora_pagada'       => '0.00',
                 'mora_condonada'    => '0.00',
-                'created_at'        => $ahora,
-                'updated_at'        => $ahora,
+            ];
+
+            $id = $existentes[$cuota->numero] ?? null;
+
+            if ($id !== null) {
+                // Todas las columnas en UNA sentencia: los CHECK de `cuotas`
+                // se evalúan por sentencia (monto = capital + interés).
+                Cuota::query()->whereKey($id)->update($datos);
+                $conservadas[] = $id;
+
+                continue;
+            }
+
+            $filas[] = [
+                'venta_id'      => $venta->getKey(),
+                'compromiso_id' => $lote->getKey(),
+                'numero'        => $cuota->numero,
+                ...$datos,
+                'created_at' => $ahora,
+                'updated_at' => $ahora,
             ];
         }
 
-        Cuota::query()->insert($filas);
+        // Las que el plan nuevo ya no tiene: la cola que el abono acortó, o
+        // todas si el abono canceló lo que quedaba (R3).
+        $sobrantes = array_values(array_diff(array_values($existentes), $conservadas));
+
+        if ($sobrantes !== []) {
+            $this->verificarQueNoGuardenTraza($lote, $sobrantes);
+
+            Cuota::query()->whereKey($sobrantes)->delete();
+        }
+
+        if ($filas !== []) {
+            Cuota::query()->insert($filas);
+        }
+    }
+
+    /**
+     * Una cuota que el abono elimina no puede llevarse la traza de un recibo.
+     *
+     * Casi imposible —la traza de un cobro anulado queda en las cuotas más
+     * viejas, que son las que el plan nuevo conserva—, pero si pasa tiene que
+     * decirlo en castellano y no con el error de Postgres.
+     *
+     * @param list<int> $cuotas ids de las cuotas que se van a borrar
+     */
+    private function verificarQueNoGuardenTraza(Compromiso $lote, array $cuotas): void
+    {
+        $hayTraza = DB::table('aplicaciones_de_pago')->whereIn('cuota_id', $cuotas)->exists();
+
+        if ($hayTraza) {
+            throw PagoInvalidoException::porPlanQueNoSePudoArmar(
+                'Una de las cuotas que este abono elimina conserva el registro de un recibo anulado. '
+                .'Se puede abonar eligiendo «bajar la cuota» en vez de «acortar el plazo», que no elimina cuotas.',
+                $this->codigo($lote),
+            );
+        }
     }
 
     /**

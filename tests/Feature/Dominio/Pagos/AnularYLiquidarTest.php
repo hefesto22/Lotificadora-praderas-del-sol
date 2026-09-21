@@ -244,6 +244,25 @@ describe('Anular un abono a capital', function (): void {
     });
 
     /*
+    | 🔴 Y EN EL OTRO SENTIDO, que es el que se alcanza desde el mostrador:
+    | cobrar una cuota, anular ese cobro y después abonar a capital. El abono
+    | BORRABA las cuotas pendientes —entre ellas la que guarda la traza del
+    | cobro anulado— y reventaba igual. Ahora las pisa en el lugar.
+    */
+    test('se puede abonar a capital aunque un cobro anulado haya dejado su traza en una cuota pendiente', function (): void {
+        $cobro = ($this->cobrar)('25000.00');
+
+        $this->pagos->anular($cobro->refresh(), 'Se cobró por error');
+
+        ($this->abonar)('100000.00');
+
+        // 300,000 menos el abono: ocho cuotas de 25,000.
+        expect(($this->plan)())->toHaveCount(8)
+            ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('200000.00')
+            ->and(DB::table('aplicaciones_de_pago')->where('recibo_id', $cobro->getKey())->count())->toBe(1);
+    });
+
+    /*
     | Lo mismo con otro abono encima: su `plan_anterior` es el plan que escribió
     | este, así que devolverle a este el suyo lo dejaría apuntando a cuotas que
     | dejan de existir.
