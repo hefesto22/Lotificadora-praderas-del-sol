@@ -1527,6 +1527,14 @@ final class ExpedientesHistoricos
                 'recibo_prima'  => '0042',
                 'observaciones' => 'Cartera anterior al sistema. Cuaderno pág. 69. ⚠️el cliente pagó la prima en 2 partes, motivo por el cual se extienden 2 recibos pero se unificó  el recibo n° 0042 con el 0079 , al momento de pasar al libro maestro sin anulacion a uno a peticion del mismo',
                 'pagos'         => [
+                    /*
+                     * 🔴 TODO AL LOTE 1 — 21-sep-2026. El cuaderno no dice a
+                     * qué lote fue este abono, y con `'lote' => null` la carga
+                     * lo partió a medias. «En el lote 2 solo son los 10,000 de
+                     * prima, en el otro va todo el resto: lo va a pagar más
+                     * rápido» — Mauricio, con el dato del cliente. En
+                     * producción se corrigió con `olympo:reimputar-recibo`.
+                     */
                     [
                         'recibo'        => '00000377',
                         'fecha'         => '2026-08-05',
@@ -1534,7 +1542,7 @@ final class ExpedientesHistoricos
                         'monto'         => '32500.00',
                         'forma'         => 'efectivo',
                         'referencia'    => null,
-                        'lote'          => null,
+                        'lote'          => 'T-1',
                         'observaciones' => 'Recibo 00000377 del talonario. Cuaderno: abono a capital. Recibió Edwin Adonay Espinoza Franco.',
                     ],
                 ],

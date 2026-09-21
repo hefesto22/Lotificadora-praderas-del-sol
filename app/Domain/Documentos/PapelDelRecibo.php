@@ -72,6 +72,12 @@ final readonly class PapelDelRecibo
 
         $saldos = $this->saldosPorLote($recibo);
 
+        // `prontoPago`: vacío salvo en un pronto pago, donde el detalle sale en
+        // una línea por lote en vez de cuota por cuota (21-sep-2026). El porqué
+        // está en `Recibo::prontoPagoPorLote()`. ⚠️ El comentario va ACA y no
+        // al lado de la clave: un comentario en medio del arreglo parte el
+        // grupo de `=>` y Pint realinea todas las de arriba.
+        //
         // `variosLotes`: con un solo lote el rótulo del papel va en singular
         // y el detalle no repite el código en cada renglón. Se pregunta por
         // los lotes que el papel NOMBRA —no solo los que tocó—, que es lo que
@@ -83,6 +89,7 @@ final readonly class PapelDelRecibo
             'enLetras'        => MontoEnLetras::de($recibo->montoTotal()),
             'aCapital'        => $recibo->montoACapital(),
             'capitalPorLote'  => $recibo->capitalPorLote(),
+            'prontoPago'      => $recibo->prontoPagoPorLote(),
             'variosLotes'     => $recibo->nombraVariosLotes(),
             'recibio'         => $recibo->nombreDeQuienRecibio(),
             'saldos'          => $saldos,

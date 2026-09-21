@@ -118,6 +118,9 @@
         th:last-child, td:last-child { padding-right: 0; }
         tr:last-child td { border-bottom: 0; }
         .capital td { color: #1d4ed8; font-weight: 600; }
+        /* El renglón único del pronto pago: el título arriba y los tres
+           números abajo, más chicos. Es una celda, no tres renglones. */
+        td .detalle { display: block; margin-top: .15rem; font-size: 11px; line-height: 1.5; color: #52525b; }
 
         /* ── Total ── */
         .total { margin-top: 1rem; padding: .75rem 1rem; background: #fafafa; border: 1px solid #e4e4e7; border-radius: .5rem; }

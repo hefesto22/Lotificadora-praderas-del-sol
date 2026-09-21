@@ -1091,6 +1091,88 @@ class Recibo extends Model
         return ! $this->capitalCondonado()->esCero();
     }
 
+    /**
+     * El pronto pago en UNA línea por lote — 21-sep-2026.
+     *
+     * «En el recibo, cuando sea pronto pago, no tiene que listar todas las
+     * cuotas: solo una línea diciendo cuánto pagó, cuánto de descuento y que
+     * quedó pagado en su totalidad» — Mauricio, mirando un pronto pago de
+     * L 200,000.00 que salió en TRES páginas: cuarenta y tantos renglones de
+     * «Cuota 3 … L 5,000.00» para decir una sola cosa.
+     *
+     * Un pronto pago salda TODAS las cuotas que el lote debía, así que
+     * listarlas no informa nada que no diga «el lote queda pagado». Lo que el
+     * cliente quiere leer —y lo que acordó de palabra— son tres números:
+     * cuánto debía, cuánto se le perdonó y cuánto entregó.
+     *
+     * ═══ SALE DE LAS APLICACIONES, NO DE UNA CUENTA NUEVA ═══
+     *
+     * Son las mismas filas que antes se imprimían una por una, sumadas por
+     * lote. Así los tres números no pueden discrepar de lo que la base guardó,
+     * y la suma de lo pagado en todos los lotes es, al centavo, el total del
+     * papel — que sigue siendo SOLO lo que entró (ver `capitalCondonado()`).
+     *
+     * ⚠️ Vacío cuando el recibo no llevó descuento: es la misma señal con la
+     * que el resto del sistema reconoce un pronto pago (`tuvoDescuento()`), y
+     * ahí el papel lista sus cuotas como siempre.
+     *
+     * @return list<array{codigo: string, desde: int, hasta: int, debia: Monto, descuento: Monto, pago: Monto}>
+     */
+    public function prontoPagoPorLote(): array
+    {
+        if (! $this->tuvoDescuento()) {
+            return [];
+        }
+
+        /*
+         * Cuatro acumuladores por código y no un arreglo de arreglos: una
+         * forma declarada que se arma de a pedazos se le pierde a PHPStan en
+         * el segundo renglón, y los tres números de abajo son dinero.
+         */
+        /** @var array<string, int> $desde */
+        $desde = [];
+        /** @var array<string, int> $hasta */
+        $hasta = [];
+        /** @var array<string, Monto> $descuento */
+        $descuento = [];
+        /** @var array<string, Monto> $pago */
+        $pago = [];
+
+        foreach ($this->aplicaciones as $aplicacion) {
+            $cuota = $aplicacion->cuota;
+
+            if (! $cuota instanceof Cuota) {
+                continue;
+            }
+
+            $codigo = (string) ($cuota->compromiso?->lote?->getAttribute('codigo') ?? '—');
+            $numero = (int) $cuota->getAttribute('numero');
+
+            $desde[$codigo] = min($desde[$codigo] ?? $numero, $numero);
+            $hasta[$codigo] = max($hasta[$codigo] ?? $numero, $numero);
+            $descuento[$codigo] = ($descuento[$codigo] ?? Monto::cero())->sumar($aplicacion->capitalCondonado());
+            $pago[$codigo] = ($pago[$codigo] ?? Monto::cero())->sumar($aplicacion->montoAplicado());
+        }
+
+        // Por código, el orden del contrato: el mismo del resto del papel.
+        ksort($pago);
+
+        $porLote = [];
+
+        foreach ($pago as $codigo => $entregado) {
+            $porLote[] = [
+                'codigo'    => $codigo,
+                'desde'     => $desde[$codigo],
+                'hasta'     => $hasta[$codigo],
+                'debia'     => $entregado->sumar($descuento[$codigo]),
+                'descuento' => $descuento[$codigo],
+                'pago'      => $entregado,
+            ];
+        }
+
+        return $porLote;
+    }
+
     public function cobroMora(): bool
     {
         return ! $this->montoMora()->esCero();

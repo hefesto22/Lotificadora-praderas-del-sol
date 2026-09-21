@@ -170,23 +170,73 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach ($recibo->aplicaciones as $aplicacion)
+                {{--
+                    🔴 EL PRONTO PAGO SALE EN UNA LINEA POR LOTE — 21-sep-2026.
+
+                    «Cuando sea pronto pago no tiene que listar todas las
+                    cuotas: solo una línea diciendo cuánto pagó, cuánto de
+                    descuento y que quedó pagado en su totalidad» — Mauricio,
+                    mirando un pronto pago de L 200,000.00 que salió en TRES
+                    páginas de «Cuota 3, Cuota 4, Cuota 5…».
+
+                    Un pronto pago salda todas las cuotas que el lote debía:
+                    listarlas no dice nada que no diga «queda pagado». Los tres
+                    números salen de las mismas aplicaciones que antes se
+                    imprimían una por una, sumadas por lote — ver
+                    `Recibo::prontoPagoPorLote()`.
+
+                    ⚠️ La columna Monto sigue siendo SOLO lo que entró, igual
+                    que el total de abajo: el descuento se dice, no se suma.
+                    Un recibo sin descuento trae la lista vacía y cae en el
+                    detalle de siempre, cuota por cuota.
+                --}}
+                @forelse (($prontoPago ?? []) as $saldado)
                     <tr>
-                        {{-- Con varios lotes, «Cuota 1» tres veces no dice nada:
-                             cada plan numera desde 1. El código va adelante. --}}
-                        <td>@if ($variosLotes){{ $aplicacion->cuota?->compromiso?->lote?->getAttribute('codigo') ?? '—' }} · @endif Cuota {{ $aplicacion->cuota?->getAttribute('numero') }}</td>
-                        <td>{{ $aplicacion->cuota?->getAttribute('fecha_vencimiento')?->format('d/m/Y') ?? '—' }}</td>
+                        <td>
+                            <strong>Pronto pago · cancela el lote {{ $saldado['codigo'] }}</strong>
+                            <span class="detalle">
+                                Debía {{ $saldado['debia']->formateado() }}
+                                @if ($saldado['desde'] === $saldado['hasta'])
+                                    (cuota {{ $saldado['desde'] }})
+                                @else
+                                    (cuotas {{ $saldado['desde'] }} a {{ $saldado['hasta'] }})
+                                @endif
+                                {{-- Dos lotes en un papel y solo a uno se le
+                                     rebajó: «descuento L. 0.00» en el otro
+                                     hace dudar del que sí lo tuvo. --}}
+                                @unless ($saldado['descuento']->esCero())
+                                    · descuento por pronto pago {{ $saldado['descuento']->formateado() }}
+                                @endunless
+                                · pagó {{ $saldado['pago']->formateado() }}.
+                                El lote queda pagado en su totalidad.
+                            </span>
+                        </td>
+                        <td>—</td>
                         @if ($recibo->esFactura())
-                            {{-- Una cuota es una, y su valor unitario es lo que
-                                 se aplicó. Las columnas existen porque la
-                                 factura las pide, no porque acá se vendan
-                                 cosas por docena. --}}
                             <td>1</td>
-                            <td>{{ $aplicacion->montoAplicado()->formateado() }}</td>
+                            <td>{{ $saldado['pago']->formateado() }}</td>
                         @endif
-                        <td>{{ $aplicacion->montoAplicado()->formateado() }}</td>
+                        <td>{{ $saldado['pago']->formateado() }}</td>
                     </tr>
-                @endforeach
+                @empty
+                    @foreach ($recibo->aplicaciones as $aplicacion)
+                        <tr>
+                            {{-- Con varios lotes, «Cuota 1» tres veces no dice nada:
+                                 cada plan numera desde 1. El código va adelante. --}}
+                            <td>@if ($variosLotes){{ $aplicacion->cuota?->compromiso?->lote?->getAttribute('codigo') ?? '—' }} · @endif Cuota {{ $aplicacion->cuota?->getAttribute('numero') }}</td>
+                            <td>{{ $aplicacion->cuota?->getAttribute('fecha_vencimiento')?->format('d/m/Y') ?? '—' }}</td>
+                            @if ($recibo->esFactura())
+                                {{-- Una cuota es una, y su valor unitario es lo que
+                                     se aplicó. Las columnas existen porque la
+                                     factura las pide, no porque acá se vendan
+                                     cosas por docena. --}}
+                                <td>1</td>
+                                <td>{{ $aplicacion->montoAplicado()->formateado() }}</td>
+                            @endif
+                            <td>{{ $aplicacion->montoAplicado()->formateado() }}</td>
+                        </tr>
+                    @endforeach
+                @endforelse
 
                 @unless ($aCapital->esCero())
                     {{--
@@ -311,10 +361,13 @@
 
          Pero tampoco se calla: el cliente acordó de palabra una rebaja y este
          papel es lo único que la deja escrita. --}}
+    {{-- ⚠️ 21-sep-2026: el descuento y el «queda pagado» se dicen ahora en el
+         renglón del detalle, una vez por lote. Acá queda solo lo que ese
+         renglón no dice: que el descuento NO forma parte del total. --}}
     @if ($recibo->tuvoDescuento())
         <p class="nota">
-            Se le descontó <strong>{{ $recibo->capitalCondonado()->formateado() }}</strong> por pronto pago,
-            que no se cobró en este recibo. Con este pago el lote queda saldado.
+            El descuento por pronto pago (<strong>{{ $recibo->capitalCondonado()->formateado() }}</strong>)
+            no se cobró: el total de este recibo es lo que usted entregó.
         </p>
     @endif
 
