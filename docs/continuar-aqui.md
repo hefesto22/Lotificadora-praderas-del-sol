@@ -1,7 +1,67 @@
-# Continuar acá — 20-sep-2026
+# Continuar acá — 21-sep-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 21-sep — Exp. 0031: re-imputar un recibo, sin anulados, y la prima por titular
+
+**El pedido.** RPS-2026-0031 (dos lotes T, L 250,000.00 c/u, prima L 10,000.00
+c/u). El abono del talonario 377 (L 32,500.00, 05/08) llegó sin lote y la carga
+lo partió a medias. «En el lote 2 solo son 10,000 de prima, en el otro va todo
+el resto». Después: «no hay anulados, directamente se borran esas
+transacciones» y «los recibos deben salir a estos nombres» (el titular de
+recibo de cada lote). Y aparte: el papel del pronto pago salía en tres páginas.
+
+**Cómo quedó producción (verificado con psql):** tres recibos, ninguno anulado
+— prima 000259 T-002 L 10,000 · prima 000260 T-001 L 10,000 · abono 000258
+T-001 L 32,500 (15,000 a cuotas 1–3 + 17,500 a capital), cada uno a nombre del
+titular de su lote. T-001 debe L 207,500.00 y T-002 L 240,000.00 (447,500 en
+total, igual que antes). «Todos los recibos cuadran».
+⚠️ **El T-002 quedó con 3 cuotas vencidas (L 15,000.00)** y sale en «Por
+cobrar hoy»: es lo que dice el reparto nuevo. Avisarle a la administración.
+
+**Lo que entró (commits `3ae31fe`, `6ab9d23`, `879df2d`, `b17b855`):**
+
+- **`olympo:reimputar-recibo`** (`ReimputacionDeRecibo`): anula por dentro —para
+  deshacer por la puerta probada—, vuelve a registrar el mismo dinero (misma
+  fecha, forma, referencia, nota y receptor) contra los lotes pedidos, comprueba
+  que no se creó ni se perdió un centavo, asienta en «Actualizaciones» y **borra
+  el recibo viejo**. `--ensayo` corre todo y deshace la transacción: no estima.
+- **`olympo:acomodar-recibos-viejos`** (`RecibosDeCarteraVieja`):
+  `--borrar-anulado=FOLIO` y `--partir-prima` (un recibo de prima por titular
+  de recibo, con la prima congelada de cada compromiso). No mueve saldos.
+- 🔴 **El límite que no se negocia:** borrar es SOLO para la serie vieja (la
+  transcripción del cuaderno; su número no está en ningún papel). Un recibo que
+  imprimió el sistema no se borra ni estando anulado (R12). Hay test.
+- **El papel del pronto pago**: una línea por lote (debía · descuento · pagó ·
+  «queda pagado en su totalidad»). El total sigue siendo lo que entró.
+  `Recibo::prontoPagoPorLote()`.
+- `ExpedientesHistoricos`: el pago del 0031 dice `'lote' => 'T-1'`. ⚠️ Una carga
+  nueva NO parte la prima por titular: los nombres no están en el dato.
+
+**🔴 Dos bugs viejos que destapó el ensayo en pruebas, ya arreglados.** Un
+recibo ANULADO devuelve el dinero pero conserva sus aplicaciones como traza, así
+que una cuota en cero puede seguir referenciada. `reescribirElPlanViejo()`
+(anular un abono) y `reescribirElPlan()` (abonar a capital) BORRABAN cuotas y
+reventaban con el error crudo de llave foránea. Se alcanzaba desde el mostrador:
+cobrar, anular ese cobro, abonar a capital. Ahora las cuotas que existen en los
+dos planes **se pisan en el lugar** y conservan su id.
+
+**Deuda que queda (L4):** si la cuota que el abono ELIMINA (la cola) guarda traza
+de un recibo anulado, hoy se frena con mensaje en castellano que sugiere «bajar
+la cuota». Pasa en PRUEBAS en el T-001 del 0031 (un pronto pago de prueba anulado
+dejó traza en todas sus cuotas), por eso ahí el ensayo no corre. La solución de
+fondo pide migración (`aplicaciones_de_pago.cuota_id` nullable + guardar el
+número de cuota en la traza): se decide aparte.
+
+**Propuestas sin decidir (L5):**
+1. La pestaña **Recibos del expediente no marca los anulados** — un anulado se
+   ve igual que uno vivo, y fue lo que confundió hoy. Badge «Anulado» + monto
+   tachado. ~30 min. Del producto.
+2. **La prima de una venta NUEVA sale en un solo recibo** aunque los lotes
+   tengan titulares de recibo distintos; cuotas y abonos ya salen uno por
+   nombre (13-ago). Que `cobrarLaPrima()` haga lo mismo. ~2 h (ojo con las
+   señas). Del producto.
 
 ## 20-sep — Los L 8.00 del expediente 0028: nace `olympo:corregir-valor`
 
