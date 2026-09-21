@@ -18,6 +18,7 @@ use App\Models\Proyecto;
 use App\Models\Recibo;
 use App\Models\Reprogramacion;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 
 /*
 |--------------------------------------------------------------------------
@@ -218,6 +219,28 @@ describe('Anular un abono a capital', function (): void {
 
         // Y el lote no quedó a medias: sigue con el plan del abono.
         expect(($this->plan)())->toHaveCount(8);
+    });
+
+    /*
+    | 🔴 EL QUE REVENTO EN PRUEBAS — 21-sep-2026. Un cobro sobre el plan nuevo
+    | que después se ANULO no estorba —ya no mueve un centavo—, pero su
+    | aplicación se conserva como traza y sigue apuntando a una cuota del plan
+    | nuevo. Deshacer el abono BORRABA esas cuotas, y Postgres se negaba con un
+    | error crudo de llave foránea. Ahora se pisan en el lugar y conservan su id.
+    */
+    test('se anula aunque un cobro posterior ya anulado haya dejado su traza en el plan nuevo', function (): void {
+        $antes = ($this->plan)();
+
+        $abono = ($this->abonar)('100000.00');
+        $cobro = ($this->cobrar)('25000.00');
+
+        $this->pagos->anular($cobro->refresh(), 'Se cobró por error');
+        $this->pagos->anular($abono->refresh(), 'Era cuota, no abono a capital');
+
+        expect(($this->plan)())->toBe($antes)
+            ->and($this->venta->refresh()->saldoPendiente())->toBeMonto('300000.00')
+            // La traza del cobro anulado sigue ahí, y apunta a una cuota que existe.
+            ->and(DB::table('aplicaciones_de_pago')->where('recibo_id', $cobro->getKey())->count())->toBe(1);
     });
 
     /*

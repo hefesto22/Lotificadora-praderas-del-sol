@@ -716,12 +716,7 @@ final readonly class RegistroDePagos
 
             $desde = (int) $constancia->getAttribute('desde_numero');
 
-            Cuota::query()
-                ->where('compromiso_id', $lote->getKey())
-                ->where('numero', '>=', $desde)
-                ->delete();
-
-            $this->reescribirElPlanViejo($lote, $plan);
+            $this->reescribirElPlanViejo($lote, $plan, $desde);
 
             $constancia->delete();
         }
@@ -821,18 +816,46 @@ final readonly class RegistroDePagos
      * Nacen sin un centavo pagado, y tiene que ser así: lo que este recibo
      * había aplicado se devuelve aparte, cuota por cuota, en `anular()`.
      *
+     * ═══ 🔴 SE PISAN EN EL LUGAR, NO SE BORRAN — 21-sep-2026 ═══
+     *
+     * Hasta hoy esto era «borrar las cuotas del plan nuevo y escribir las
+     * viejas». Reventó en pruebas con un error crudo de llave foránea: sobre
+     * una cuota del plan nuevo se había hecho un cobro que DESPUES SE ANULO.
+     * `loQueVinoDespues()` hace bien en no contarlo —un recibo anulado no
+     * estorba—, pero su aplicación se conserva como traza (ver `anular()`) y
+     * sigue apuntando a esa cuota: Postgres no deja borrarla.
+     *
+     * La cuota que existe en los dos planes —mismo lote, mismo número— se
+     * actualiza con los datos del plan viejo y conserva su id, así que la traza
+     * del recibo anulado sigue apuntando a una cuota que existe. Solo se
+     * insertan las que el abono había quitado del final, y solo se borran las
+     * que el plan viejo no tenía.
+     *
+     * Es seguro pisarlas porque ninguna tiene un centavo vivo: si lo tuviera,
+     * `comprobarQueSePuedeDeshacer()` ya habría frenado todo.
+     *
+     * ⚠️ Por el constructor de consultas y no por el modelo: son decenas de
+     * cuotas, y cada `save()` dejaría un asiento en la bitácora por un cambio
+     * que ya está contado en la anulación del recibo.
+     *
      * @param list<array{numero: int, vence: string, monto: string}> $plan
      */
-    private function reescribirElPlanViejo(Compromiso $lote, array $plan): void
+    private function reescribirElPlanViejo(Compromiso $lote, array $plan, int $desde): void
     {
         $ahora = now();
+
+        /** @var array<int, int> $existentes numero → id */
+        $existentes = Cuota::query()
+            ->where('compromiso_id', $lote->getKey())
+            ->where('numero', '>=', $desde)
+            ->pluck('id', 'numero')
+            ->all();
+
         $filas = [];
+        $conservadas = [];
 
         foreach ($plan as $cuota) {
-            $filas[] = [
-                'venta_id'          => $lote->getAttribute('venta_id'),
-                'compromiso_id'     => $lote->getKey(),
-                'numero'            => $cuota['numero'],
+            $datos = [
                 'fecha_vencimiento' => $cuota['vence'],
                 'monto'             => $cuota['monto'],
                 'monto_capital'     => $cuota['monto'],
@@ -840,12 +863,40 @@ final readonly class RegistroDePagos
                 'monto_pagado'      => '0.00',
                 'mora_pagada'       => '0.00',
                 'mora_condonada'    => '0.00',
-                'created_at'        => $ahora,
-                'updated_at'        => $ahora,
+            ];
+
+            $id = $existentes[$cuota['numero']] ?? null;
+
+            if ($id !== null) {
+                // Todas las columnas en UNA sentencia: los CHECK de `cuotas`
+                // se evalúan por sentencia (monto = capital + interés).
+                Cuota::query()->whereKey($id)->update($datos);
+                $conservadas[] = $id;
+
+                continue;
+            }
+
+            $filas[] = [
+                'venta_id'      => $lote->getAttribute('venta_id'),
+                'compromiso_id' => $lote->getKey(),
+                'numero'        => $cuota['numero'],
+                ...$datos,
+                'created_at' => $ahora,
+                'updated_at' => $ahora,
             ];
         }
 
-        Cuota::query()->insert($filas);
+        // Las que el plan viejo no tenía. Con «acortar plazo» y con «bajar
+        // cuota» no hay ninguna: el plan viejo nunca es más corto que el nuevo.
+        Cuota::query()
+            ->where('compromiso_id', $lote->getKey())
+            ->where('numero', '>=', $desde)
+            ->whereNotIn('id', $conservadas)
+            ->delete();
+
+        if ($filas !== []) {
+            Cuota::query()->insert($filas);
+        }
     }
 
     /**
