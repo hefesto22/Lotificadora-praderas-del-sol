@@ -54,14 +54,20 @@ dejó traza en todas sus cuotas), por eso ahí el ensayo no corre. La solución 
 fondo pide migración (`aplicaciones_de_pago.cuota_id` nullable + guardar el
 número de cuota en la traza): se decide aparte.
 
-**Propuestas sin decidir (L5):**
-1. La pestaña **Recibos del expediente no marca los anulados** — un anulado se
-   ve igual que uno vivo, y fue lo que confundió hoy. Badge «Anulado» + monto
-   tachado. ~30 min. Del producto.
-2. **La prima de una venta NUEVA sale en un solo recibo** aunque los lotes
-   tengan titulares de recibo distintos; cuotas y abonos ya salen uno por
-   nombre (13-ago). Que `cobrarLaPrima()` haga lo mismo. ~2 h (ojo con las
-   señas). Del producto.
+**Las dos mejoras que aprobó Mauricio el mismo día, ya construidas:**
+
+1. **La pestaña Recibos del expediente marca los anulados**: folio en rojo,
+   «ANULADO — motivo» debajo y el monto tachado. El texto sale de
+   `Recibo::rotuloDeAnulado()`, que ahora también usa la lista general: dos
+   tablas armando el mismo texto es cómo una se quedó sin decirlo.
+2. **La prima de una venta NUEVA sale en un recibo por titular de recibo**
+   (`RegistroDeVentas::papelesDeLaPrima()`), igual que cuotas y abonos desde el
+   13-ago. Cada papel lleva la parte de la prima de SUS lotes menos SUS señas;
+   cuelga de su lote si ese nombre tiene uno solo, y si tiene varios queda en
+   la venta y `Recibo::compromisosDelPapel()` los encuentra por el nombre.
+   **Sigue saliendo UN papel** cuando todos comparten nombre (ahora lo lleva),
+   cuando a algún nombre sus señas le superan su parte, o si las partes no
+   sumaran la prima. La ficha del expediente nombra todos los papeles de prima.
 
 ## 20-sep — Los L 8.00 del expediente 0028: nace `olympo:corregir-valor`
 

@@ -479,10 +479,10 @@ class RecibosTable
     {
         $renglones = [];
 
-        if ($record->estaAnulado()) {
-            $motivo = $record->getAttribute('motivo_anulacion');
+        $anulado = $record->rotuloDeAnulado();
 
-            $renglones[] = 'ANULADO'.(is_string($motivo) && $motivo !== '' ? ' — '.$motivo : '');
+        if ($anulado !== null) {
+            $renglones[] = $anulado;
         }
 
         if ($record->esFactura()) {

@@ -7,6 +7,7 @@ use App\Domain\Enums\EstadoLote;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Exceptions\VentaInvalidaException;
 use App\Domain\ValueObjects\Monto;
+use App\Domain\Ventas\PrecioPactado;
 use App\Domain\Ventas\RegistroDeCompromisos;
 use App\Domain\Ventas\RegistroDeVentas;
 use App\Models\Bloque;
@@ -221,5 +222,184 @@ describe('Lo que se rechaza', function (): void {
 
         expect($prima?->getAttribute('forma_pago'))->toBe(FormaDePago::Transferencia)
             ->and($prima?->getAttribute('referencia'))->toBe('TRF-9080');
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| 🔴 Un papel por titular de recibo — 21-sep-2026
+|--------------------------------------------------------------------------
+| «Los recibos deben salir a estos nombres» — Mauricio, con un expediente de
+| dos lotes, cada uno con su titular de recibo, y UNA prima sin nombre que
+| hubo que partir a mano. Las cuotas y los abonos ya salían en un papel por
+| nombre desde el 13-ago; la prima era la única que no.
+|
+| Lo de arriba no cambia: con un solo nombre —o ninguno— la prima sigue
+| saliendo en UN papel que cuelga de la venta.
+*/
+describe('Un papel por titular de recibo', function (): void {
+    beforeEach(function (): void {
+        /*
+         * `$nombres` va en el orden de los lotes; null es «sin titular de
+         * recibo». `$primas`, igual, es la prima pactada de ese lote; null es
+         * «repartime la del contrato».
+         */
+        $this->firmarANombreDe = function (array $lotes, array $nombres, string $prima, array $primas = []): Venta {
+            /** @var list<Lote> $enOrden */
+            $enOrden = array_values($lotes);
+
+            $precios = [];
+
+            foreach ($enOrden as $indice => $lote) {
+                $precios[] = new PrecioPactado(
+                    loteId: (int) $lote->getKey(),
+                    precioVara: new Monto('1400.00'),
+                    prima: isset($primas[$indice]) ? new Monto($primas[$indice]) : null,
+                    titularRecibo: $nombres[$indice] ?? null,
+                );
+            }
+
+            return $this->registro->activar(
+                proyecto: $this->proyecto,
+                lotes: $enOrden,
+                clientes: [$this->cliente],
+                prima: new Monto($prima),
+                plazoMeses: 12,
+                diaPago: 5,
+                precios: $precios,
+            );
+        };
+
+        $this->primas = fn () => Recibo::query()
+            ->where('concepto', ConceptoDeRecibo::Prima)
+            ->orderBy('id')
+            ->get();
+    });
+
+    test('dos lotes con nombres distintos: dos recibos, cada uno de su lote y a su nombre', function (): void {
+        $venta = ($this->firmarANombreDe)(
+            [($this->lote)('1'), ($this->lote)('2')],
+            ['MELVIN RODRIGUEZ LOTE UNO', 'MELVIN RODRIGUEZ LOTE DOS'],
+            '100000.00',
+        );
+
+        [$uno, $dos] = $venta->compromisos()->orderBy('id')->get()->all();
+        $primas = ($this->primas)();
+
+        expect($primas)->toHaveCount(2)
+            ->and($primas[0]->montoTotal())->toBeMonto('50000.00')
+            ->and($primas[0]->getAttribute('compromiso_id'))->toBe($uno->getKey())
+            ->and($primas[0]->getAttribute('a_nombre_de'))->toBe('MELVIN RODRIGUEZ LOTE UNO')
+            ->and($primas[1]->montoTotal())->toBeMonto('50000.00')
+            ->and($primas[1]->getAttribute('compromiso_id'))->toBe($dos->getKey())
+            ->and($primas[1]->getAttribute('a_nombre_de'))->toBe('MELVIN RODRIGUEZ LOTE DOS')
+            // R12: dos papeles, dos números seguidos de la misma serie.
+            ->and((int) $primas[1]->getAttribute('numero'))->toBe((int) $primas[0]->getAttribute('numero') + 1);
+    });
+
+    test('con el MISMO nombre en todos los lotes sigue saliendo un solo papel, y lleva ese nombre', function (): void {
+        ($this->firmarANombreDe)(
+            [($this->lote)('1'), ($this->lote)('2')],
+            ['INVERSIONES DEL NORTE', 'INVERSIONES DEL NORTE'],
+            '100000.00',
+        );
+
+        $primas = ($this->primas)();
+
+        expect($primas)->toHaveCount(1)
+            ->and($primas[0]->montoTotal())->toBeMonto('100000.00')
+            ->and($primas[0]->getAttribute('compromiso_id'))->toBeNull()
+            ->and($primas[0]->getAttribute('a_nombre_de'))->toBe('INVERSIONES DEL NORTE');
+    });
+
+    /*
+    | Tres lotes de igual valor y L 90,000.00 de prima: L 30,000.00 cada uno.
+    | Dos comparten nombre, así que su papel es de L 60,000.00, queda en la
+    | venta —no es de UN lote— y dice SUS dos lotes, no los tres del contrato.
+    */
+    test('los lotes que comparten nombre van en un mismo papel, y el papel dice cuáles son', function (): void {
+        $venta = ($this->firmarANombreDe)(
+            [($this->lote)('1'), ($this->lote)('2'), ($this->lote)('3')],
+            ['LOS HERMANOS', 'LOS HERMANOS', 'LA TIA'],
+            '90000.00',
+        );
+
+        $tercero = $venta->compromisos()->orderByDesc('id')->firstOrFail();
+        $primas = ($this->primas)();
+
+        expect($primas)->toHaveCount(2)
+            ->and($primas[0]->getAttribute('a_nombre_de'))->toBe('LOS HERMANOS')
+            ->and($primas[0]->montoTotal())->toBeMonto('60000.00')
+            ->and($primas[0]->getAttribute('compromiso_id'))->toBeNull()
+            ->and($primas[0]->compromisosDelPapel())->toHaveCount(2)
+            ->and($primas[1]->getAttribute('a_nombre_de'))->toBe('LA TIA')
+            ->and($primas[1]->montoTotal())->toBeMonto('30000.00')
+            ->and($primas[1]->getAttribute('compromiso_id'))->toBe($tercero->getKey());
+    });
+
+    test('cada papel descuenta SUS señas y lo explica', function (): void {
+        $lotes = [($this->lote)('1'), ($this->lote)('2')];
+
+        $this->compromisos->apartarVarios($lotes, $this->cliente, montoSenia: '5000.00', forma: FormaDePago::Efectivo);
+
+        ($this->firmarANombreDe)(
+            array_map(static fn (Lote $lote): Lote => $lote->refresh(), $lotes),
+            ['MELVIN RODRIGUEZ LOTE UNO', 'MELVIN RODRIGUEZ LOTE DOS'],
+            '100000.00',
+        );
+
+        $primas = ($this->primas)();
+
+        // 50,000 de prima por lote menos los 5,000 de SU seña.
+        expect($primas)->toHaveCount(2)
+            ->and($primas[0]->montoTotal())->toBeMonto('45000.00')
+            ->and($primas[1]->montoTotal())->toBeMonto('45000.00')
+            ->and($primas[0]->getAttribute('observaciones'))->toContain('50,000.00')
+            ->and($primas[0]->getAttribute('observaciones'))->toContain('5,000.00');
+    });
+
+    /*
+    | 🔴 El caso que NO se parte. El primer lote pactó L 2,000.00 de prima y ya
+    | había dejado L 5,000.00 de seña: la cuenta del contrato cierra (100,000
+    | menos 10,000), pero la de ESE papel daría negativa. Sale un solo recibo
+    | por la diferencia entera, como se hizo siempre, y sin nombre: es de los dos.
+    */
+    test('si a un nombre sus señas le superan su parte, la prima sale en un solo papel', function (): void {
+        $lotes = [($this->lote)('1'), ($this->lote)('2')];
+
+        $this->compromisos->apartarVarios($lotes, $this->cliente, montoSenia: '5000.00', forma: FormaDePago::Efectivo);
+
+        ($this->firmarANombreDe)(
+            array_map(static fn (Lote $lote): Lote => $lote->refresh(), $lotes),
+            ['MELVIN RODRIGUEZ LOTE UNO', 'MELVIN RODRIGUEZ LOTE DOS'],
+            '100000.00',
+            ['2000.00', '98000.00'],
+        );
+
+        $primas = ($this->primas)();
+
+        expect($primas)->toHaveCount(1)
+            ->and($primas[0]->montoTotal())->toBeMonto('90000.00')
+            ->and($primas[0]->getAttribute('compromiso_id'))->toBeNull()
+            ->and($primas[0]->getAttribute('a_nombre_de'))->toBeNull();
+    });
+
+    // 🔴 Ni un centavo de más ni de menos entre todos los papeles.
+    test('los papeles suman exactamente lo que el cliente entregó', function (): void {
+        ($this->firmarANombreDe)(
+            [($this->lote)('1'), ($this->lote)('2'), ($this->lote)('3')],
+            ['UNO', 'DOS', 'TRES'],
+            '100000.00',
+        );
+
+        $total = Monto::cero();
+
+        foreach (($this->primas)() as $papel) {
+            $total = $total->sumar($papel->montoTotal());
+        }
+
+        // 100,000 entre tres no es exacto: el centavo que sobra va al último.
+        expect(($this->primas)())->toHaveCount(3)
+            ->and($total)->toBeMonto('100000.00');
     });
 });

@@ -150,6 +150,34 @@ test('la pestaña del expediente muestra los recibos de ese contrato', function 
         ->assertDontSee('original');
 });
 
+/*
+| 🔴 21-sep-2026. Acá un anulado se veía IGUAL que uno vigente, y mirando el
+| expediente parecía que el cliente había pagado dos veces lo mismo.
+*/
+test('la pestaña del expediente dice cuál recibo está anulado, y por qué', function (): void {
+    app(RegistroDePagos::class)->anular($this->recibo, 'Se cobró al lote equivocado');
+
+    Livewire::test(RecibosRelationManager::class, [
+        'ownerRecord' => $this->venta,
+        'pageClass'   => ViewVenta::class,
+    ])
+        ->assertSuccessful()
+        ->assertCanSeeTableRecords([$this->recibo])
+        ->assertSee('ANULADO — Se cobró al lote equivocado')
+        ->assertSee('line-through', false);
+});
+
+test('un recibo vigente no lleva ninguna marca', function (): void {
+    expect($this->recibo->rotuloDeAnulado())->toBeNull();
+
+    Livewire::test(RecibosRelationManager::class, [
+        'ownerRecord' => $this->venta,
+        'pageClass'   => ViewVenta::class,
+    ])
+        ->assertSuccessful()
+        ->assertDontSee('ANULADO');
+});
+
 describe('Quién entra', function (): void {
     /*
     | El receptor cobra, así que tiene que poder buscar y reimprimir lo que

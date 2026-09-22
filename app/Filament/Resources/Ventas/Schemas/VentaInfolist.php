@@ -279,18 +279,28 @@ class VentaInfolist
      */
     private static function papelDeLaPrima(Venta $venta): ?string
     {
-        $recibo = $venta->recibos()
+        /*
+         * Pueden ser VARIOS desde el 21-sep-2026: con titulares de recibo
+         * distintos, la prima sale en un papel por nombre. Nombrar solo el
+         * último haría dudar de si el otro lote tiene el suyo.
+         */
+        $papeles = $venta->recibos()
             ->where('concepto', ConceptoDeRecibo::Prima->value)
             ->whereNull('anulado_el')
-            ->latest('id')
-            ->first();
+            ->oldest('id')
+            ->get()
+            ->map(static fn (Recibo $recibo): string => $recibo->esFactura()
+                ? 'la factura '.$recibo->numeroDelPapel()
+                : 'el recibo N.º '.$recibo->folio())
+            ->values()
+            ->all();
 
-        if (! $recibo instanceof Recibo) {
+        if ($papeles === []) {
             return null;
         }
 
-        return $recibo->esFactura()
-            ? 'la factura '.$recibo->numeroDelPapel()
-            : 'el recibo N.º '.$recibo->folio();
+        $ultimo = array_pop($papeles);
+
+        return $papeles === [] ? $ultimo : implode(', ', $papeles).' y '.$ultimo;
     }
 }

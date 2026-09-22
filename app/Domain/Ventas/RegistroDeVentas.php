@@ -257,6 +257,8 @@ final readonly class RegistroDeVentas
             // 7. Los duenos, y los lotes ligados a su venta con SU plan.
             $this->asentarClientes($venta, $clientes);
 
+            $vendidos = [];
+
             foreach ($renglones as $renglon) {
                 $compromiso = $this->compromisos->vender(
                     $renglon['lote'],
@@ -277,6 +279,8 @@ final readonly class RegistroDeVentas
 
                 // 8. El plan congelado (§9.D6), el de ESTE lote.
                 $this->asentarCuotas($venta, $compromiso, $renglon['plan']);
+
+                $vendidos[] = ['lote' => $compromiso, 'prima' => $renglon['prima']];
             }
 
             // 9. El papel de la prima, por lo que el cliente pone HOY.
@@ -290,6 +294,7 @@ final readonly class RegistroDeVentas
                 $fecha,
                 $apartados,
                 $deLaCarteraVieja,
+                $vendidos,
             );
 
             /*
@@ -334,7 +339,21 @@ final readonly class RegistroDeVentas
      * pago una prima, no tres. Por eso `compromiso_id` va nulo y el CHECK de
      * R13 se conforma con el `venta_id`.
      *
+     * ═══ 🔴 UN PAPEL POR TITULAR DE RECIBO — 21-sep-2026 ═══
+     *
+     * «Los recibos deben salir a estos nombres» — Mauricio, con un expediente
+     * de dos lotes, cada uno con su titular de recibo, y UNA prima sin nombre.
+     * Las cuotas y los abonos ya salen en un papel por nombre desde el 13-ago;
+     * la prima era la única que no, y hubo que partirla a mano.
+     *
+     * Lo de arriba sigue valiendo cuando todos los lotes comparten nombre —o
+     * no tienen ninguno—: la prima es del contrato, sale en UN papel y cuelga
+     * de la venta. Solo cuando hay nombres distintos sale un papel por nombre,
+     * cada uno con la parte de la prima de SUS lotes —la que congeló
+     * `repartirPrima()`— menos SUS señas. Ver `papelesDeLaPrima()`.
+     *
      * @param list<Compromiso> $apartados
+     * @param list<array{lote: Compromiso, prima: Monto}> $vendidos los compromisos que acaban de nacer
      *
      * @throws VentaInvalidaException
      */
@@ -348,6 +367,7 @@ final readonly class RegistroDeVentas
         CarbonImmutable $fecha,
         array $apartados,
         bool $deLaCarteraVieja = false,
+        array $vendidos = [],
     ): void {
         $aCobrar = $prima->restar($senias);
         $limpia = trim($referencia ?? '');
@@ -362,44 +382,179 @@ final readonly class RegistroDeVentas
             return;
         }
 
-        $factura = $this->facturas->paraElProyecto($venta->proyecto);
-        $delTalonario = $this->correlativos->paraUnReciboNuevo($venta->proyecto, $deLaCarteraVieja);
-
         /*
          * ⚠️ `recibido_por` (R24). Queda en null cuando nadie eligió, y ahí lo
          * llena `Recibo::booted()` con quien teclea — que es lo que este camino
          * hizo hasta el 31-ago-2026, y por eso el corte de caja del día sumaba
          * la prima del día bajo «Sin usuario».
          */
-        Recibo::query()->create([
-            'numero'        => $delTalonario['numero'],
-            'serie'         => $delTalonario['serie'],
-            'venta_id'      => $venta->getKey(),
-            'cliente_id'    => $titular->getKey(),
-            'concepto'      => ConceptoDeRecibo::Prima,
-            'forma_pago'    => $forma,
-            'referencia'    => $limpia === '' ? null : $limpia,
-            'monto'         => $aCobrar->redondeado(),
-            'fecha'         => $fecha->toDateString(),
-            'observaciones' => $senias->esCero() ? null : sprintf(
-                'Prima del contrato %s, menos %s ya recibidos en señas de apartado.',
-                $prima->formateado(),
-                $senias->formateado(),
-            ),
-            'recibido_por' => $this->recibidoPor,
-            /*
-             * ═══ LA FACTURA CON CAI, DESDE EL 14-AGO-2026 ═══
-             *
-             * Si el desarrollo tiene una facturación encendida, acá se consume
-             * el correlativo del SAR y el papel sale como FACTURA. Si no, no
-             * agrega nada y el papel sale como el recibo interno de siempre.
-             *
-             * El número interno de arriba NO se saltea en ninguno de los dos
-             * casos: es el que cuadra la caja, y una serie con huecos deja de
-             * servir para eso (R12).
-             */
-            ...($factura?->paraElRecibo() ?? []),
-        ]);
+        foreach ($this->papelesDeLaPrima($vendidos, $apartados, $prima, $senias) as $papel) {
+            // Ese nombre ya puso toda su parte en señas: hoy no entrega nada,
+            // y el CHECK `recibos_monto_positivo_chk` no admite L 0.00.
+            if ($papel['aCobrar']->esCero()) {
+                continue;
+            }
+
+            $factura = $this->facturas->paraElProyecto($venta->proyecto);
+            $delTalonario = $this->correlativos->paraUnReciboNuevo($venta->proyecto, $deLaCarteraVieja);
+
+            Recibo::query()->create([
+                'numero'          => $delTalonario['numero'],
+                'serie'           => $delTalonario['serie'],
+                'venta_id'        => $venta->getKey(),
+                'compromiso_id'   => $papel['compromisoId'],
+                'cliente_id'      => $titular->getKey(),
+                'a_nombre_de'     => $papel['nombre'],
+                'a_nombre_de_dni' => $papel['dni'],
+                'concepto'        => ConceptoDeRecibo::Prima,
+                'forma_pago'      => $forma,
+                'referencia'      => $limpia === '' ? null : $limpia,
+                'monto'           => $papel['aCobrar']->redondeado(),
+                'fecha'           => $fecha->toDateString(),
+                'observaciones'   => $papel['senias']->esCero() ? null : sprintf(
+                    'Prima del contrato %s, menos %s ya recibidos en señas de apartado.',
+                    $papel['prima']->formateado(),
+                    $papel['senias']->formateado(),
+                ),
+                'recibido_por' => $this->recibidoPor,
+                /*
+                 * ═══ LA FACTURA CON CAI, DESDE EL 14-AGO-2026 ═══
+                 *
+                 * Si el desarrollo tiene una facturación encendida, acá se
+                 * consume el correlativo del SAR y el papel sale como FACTURA.
+                 * Si no, no agrega nada y el papel sale como el recibo interno
+                 * de siempre.
+                 *
+                 * El número interno de arriba NO se saltea en ninguno de los
+                 * dos casos: es el que cuadra la caja, y una serie con huecos
+                 * deja de servir para eso (R12).
+                 */
+                ...($factura?->paraElRecibo() ?? []),
+            ]);
+        }
+    }
+
+    /**
+     * En cuántos papeles sale la prima, y cuánto lleva cada uno.
+     *
+     * Es el mismo criterio de `RegistroDePagos::porCadaNombre()`: los lotes que
+     * comparten titular de recibo —o no tienen ninguno— van en un mismo papel.
+     *
+     * ═══ CUANDO SALE EN UNO SOLO, COMO SIEMPRE ═══
+     *
+     *   · Todos los lotes comparten nombre, o ninguno tiene: es el caso de casi
+     *     todas las ventas, y no cambia nada — salvo que ahora el papel lleva
+     *     ese nombre, que antes la prima no llevaba.
+     *   · A algún nombre sus señas le superan su parte de la prima. Pasa con un
+     *     lote barato y una seña fija: la cuenta del contrato cierra, pero la
+     *     de ESE papel daría negativa. Se cobra la diferencia entera en un solo
+     *     recibo, que es lo que se hizo siempre.
+     *   · Las partes no suman la prima. No debería pasar —las reparte
+     *     `repartirPrima()`—, y justamente por eso no se parte sobre una cuenta
+     *     que no cierra.
+     *
+     * El papel cuelga de SU lote cuando ese nombre tiene uno solo; con varios
+     * queda en la venta, y `Recibo::compromisosDelPapel()` los encuentra por
+     * el nombre.
+     *
+     * @param list<array{lote: Compromiso, prima: Monto}> $vendidos
+     * @param list<Compromiso> $apartados
+     *
+     * @return list<array{compromisoId: int|null, nombre: string|null, dni: string|null, prima: Monto, senias: Monto, aCobrar: Monto}>
+     */
+    private function papelesDeLaPrima(array $vendidos, array $apartados, Monto $prima, Monto $senias): array
+    {
+        /** @var array<string, list<Compromiso>> $lotes */
+        $lotes = [];
+        /** @var array<string, Monto> $primas */
+        $primas = [];
+        /** @var array<string, Monto> $seniasDe */
+        $seniasDe = [];
+
+        foreach ($vendidos as $vendido) {
+            $nombre = $vendido['lote']->titularDelRecibo() ?? '';
+
+            $lotes[$nombre][] = $vendido['lote'];
+            $primas[$nombre] = ($primas[$nombre] ?? Monto::cero())->sumar($vendido['prima']);
+            $seniasDe[$nombre] = ($seniasDe[$nombre] ?? Monto::cero())->sumar($this->seniaDelLote($vendido['lote'], $apartados));
+        }
+
+        // Con un solo nombre para todos, el papel único lo lleva. Con varios
+        // no puede llevar ninguno: sale a nombre del dueño del expediente.
+        $deTodos = null;
+        $dniDeTodos = null;
+        $primero = $vendidos[0]['lote'] ?? null;
+
+        if (count($lotes) === 1 && $primero instanceof Compromiso) {
+            $deTodos = $primero->titularDelRecibo();
+            $dniDeTodos = $primero->dniDelTitularDelRecibo();
+        }
+
+        $unSoloPapel = [[
+            'compromisoId' => null,
+            'nombre'       => $deTodos,
+            'dni'          => $dniDeTodos,
+            'prima'        => $prima,
+            'senias'       => $senias,
+            'aCobrar'      => $prima->restar($senias),
+        ]];
+
+        if (count($lotes) < 2) {
+            return $unSoloPapel;
+        }
+
+        $repartida = Monto::cero();
+
+        foreach ($primas as $nombre => $suya) {
+            if ($seniasDe[$nombre]->mayorQue($suya)) {
+                return $unSoloPapel;
+            }
+
+            $repartida = $repartida->sumar($suya);
+        }
+
+        if (! $repartida->igualA($prima)) {
+            return $unSoloPapel;
+        }
+
+        $papeles = [];
+
+        foreach ($lotes as $nombre => $suyos) {
+            $papeles[] = [
+                'compromisoId' => count($suyos) === 1 ? (int) $suyos[0]->getKey() : null,
+                'nombre'       => $suyos[0]->titularDelRecibo(),
+                'dni'          => $suyos[0]->dniDelTitularDelRecibo(),
+                'prima'        => $primas[$nombre],
+                'senias'       => $seniasDe[$nombre],
+                'aCobrar'      => $primas[$nombre]->restar($seniasDe[$nombre]),
+            ];
+        }
+
+        return $papeles;
+    }
+
+    /**
+     * La seña que dejó el apartado de ESTE lote, si venía de un apartado.
+     *
+     * @param list<Compromiso> $apartados
+     */
+    private function seniaDelLote(Compromiso $lote, array $apartados): Monto
+    {
+        $total = Monto::cero();
+
+        foreach ($apartados as $apartado) {
+            if ((int) $apartado->getAttribute('lote_id') !== (int) $lote->getAttribute('lote_id')) {
+                continue;
+            }
+
+            $senia = $apartado->getAttribute('monto_senia');
+
+            if (is_string($senia) || is_int($senia)) {
+                $total = $total->sumar(new Monto($senia));
+            }
+        }
+
+        return $total;
     }
 
     /**

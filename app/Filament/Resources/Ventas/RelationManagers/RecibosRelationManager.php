@@ -71,15 +71,22 @@ class RecibosRelationManager extends RelationManager
                  * Dos numeros en una fila no confunden si uno esta arriba y
                  * grande —el interno, el que cuadra la caja— y el otro debajo
                  * y chico, con su nombre.
+                 *
+                 * 🔴 Y «ANULADO», desde el 21-sep-2026. Acá un anulado se veia
+                 * IGUAL que uno vigente —la lista general si lo decia—, y
+                 * mirando el expediente parecia que el cliente habia pagado
+                 * dos veces lo mismo. Folio en rojo, la palabra y el motivo
+                 * debajo, y el monto tachado: es el mismo trato de
+                 * `RecibosTable`, y el texto sale de `Recibo::rotuloDeAnulado()`
+                 * para que las dos tablas no puedan decir distinto.
                  */
                 TextColumn::make('numero')
                     ->label('Recibo')
                     ->weight('bold')
                     ->sortable()
                     ->formatStateUsing(static fn (Recibo $record): string => $record->folio())
-                    ->description(static fn (Recibo $record): ?string => $record->esFactura()
-                        ? 'Factura '.$record->numeroDelPapel()
-                        : null),
+                    ->color(static fn (Recibo $record): ?string => $record->estaAnulado() ? 'danger' : null)
+                    ->description(static fn (Recibo $record): ?string => self::debajoDelFolio($record)),
 
                 TextColumn::make('fecha')
                     ->label('Fecha')
@@ -102,10 +109,20 @@ class RecibosRelationManager extends RelationManager
                         ? $record->getAttribute('concepto')->color()
                         : 'gray'),
 
+                /*
+                 * Tachado y en gris cuando esta anulado: ese dinero no cuenta,
+                 * y quien suma la columna de un vistazo tiene que verlo. Va con
+                 * `style` y no con una clase: el CSS de Filament esta
+                 * precompilado y una clase nueva de Tailwind no existe ahi.
+                 */
                 TextColumn::make('monto')
                     ->label('Monto')
                     ->alignEnd()
                     ->weight('bold')
+                    ->color(static fn (Recibo $record): ?string => $record->estaAnulado() ? 'gray' : null)
+                    ->extraAttributes(static fn (Recibo $record): array => $record->estaAnulado()
+                        ? ['style' => 'text-decoration: line-through;']
+                        : [])
                     ->formatStateUsing(static fn (Recibo $record): string => $record->montoTotal()->formateado()),
 
             ])
@@ -134,5 +151,19 @@ class RecibosRelationManager extends RelationManager
     public function isReadOnly(): bool
     {
         return false;
+    }
+
+    /**
+     * La segunda línea del folio: si el papel vale, y con qué número salió.
+     * En ese orden: lo que cambia si el papel vale se lee antes que su número.
+     */
+    private static function debajoDelFolio(Recibo $record): ?string
+    {
+        $renglones = array_filter([
+            $record->rotuloDeAnulado(),
+            $record->esFactura() ? 'Factura '.$record->numeroDelPapel() : null,
+        ]);
+
+        return $renglones === [] ? null : implode(' · ', $renglones);
     }
 }

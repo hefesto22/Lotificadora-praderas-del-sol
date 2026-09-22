@@ -422,6 +422,28 @@ class Recibo extends Model
         return $this->getAttribute('anulado_el') !== null;
     }
 
+    /**
+     * Cómo se dice, en una lista, que este papel ya no vale — y por qué.
+     *
+     * Vive acá y no en cada tabla desde el 21-sep-2026: la lista general lo
+     * decía y la pestaña Recibos del expediente no, así que un anulado se veía
+     * igual que uno vigente justo donde más se mira. Dos tablas armando el
+     * mismo texto por su cuenta es cómo una de las dos se queda sin decirlo.
+     *
+     * El motivo va pegado porque es lo único que contesta la pregunta que
+     * sigue —«¿y por qué?»— sin abrir la ficha. Null si el recibo vale.
+     */
+    public function rotuloDeAnulado(): ?string
+    {
+        if (! $this->estaAnulado()) {
+            return null;
+        }
+
+        $motivo = $this->getAttribute('motivo_anulacion');
+
+        return 'ANULADO'.(is_string($motivo) && trim($motivo) !== '' ? ' — '.trim($motivo) : '');
+    }
+
     // ─── Los lotes ────────────────────────────────────────────────────
 
     /**
@@ -486,6 +508,29 @@ class Recibo extends Model
         foreach ($renglones as $renglon) {
             if ($renglon->getAttribute('estado') !== EstadoCompromiso::Rescindido) {
                 $vivos[] = $renglon;
+            }
+        }
+
+        /*
+         * 🔴 La prima partida por titular — 21-sep-2026. Cuando los lotes de
+         * un expediente sacan el recibo a nombres distintos, la prima sale en
+         * un papel por nombre. Si ese nombre tiene UN lote el papel cuelga de
+         * él y ni llega acá; si tiene varios queda en la venta, y sus lotes
+         * son los que llevan ese mismo nombre — no todos los del contrato.
+         *
+         * ⚠️ Si nadie coincide —el nombre del lote se corrigió después— se
+         * muestran todos, como antes: decir de más es mejor que no decir.
+         */
+        $aNombreDe = $this->getAttribute('a_nombre_de');
+
+        if (is_string($aNombreDe) && trim($aNombreDe) !== '') {
+            $suyos = array_values(array_filter(
+                $vivos,
+                static fn (Compromiso $renglon): bool => $renglon->titularDelRecibo() === trim($aNombreDe),
+            ));
+
+            if ($suyos !== []) {
+                $vivos = $suyos;
             }
         }
 
