@@ -39,7 +39,7 @@ function sembrarRioBlanco(): Proyecto
     app(ColoniaRioBlancoSeeder::class)->run();
 
     /** @var Proyecto $proyecto */
-    $proyecto = Proyecto::query()->where('codigo', 'CRB')->sole();
+    $proyecto = Proyecto::query()->where('codigo', 'RRB')->sole();
 
     return $proyecto;
 }
@@ -106,7 +106,7 @@ function areaSumadaDe(Proyecto $proyecto): float
     return (float) $total;
 }
 
-describe('COLONIA RIO BLANCO', function (): void {
+describe('RESIDENCIAL RIO BLANCO', function (): void {
     test('de un plano sin un solo lote cerrado entran los 83, cada uno en su manzana', function (): void {
         $proyecto = sembrarRioBlanco();
 

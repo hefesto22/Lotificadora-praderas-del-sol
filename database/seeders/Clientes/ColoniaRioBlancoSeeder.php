@@ -9,7 +9,14 @@ use Database\Seeders\PlanoDeclarado;
 use Database\Seeders\PlanoDesdeDxfSeeder;
 
 /**
- * COLONIA RIO BLANCO — La Union, Copan. Carga inicial del plano.
+ * RESIDENCIAL RIO BLANCO — La Union, Copan. Carga inicial del plano.
+ *
+ * ⚠️ Se importó como `CRB · COLONIA RIO BLANCO` el 18-sep-2026, que es como
+ * titula el plano. El 28-sep-2026 llegó el cuaderno del dueño y sus contratos
+ * dicen `RRB-2025-002`, «Residencial Río Blanco»: el proyecto se renombró con
+ * `olympo:renombrar-proyecto` antes de cargar la cartera, y este seeder dice
+ * lo mismo para que una instalación nueva nazca igual. La clase conserva el
+ * nombre viejo para no mover lo que ya la cita.
  *
  *   php artisan db:seed --class="Database\Seeders\Clientes\ColoniaRioBlancoSeeder"
  *
@@ -78,8 +85,8 @@ final class ColoniaRioBlancoSeeder extends PlanoDesdeDxfSeeder
     protected function plano(): PlanoDeclarado
     {
         return new PlanoDeclarado(
-            codigo: 'CRB',
-            nombre: 'COLONIA RIO BLANCO',
+            codigo: 'RRB',
+            nombre: 'RESIDENCIAL RIO BLANCO',
             archivo: 'database/data/colonia-rio-blanco-plano.dxf',
             // Las cinco series de numeros del plano, manzana por manzana.
             lotesPorBloque: [

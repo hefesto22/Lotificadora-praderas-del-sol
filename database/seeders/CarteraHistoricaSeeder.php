@@ -22,6 +22,7 @@ use App\Models\Proyecto;
 use App\Models\Vendedor;
 use App\Models\Venta;
 use Carbon\CarbonImmutable;
+use Database\Seeders\Cartera\CarteraAnterior;
 use Database\Seeders\Cartera\ExpedientesHistoricos;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
@@ -97,15 +98,26 @@ use RuntimeException;
  *
  * Un expediente que ya existe se saltea. Correrlo dos veces no duplica nada, y
  * agregar el número 13 a la lista no vuelve a cargar los doce anteriores.
+ *
+ * ═══ UN CARGADOR, VARIOS CUADERNOS ═══
+ *
+ * Lo que se carga lo dice `cartera()`: acá, el cuaderno de Praderas del Sol.
+ * Otro desarrollo trae el suyo en su propia clase de datos y una subclase de
+ * este seeder que solo contesta ese método —`CarteraRioBlancoSeeder`, desde el
+ * 28-sep-2026—. El cargador es uno solo a propósito: cada tropiezo de la
+ * primera carga quedó arreglado ACA, y una copia lo habría perdido.
  */
 class CarteraHistoricaSeeder extends Seeder
 {
     public function run(): void
     {
-        $proyecto = Proyecto::query()->where('codigo', ExpedientesHistoricos::PROYECTO)->first();
+        $cartera = $this->cartera();
+        $codigo = $cartera::proyecto();
+
+        $proyecto = Proyecto::query()->where('codigo', $codigo)->first();
 
         if (! $proyecto instanceof Proyecto) {
-            $this->command?->error('No existe el proyecto '.ExpedientesHistoricos::PROYECTO.'. Importá el plano primero.');
+            $this->command?->error("No existe el proyecto {$codigo}. Importá el plano primero.");
 
             return;
         }
@@ -117,7 +129,7 @@ class CarteraHistoricaSeeder extends Seeder
         $cargados = 0;
         $salteados = 0;
 
-        foreach (ExpedientesHistoricos::todos() as $datos) {
+        foreach ($cartera::todos() as $datos) {
             $numero = (int) $datos['expediente'];
 
             if ($this->yaExiste($proyecto, $numero)) {
@@ -138,6 +150,17 @@ class CarteraHistoricaSeeder extends Seeder
 
         $this->command?->newLine();
         $this->command?->info("Cartera histórica: {$cargados} expedientes cargados, {$salteados} ya estaban.");
+    }
+
+    /**
+     * El cuaderno que carga este seeder: el de Praderas del Sol. La subclase
+     * de otro desarrollo contesta el suyo y no toca nada más.
+     *
+     * @return class-string<CarteraAnterior>
+     */
+    protected function cartera(): string
+    {
+        return ExpedientesHistoricos::class;
     }
 
     // ─── La revisión de antes de cargar ───────────────────────────────
@@ -167,8 +190,9 @@ class CarteraHistoricaSeeder extends Seeder
     private function revisarTodoAntesDeCargar(Proyecto $proyecto): bool
     {
         $problemas = $this->seriesQueQuedaronAtras();
+        $cartera = $this->cartera();
 
-        foreach (ExpedientesHistoricos::todos() as $datos) {
+        foreach ($cartera::todos() as $datos) {
             $exp = $this->folio((int) $datos['expediente']);
 
             foreach ($this->quejasDelExpediente($proyecto, $datos) as $queja) {
@@ -180,7 +204,9 @@ class CarteraHistoricaSeeder extends Seeder
             return true;
         }
 
-        $this->command?->error(count($problemas).' cosas que hay que arreglar en ExpedientesHistoricos ANTES de cargar:');
+        $archivo = class_basename($cartera);
+
+        $this->command?->error(count($problemas)." cosas que hay que arreglar en {$archivo} ANTES de cargar:");
         $this->command?->newLine();
 
         foreach ($problemas as $problema) {
@@ -275,6 +301,21 @@ class CarteraHistoricaSeeder extends Seeder
 
         /** @var list<array<string, mixed>> $pagos */
         $pagos = is_array($datos['pagos'] ?? null) ? $datos['pagos'] : [];
+
+        // Un pronto pago sin descuento o sin motivo no es un pronto pago.
+        foreach ($pagos as $pago) {
+            if (($pago['tipo'] ?? 'cuota') !== 'pronto_pago') {
+                continue;
+            }
+
+            if (! is_numeric($pago['descuento'] ?? null) || (float) $pago['descuento'] <= 0) {
+                $quejas[] = "el pronto pago del {$pago['fecha']} no dice cuánto se descontó.";
+            }
+
+            if (trim((string) ($pago['motivo'] ?? '')) === '') {
+                $quejas[] = "el pronto pago del {$pago['fecha']} no trae el motivo del descuento (R4).";
+            }
+        }
 
         /** @var list<string> $alContado */
         $alContado = [];
@@ -491,6 +532,12 @@ class CarteraHistoricaSeeder extends Seeder
      */
     private function pagar(Venta $venta, Cliente $cliente, array $lotes, array $pago): void
     {
+        if (($pago['tipo'] ?? 'cuota') === 'pronto_pago') {
+            $this->prontoPago($venta, $cliente, $lotes, $pago);
+
+            return;
+        }
+
         $renglones = $this->renglones($venta, $lotes, $pago);
         $forma = $this->forma((string) $pago['forma']);
         $referencia = is_string($pago['referencia'] ?? null) ? $pago['referencia'] : null;
@@ -505,7 +552,8 @@ class CarteraHistoricaSeeder extends Seeder
              * motivo. El motivo lo pone el seeder porque el cuaderno no lo
              * trae, y decir de dónde salió el dato es mejor que inventar uno.
              */
-            $modalidad = ModalidadDeReprogramacion::from(ExpedientesHistoricos::MODALIDAD_DEL_ABONO);
+            $cartera = $this->cartera();
+            $modalidad = ModalidadDeReprogramacion::from($cartera::modalidadDelAbono());
 
             $servicio->abonarAVariosLotes(
                 venta: $venta,
@@ -535,6 +583,62 @@ class CarteraHistoricaSeeder extends Seeder
             observaciones: $nota,
             deLaCarteraVieja: true,
         );
+    }
+
+    /**
+     * El pronto pago del cuaderno: saldar perdonando una parte (28-sep-2026).
+     *
+     * Lo trajo el exp. 0008 de Río Blanco: debía L 312,400.00, entregó
+     * L 312,000.00 y el cuaderno lo da por «Pagado», saldo cero. «Se toma como
+     * descuento esos 400» —Mauricio—. Es lo mismo que hace el pronto pago del
+     * mostrador, así que entra por la misma puerta: el dinero a las cuotas más
+     * viejas, el perdón a la cola, el motivo en la bitácora, y la caja recibe
+     * solo lo que entró.
+     *
+     * El dato declara el DESCUENTO, repartido entre los lotes igual que un pago
+     * (`lote`/`lotes`, o proporcional al valor). Lo que el cliente entregó lo
+     * calcula el servicio —saldo menos descuento— y acá se compara contra el
+     * `monto` del cuaderno: si no da, el plan cargado y el papel no están de
+     * acuerdo en cuánto se debía ese día, y eso se mira antes de perdonar.
+     *
+     * @param array<string, Lote> $lotes
+     * @param array<string, mixed> $pago
+     */
+    private function prontoPago(Venta $venta, Cliente $cliente, array $lotes, array $pago): void
+    {
+        $descuentos = $this->renglones($venta, $lotes, [...$pago, 'monto' => (string) ($pago['descuento'] ?? '0')]);
+
+        $recibos = resolve(RegistroDePagos::class)->prontoPago(
+            venta: $venta,
+            cliente: $cliente,
+            renglones: array_map(
+                static fn (array $renglon): array => ['lote' => $renglon['lote'], 'descuento' => $renglon['monto']],
+                $descuentos,
+            ),
+            motivo: is_string($pago['motivo'] ?? null) ? $pago['motivo'] : '',
+            forma: $this->forma((string) $pago['forma']),
+            referencia: is_string($pago['referencia'] ?? null) ? $pago['referencia'] : null,
+            fecha: CarbonImmutable::parse((string) $pago['fecha']),
+            observaciones: is_string($pago['observaciones'] ?? null) ? $pago['observaciones'] : null,
+            deLaCarteraVieja: true,
+        );
+
+        $entregado = Monto::cero();
+
+        foreach ($recibos as $recibo) {
+            $entregado = $entregado->sumar(new Monto((string) $recibo->getAttribute('monto')));
+        }
+
+        $dice = new Monto((string) $pago['monto']);
+
+        if (! $entregado->igualA($dice)) {
+            throw new RuntimeException(sprintf(
+                '%s: con ese descuento el cliente habría entregado %s y el cuaderno dice %s.',
+                $this->elPago($pago),
+                $entregado->formateado(),
+                $dice->formateado(),
+            ));
+        }
     }
 
     // ─── Las piezas ───────────────────────────────────────────────────
@@ -1008,7 +1112,9 @@ class CarteraHistoricaSeeder extends Seeder
      */
     private function reservarLosQueNoSeVenden(Proyecto $proyecto): void
     {
-        foreach (ExpedientesHistoricos::RESERVADOS as $grupo => $datos) {
+        $cartera = $this->cartera();
+
+        foreach ($cartera::reservados() as $grupo => $datos) {
             $reservados = 0;
             $ocupados = [];
 
@@ -1065,9 +1171,11 @@ class CarteraHistoricaSeeder extends Seeder
      */
     private function dejarLasSeriesDondeVan(Proyecto $proyecto): void
     {
+        $cartera = $this->cartera();
+
         $expedientes = array_map(
             static fn (array $datos): int => (int) $datos['expediente'],
-            ExpedientesHistoricos::todos(),
+            $cartera::todos(),
         );
 
         if ($expedientes !== []) {

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Database\Seeders\Cartera;
 
+use Override;
+
 /**
  * La cartera que Praderas del Sol vendió ANTES de tener sistema.
  *
@@ -135,7 +137,7 @@ namespace Database\Seeders\Cartera;
  *                   cuaderno; la columna «¿A qué lote?» dice «1 y 14 N».
  *   'observaciones' → quién lo recibió, y lo que el cuaderno anote.
  */
-final class ExpedientesHistoricos
+final class ExpedientesHistoricos implements CarteraAnterior
 {
     /**
      * El código del proyecto al que pertenece esta cartera.
@@ -185,9 +187,28 @@ final class ExpedientesHistoricos
      */
     public const string MODALIDAD_DEL_ABONO = 'acortar_plazo';
 
+    #[Override]
+    public static function proyecto(): string
+    {
+        return self::PROYECTO;
+    }
+
+    #[Override]
+    public static function reservados(): array
+    {
+        return self::RESERVADOS;
+    }
+
+    #[Override]
+    public static function modalidadDelAbono(): string
+    {
+        return self::MODALIDAD_DEL_ABONO;
+    }
+
     /**
      * @return list<array<string, mixed>>
      */
+    #[Override]
     public static function todos(): array
     {
         return [

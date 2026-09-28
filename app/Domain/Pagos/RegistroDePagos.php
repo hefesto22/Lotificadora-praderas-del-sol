@@ -1361,6 +1361,10 @@ final readonly class RegistroDePagos
      * es lo mismo que ya pasa con un abono. Revertir un pronto pago es otro
      * tramite con su propio motivo, y todavia no existe.
      *
+     * `$deLaCarteraVieja` lo pasa SOLO `CarteraHistoricaSeeder` (28-sep-2026,
+     * el exp. 0008 de Río Blanco): el papel sale de la serie vieja, como todo
+     * lo que se transcribe del cuaderno. Ver `emitir()`.
+     *
      * @param list<array{lote: Compromiso, descuento: Monto}> $renglones
      * @param string $motivo obligatorio: sin el no hay descuento
      *
@@ -1377,6 +1381,7 @@ final readonly class RegistroDePagos
         ?string $referencia = null,
         ?CarbonImmutable $fecha = null,
         ?string $observaciones = null,
+        bool $deLaCarteraVieja = false,
     ): array {
         return $this->porCadaNombre(
             $renglones,
@@ -1389,6 +1394,7 @@ final readonly class RegistroDePagos
                 $referencia,
                 $fecha,
                 $observaciones,
+                $deLaCarteraVieja,
             ),
         );
     }
@@ -1409,6 +1415,7 @@ final readonly class RegistroDePagos
         ?string $referencia,
         ?CarbonImmutable $fecha,
         ?string $observaciones,
+        bool $deLaCarteraVieja = false,
     ): Recibo {
         if ($renglones === []) {
             throw PagoInvalidoException::porNoElegirNingunLote();
@@ -1450,7 +1457,8 @@ final readonly class RegistroDePagos
             $forma,
             $limpia,
             $cuando,
-            $observaciones
+            $observaciones,
+            $deLaCarteraVieja
         ): Recibo {
             /*
              * FASE 1 — releer bloqueando, calcular y rechazar. Sin escribir una
@@ -1529,6 +1537,7 @@ final readonly class RegistroDePagos
                 $cuando,
                 $observaciones,
                 array_map(static fn (array $renglon): Compromiso => $renglon['lote'], $renglones),
+                $deLaCarteraVieja,
             );
 
             foreach ($planificados as $planificado) {

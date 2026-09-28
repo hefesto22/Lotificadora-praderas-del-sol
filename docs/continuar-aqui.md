@@ -1,7 +1,60 @@
-# Continuar acá — 21-sep-2026
+# Continuar acá — 28-sep-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 28-sep — La cartera de Residencial Río Blanco, y el proyecto pasa de CRB a RRB
+
+**El pedido.** Cargar el cuaderno de Río Blanco (Elder Dionel Pinto Molina, La
+Unión): un directorio y nueve fichas con su historial, escaneados en PDF.
+
+**Lo que decidió Mauricio:**
+
+- El proyecto se llama como firma el cuaderno: **`RRB · RESIDENCIAL RIO
+  BLANCO`** (contratos `RRB-2025-002`). Se importó el 18-sep como CRB y se
+  renombra ANTES de cargar, porque con un contrato numerado el código ya no
+  se toca. Nace `olympo:renombrar-proyecto` —con `--ensayo`— que se niega si
+  hay un contrato numerado o un recibo en la serie. La dirección pública del
+  plano (slug) no cambia.
+- **Exp. 0008**: saldo L 312,400, pagó L 312,000, «Pagado» → los L 400 son
+  **descuento**. El seeder aprendió el pago `pronto_pago` (el mismo servicio
+  del mostrador, con `deLaCarteraVieja`, y compara lo entregado contra el
+  cuaderno).
+- **Exp. 0005 (A-5)**: la ficha dice 1,007 vr² «le restó 300 vr por falta de
+  pago»; entra con el área del plano (1,307.67) y el valor del cuaderno
+  (L 1,125,000).
+
+**Lo que se decidió al transcribir** (todo escrito en `CarteraRioBlanco`):
+0001 y 0006 están borrados en el directorio y no se cargan; si directorio y
+ficha no coinciden, vale la ficha (0009 va al **B-13**, el C-13 es del 0007);
+«Abono» de este cuaderno es pago a cuenta (FIFO), no abono a capital; el 0007
+se reparte por lote con C-13 a L 1,100/vr² y el resto a L 1,200 (el único
+reparto con precios redondos que da 724,400 y 1,278,000), y su saldo de
+C-13/14 es 424,400 (la ficha resta mal: 424,000); el 0009 (cuota 9,055 que
+no cierra) repite el camino del 0028: entra respetando la cuota y
+`correccion_de_valor` lo lleva a 336,000, residuo L 20 a la última.
+
+**Cómo queda** (golden test `CarteraRioBlancoTest`, al 28-sep-2026): 9
+expedientes · 16 lotes · valor L 9,870,900.00 · primas L 3,785,000.00 ·
+pagos L 2,041,665.00 · descuento L 400.00 · **por cobrar L 4,043,835.00**.
+Cada saldo es el último que anota el cuaderno.
+
+⚠️ **Seis expedientes amanecen atrasados, y es lo que dice el papel**: los
+cuatro de 2025 a 12 meses ya vencieron con saldo (0002 L 100,000 · 0003
+L 200,000 · 0004 L 650,000 · 0005 L 562,500), el 0007 no registra un pago
+desde la prima (11 cuotas, L 893,688.95) y el 0011 tampoco (6 cuotas,
+L 159,199.98). Van a salir en «Por cobrar hoy». Avisarle al dueño.
+
+**Piezas:** `CarteraAnterior` (interfaz), `CarteraHistoricaSeeder::cartera()`
+(el cargador es uno solo; la subclase `CarteraRioBlancoSeeder` solo contesta
+qué cuaderno), `CarteraRioBlanco` (los datos), `RegistroDePagos::prontoPago(…,
+deLaCarteraVieja)`, `olympo:renombrar-proyecto` + `RenombrarProyectoTest`.
+`ColoniaRioBlancoSeeder` ahora siembra RRB (la clase conserva el nombre).
+
+**Pendiente con el dueño:** B-009 a B-012 figuran en el directorio a nombre de
+Yoni Moreno (exp. 0008) sin ficha — no se cargaron; el A-5 espera que el
+ingeniero parta las 300 vr²; el 0002 no tiene DNI; los precios y planes de
+pago del resto de RRB siguen en cero.
 
 ## 21-sep — Exp. 0031: re-imputar un recibo, sin anulados, y la prima por titular
 
