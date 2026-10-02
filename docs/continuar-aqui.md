@@ -5,8 +5,11 @@
 
 ## 2-oct — La segunda etapa de Praderas del Sol: 81 lotes, A-1 a G-1
 
-**EN LOCAL** — falta mirarla en el plano, pasar la puerta, commitear y
-después llevarla a pruebas y a producción con el mismo comando.
+**YA EN PRODUCCIÓN** — `05eb26e` y `84cfbb4`, 2-oct: los 81 lotes cargados
+en local, pruebas y producción (con `pg_dump` antes). El mismo día el mapa
+del panel quedó con una sola vista, la de los lotes: se quitó el botón
+Plano/Lotes y la capa del calco (Mauricio: «no aporta nada estar cambiando
+entre uno y otro»).
 
 **El pedido.** Mauricio, con el impreso al lado: agregar los lotes de las
 manzanas de la segunda etapa. Estaban en el DXF desde agosto y se habían
