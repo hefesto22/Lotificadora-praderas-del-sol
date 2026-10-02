@@ -158,12 +158,6 @@
         .dark .plano-boton:hover { background: rgb(24 24 27); color: #fff; }
         .dark .plano-boton.activo { background: rgb(244 244 245); color: rgb(24 24 27); border-color: rgb(244 244 245); }
 
-        /* El calco hereda currentColor: tinta oscura en claro, clara en
-           oscuro. Sin esto el dibujo del topografo desaparece en el tema
-           que no le toca. */
-        .plano-calco { color: rgb(24 24 27); }
-        .dark .plano-calco { color: rgb(228 228 231); }
-
         .plano-pista {
             position: absolute; left: .75rem; bottom: .625rem;
             font-size: .6875rem; color: rgb(161 161 170); pointer-events: none;
@@ -621,42 +615,10 @@
                 movio: false,
                 inicio: { x: 0, y: 0, vx: 0, vy: 0 },
 
-                /* Calco del plano original. Se pide aparte y no embebido en
-                   la pagina porque pesa ~1.5 MB: asi lo cachea el navegador
-                   y no viaja en cada render de Livewire. Si falla, no pasa
-                   nada: los lotes se dibujan igual. */
-                calco: { obra: '', rotulo: '', textos: [] },
-
-                /* 🔴 Arranca segun SI HAY calco, no en true a secas.
-                   Mordio el 13-ago-2026 con El Bambu: el boton que apaga
-                   el calco solo se dibuja cuando el proyecto TIENE calco
-                   —ver la condicion de mas abajo, al lado de «Ampliar»—,
-                   asi que en un proyecto sin calco verCalco se quedaba en
-                   true para siempre y los rotulos de los 84 lotes —que
-                   estan dibujados, con display:none— no habia forma de
-                   encenderlos. Sin calco no hay nada que tapar: los
-                   numeros se ven de entrada.
-
-                   ⚠️ Y ojo con lo que se escribe ACA ADENTRO: este
-                   comentario es de JavaScript, pero el archivo pasa
-                   primero por Blade. Una directiva citada de ejemplo se
-                   COMPILA igual, y una condicional sin su cierre revienta
-                   la vista entera con «unexpected end of file». Mordio en
-                   el mismo cambio: 30 tests en rojo por una cita. */
-                verCalco: @js($plano['calco'] !== null),
                 completo: false,
 
                 init() {
                     this.ajustar();
-
-                    const url = @js($plano['calco']);
-
-                    if (url) {
-                        fetch(url)
-                            .then((r) => r.ok ? r.json() : null)
-                            .then((d) => { if (d) this.calco = d })
-                            .catch(() => {});
-                    }
                 },
 
 
@@ -1897,40 +1859,6 @@
                         </polygon>
                     @endforeach
 
-                    {{-- El calco del plano del topografo, ENCIMA del color.
-
-                         Va arriba y no abajo a proposito: asi se leen sus
-                         cotas y sus numeros sobre el lote pintado, que es
-                         como se lee un plano de ventas. El color queda de
-                         tinte. pointer-events none: lo que se clickea son
-                         los poligonos de la base, no el dibujo. --}}
-                    <g class="plano-calco" x-show="verCalco" style="pointer-events: none;">
-                        {{-- Los rotulos del topografo —CALLE PUBLICA, BLOQUE X,
-                             las areas verdes— NO se dibujan (5-ago-2026).
-
-                             Vienen en el JSON del calco y estuvieron rotos
-                             desde el principio por un <template x-for> dentro
-                             del <svg>, que en contexto SVG no es un template
-                             de verdad. Al arreglarlo se vieron por primera
-                             vez, y la conclusion fue que estorban: se
-                             amontonan sobre los lotes, compiten con nuestros
-                             propios numeros y no dicen nada que la persona no
-                             sepa mirando el dibujo.
-
-                             El dato sigue en el JSON (`calco.textos`) por si
-                             algun dia se quieren, por ejemplo solo a partir
-                             de cierto acercamiento. Lo que se dibuja es el
-                             TRAZO del topografo, que es lo que sirve de
-                             referencia. --}}
-                        <path
-                            :d="calco.obra"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.3"
-                            vector-effect="non-scaling-stroke"
-                        />
-                    </g>
-
                     {{-- Los rotulos al final, para que ningun poligono los tape.
 
                          Van con la letra del bloque adelante —B-12— porque
@@ -1938,11 +1866,12 @@
                          cual es, el codigo entero (RPS-B-012) no entra, y
                          asi se lee igual que como lo dice la oficina.
 
-                         Con el calco encendido se ocultan: el dibujo del
-                         topografo ya trae escritos el numero y el area de
-                         cada lote, y encimarle los nuestros deja el mapa
-                         ilegible. --}}
-                    <g x-show="!verCalco">
+                         Se ven siempre. Hasta el 2-oct-2026 habia un boton
+                         Plano/Lotes que encimaba el dibujo del topografo y
+                         escondia estos rotulos; se quito porque cambiar de
+                         una vista a la otra no aportaba nada (Mauricio). El
+                         mapa es uno solo: el de los lotes. --}}
+                    <g>
                         @foreach ($plano['lotes'] as $lote)
                             <text
                                 x="{{ $lote['centro'][0] }}"
@@ -1970,16 +1899,6 @@
                         :title="completo ? 'Salir de pantalla completa (Esc)' : 'Pantalla completa'"
                         x-text="completo ? 'Reducir' : 'Ampliar'"
                     ></button>
-                    @if ($plano['calco'] !== null)
-                        <button
-                            type="button"
-                            class="plano-boton"
-                            x-on:click="verCalco = !verCalco"
-                            :class="verCalco ? 'activo' : ''"
-                            title="Mostrar u ocultar el dibujo del plano original"
-                            x-text="verCalco ? 'Plano' : 'Lotes'"
-                        ></button>
-                    @endif
                 </div>
 
                 <div class="plano-pista" x-text="completo
