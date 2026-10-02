@@ -39,8 +39,11 @@ use RuntimeException;
  * La unidad la declara el propio archivo: `$DIMLFAC = 1.1976`, o sea
  * 1 vara = 0.835 m exactos.
  *
- * Los 309 vienen dibujados
+ * Los 390 vienen dibujados
  * ------------------------
+ * 309 de la primera etapa (A a X) y 81 de la segunda (A-1 a G-1, desde el
+ * 2-oct-2026). Ver docs/plano-real.md.
+ *
  * Ninguno viaja sin poligono. NOTA_SIN_DIBUJO queda de red: si un dia el
  * JSON trae una cara que no cierra, el lote entra igual -con su area y su
  * numero, que son los que se venden- y el mapa lo manda a "Sin dibujar"

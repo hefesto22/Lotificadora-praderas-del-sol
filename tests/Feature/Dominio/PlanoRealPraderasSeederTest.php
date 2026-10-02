@@ -16,15 +16,19 @@ use Database\Seeders\PlanoRealPraderasSeeder;
 | cambia una cuenta, se pone rojo aca y no en una escritura.
 */
 
-/** Los 24 del plano, de la A a la X: el DXF nativo los trae rotulados. */
-const BLOQUES = 24;
+/**
+ * Los 24 de la primera etapa, de la A a la X, y los 7 de la segunda, de la
+ * A-1 a la G-1 (2-oct-2026). El DXF nativo los trae rotulados a todos.
+ */
+const BLOQUES = 31;
 
 /**
  * 301 hasta el 22-ago-2026, cuando se releyó la manzana I del DXF y
  * aparecieron los 8 que la primera lectura no había cerrado: I-8 a I-15,
- * la segunda fila entera. Ver docs/plano-real.md.
+ * la segunda fila entera. 309 hasta el 2-oct-2026, cuando entró la segunda
+ * etapa: 81 lotes en las manzanas A-1 a G-1. Ver docs/plano-real.md.
  */
-const TOTAL_LOTES = 309;
+const TOTAL_LOTES = 390;
 
 /**
  * Las calles no se cargan: el calco del plano nativo las dibuja con sus
@@ -32,8 +36,11 @@ const TOTAL_LOTES = 309;
  */
 const TOTAL_CALLES = 0;
 
-/** Lotes tipo de 12.50V x 20.00V. El area sale del texto del plano. */
-const LOTES_TIPO = 233;
+/**
+ * Lotes tipo de 12.50V x 20.00V: 233 de la primera etapa y 57 de la
+ * segunda. El area sale del texto del plano.
+ */
+const LOTES_TIPO = 290;
 
 function sembrarPlanoReal(): Proyecto
 {
@@ -63,17 +70,24 @@ describe('PlanoRealPraderasSeeder', function (): void {
         expect($lotes->filter(fn (Lote $l): bool => ! $l->tienePoligono()))->toBeEmpty();
     });
 
-    test('estan los 24 bloques del plano, con su letra', function (): void {
+    test('estan los 31 bloques del plano, con su letra', function (): void {
         $proyecto = sembrarPlanoReal();
 
         $nombres = Bloque::query()
             ->where('proyecto_id', $proyecto->getKey())
-            ->orderBy('nombre')
             ->pluck('nombre')
             ->all();
 
-        expect($nombres)->toBe(range('A', 'X'))
-            ->and($nombres)->toHaveCount(BLOQUES);
+        /*
+        | La primera etapa va de la A a la X; la segunda repite la letra con
+        | «-1». Se compara sin orden: cómo ordena Postgres un texto con guion
+        | depende de la collation de la base, y eso no es lo que cuida este
+        | test.
+        */
+        expect($nombres)->toEqualCanonicalizing([
+            ...range('A', 'X'),
+            'A-1', 'B-1', 'C-1', 'D-1', 'E-1', 'F-1', 'G-1',
+        ])->and($nombres)->toHaveCount(BLOQUES);
     });
 
     test('la manzana I entra con sus dos filas, no con una', function (): void {
@@ -103,6 +117,75 @@ describe('PlanoRealPraderasSeeder', function (): void {
 
         expect($numeros)->toBe(array_map(strval(...), range(1, 15)))
             ->and($manzana->getAttribute('lotes_planificados'))->toBe(15);
+    });
+
+    test('la segunda etapa entra entera: 81 lotes en siete manzanas', function (): void {
+        $proyecto = sembrarPlanoReal();
+
+        /*
+        | 2-oct-2026. Las manzanas A-1 a G-1 estaban dibujadas en el DXF
+        | desde agosto y se habían dejado afuera a propósito; ahora entran.
+        |
+        | Estos números NO salen del archivo: los dictó Mauricio contra el
+        | plano impreso (LOTIFICACION CORPUS REVISADO, 29-ago-2026). Copiar
+        | acá la salida de una corrida volvería al control un espejo: si el
+        | JSON pierde o gana un lote, esto se pone rojo.
+        |
+        | G-1 es la manzana chica de dos lotes debajo de la A-1. En el plano
+        | también dice «BLOQUE F-1» —el rótulo quedó repetido— y no puede
+        | llamarse igual que la F-1 de quince.
+        */
+        $porManzana = [];
+
+        foreach (['A-1', 'B-1', 'C-1', 'D-1', 'E-1', 'F-1', 'G-1'] as $nombre) {
+            /** @var Bloque $manzana */
+            $manzana = Bloque::query()
+                ->where('proyecto_id', $proyecto->getKey())
+                ->where('nombre', $nombre)
+                ->sole();
+
+            $porManzana[$nombre] = Lote::query()->where('bloque_id', $manzana->getKey())->count();
+        }
+
+        expect($porManzana)->toBe([
+            'A-1' => 4,
+            'B-1' => 16,
+            'C-1' => 17,
+            'D-1' => 11,
+            'E-1' => 16,
+            'F-1' => 15,
+            'G-1' => 2,
+        ])->and(array_sum($porManzana))->toBe(81);
+    });
+
+    test('la segunda etapa lleva el area del plano revisado, no la del DXF', function (): void {
+        $proyecto = sembrarPlanoReal();
+
+        /*
+        | El DXF es del 22-ago y el plano impreso del 29-ago. En dos lotes
+        | el rótulo del DXF quedó viejo y el impreso lo corrigió, y el
+        | dibujo le da la razón al impreso en los dos:
+        |
+        |   D-1-8   DXF 388.84 (el rótulo del D-1-1, repetido)   plano 250.00   dibujo 249.99
+        |   F-1-11  DXF 189.50                                   plano 271.69   dibujo 271.81
+        |
+        | Manda el impreso, que es el que tiene el comprador en la mano.
+        */
+        $area = static function (string $manzana, string $numero) use ($proyecto): string {
+            /** @var Bloque $bloque */
+            $bloque = Bloque::query()
+                ->where('proyecto_id', $proyecto->getKey())
+                ->where('nombre', $manzana)
+                ->sole();
+
+            return (string) Lote::query()
+                ->where('bloque_id', $bloque->getKey())
+                ->where('numero', $numero)
+                ->value('area_varas');
+        };
+
+        expect($area('D-1', '8'))->toBe('250.0000')
+            ->and($area('F-1', '11'))->toBe('271.6900');
     });
 
     test('no entra ninguna cara que no sea un lote vendible', function (): void {

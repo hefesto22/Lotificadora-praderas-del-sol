@@ -1,5 +1,10 @@
 # De dónde sale la geometría de Praderas del Sol
 
+> **2-oct-2026 — entró la segunda etapa.** 81 lotes más, en las manzanas
+> A-1 a G-1: el plano pasa de 309 a **390 lotes** en 31 manzanas. Ver
+> [La segunda etapa](#la-segunda-etapa-a-1-a-g-1) al final. Lo que sigue
+> hasta ahí habla de la primera etapa, y sus números siguen valiendo.
+
 > **22-ago-2026 — la manzana I estaba a medias.** La primera lectura dejó
 > 301 lotes; el plano tiene 309. Faltaba la segunda fila entera de la
 > manzana I (I-8 a I-15). Ver [La manzana I](#la-manzana-i-el-faltante-que-no-se-veía)
@@ -238,8 +243,93 @@ ninguno sale marcado por `poligonoDesalineado()` y el X-15 sigue siendo el
 del frente que ya estaban cargados —la manzana cierra— y ninguno se
 traslapa con ningún otro lote del plano.
 
-**Lo que el plano tiene y el sistema sigue sin cargar:** las manzanas de la
-segunda serie, `A-1` a `F-1`, que en el DXF están dibujadas y rotuladas
-igual que las demás. Quedan afuera a propósito —22-ago-2026, Mauricio:
-«solo esos hacen falta»—, no por un tropiezo de la lectura. Si algún día
-entran, entran por `olympo:completar-plano`.
+Las manzanas de la segunda serie quedaron afuera ese día a propósito
+—22-ago-2026, Mauricio: «solo esos hacen falta»—. Entraron el 2-oct, por
+`olympo:completar-plano`, como se había dejado escrito.
+
+## La segunda etapa: A-1 a G-1
+
+**2-oct-2026.** Mauricio, con el plano impreso al lado: «hay que agregar
+los de la segunda etapa, los lotes de esos bloques». Entran **81 lotes en
+siete manzanas, 21,615.06 vr²**.
+
+| Manzana | Lotes | Área | |
+|---|---|---|---|
+| A-1 | 4 | 1,389.69 vr² | pegada a la X, del lado de abajo |
+| B-1 | 16 | 4,000.00 vr² | todos de 250.00 |
+| C-1 | 17 | 4,246.56 vr² | |
+| D-1 | 11 | 3,314.28 vr² | la cuña contra la calle de la orilla |
+| E-1 | 16 | 4,000.00 vr² | todos de 250.00 |
+| F-1 | 15 | 4,092.59 vr² | |
+| G-1 | 2 | 571.94 vr² | ⚠️ en el plano dice «BLOQUE F-1» (ver abajo) |
+
+Los conteos **no se copiaron de la lectura: los dictó Mauricio** contra el
+impreso, y así están en `PlanoRealPraderasSeederTest`. Si el JSON pierde o
+gana un lote, el test se pone rojo; la lectura sola no se puede auditar a
+sí misma (ver la manzana I, arriba).
+
+### Los dos archivos
+
+- **DXF**: el mismo `PLANO DIONEL CORPUS.dxf`, en la versión que el
+  ingeniero guardó el **22-ago-2026** (ya trae la segunda etapa y la fila
+  de atrás de la manzana I).
+- **Impreso**: `LOTIFICACION CORPUS REVISADO.pdf`, ploteado el
+  **29-ago-2026**. Es una semana más nuevo que el DXF, y se nota en dos
+  rótulos (abajo).
+
+**Cómo se sabe que la lectura es la misma de siempre:** con el mismo
+método y la misma transformación campo → varas, **307 de los 309 lotes ya
+cargados salen idénticos** —mismo número, misma área, polígono a menos de
+5 mm—. Los otros dos, Q-3 y Q-4, rotulan con coma de miles
+(`1,200.57 vr2`) y esta lectura no los buscó; no son de la segunda etapa.
+
+### Lo que no se lee solo
+
+1. **«BLOQUE F-1» está escrito dos veces.** Una vez en la manzana de
+   quince lotes de abajo, y otra en la manzana chica de dos lotes que queda
+   debajo de la A-1, contra la orilla. Dos manzanas no pueden llamarse
+   igual; la chica entra como **G-1** (Mauricio, 2-oct: «bloque G son 2»).
+   ⚠️ **Falta que el ingeniero corrija el rótulo** del plano.
+2. **Dos rótulos del DXF quedaron viejos y el impreso los corrigió.**
+   Manda el impreso —es el que tiene el comprador en la mano— y el dibujo
+   le da la razón en los dos:
+
+   | Lote | DXF (22-ago) | Impreso (29-ago) | Dibujo |
+   |---|---|---|---|
+   | D-1-8 | 388.84 — el rótulo del D-1-1, repetido | **250.00** | 249.99 |
+   | F-1-11 | 189.50 | **271.69** | 271.81 |
+
+3. **Trazos nuevos que no son linderos.** El DXF trae la línea verde que
+   encierra la «2DA ETAPA» (corre por linderos y cruza calles) y los ejes
+   rojos punteados de las calles. Se sacan **antes** de armar las caras,
+   igual que la polilínea vieja del área verde.
+
+Dibujo contra rótulo, los 81: mediana **0.006 %**, máximo **0.043 %**
+(el F-1-11). Ninguno sale marcado por `poligonoDesalineado()`: el X-15
+sigue siendo el único.
+
+### El calco creció con ellos
+
+Al final del trazo (`obra`) de `public/planos/rps-fondo.json` se agregó lo
+que el DXF dibuja y el calco no tenía: los linderos y los bordes de calle
+de la segunda etapa y, de paso, **la fila de atrás de la manzana I**, que
+tampoco estaba — el calco es de abril y el I-8 a I-15 entró después. Lo
+que ya estaba no se tocó: el archivo solo crece al final.
+
+### Cómo se carga
+
+Con la base operando, por la puerta que agrega y no toca nada:
+
+```bash
+herd php artisan olympo:completar-plano RPS database/data/praderas-plano.json --precio-vara=1000 --ensayo
+herd php artisan olympo:completar-plano RPS database/data/praderas-plano.json --precio-vara=1000
+```
+
+Las siete manzanas nacen vacías y no tienen de quién heredar el precio.
+**L 1,000.00 por vara²** —un lote tipo de 250 vr² queda en
+L 250,000.00, como los de la primera etapa— lo decidió Mauricio el 2-oct.
+El precio de cada lote se afina al venderlo
+(ver `precio-por-lote-no-por-vara`).
+
+El script de la lectura quedó en `storage/app/_analisis/segunda-etapa/`
+(no viaja con el repo; el LEEME dice en qué orden se corre).

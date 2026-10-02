@@ -1,9 +1,47 @@
-# Continuar acá — 28-sep-2026
+# Continuar acá — 2-oct-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
 
+## 2-oct — La segunda etapa de Praderas del Sol: 81 lotes, A-1 a G-1
+
+**EN LOCAL** — falta mirarla en el plano, pasar la puerta, commitear y
+después llevarla a pruebas y a producción con el mismo comando.
+
+**El pedido.** Mauricio, con el impreso al lado: agregar los lotes de las
+manzanas de la segunda etapa. Estaban en el DXF desde agosto y se habían
+dejado afuera a propósito.
+
+**Lo que decidió Mauricio:**
+
+- Los conteos, contra el impreso: A-1 4 · B-1 16 · C-1 17 · D-1 11 · E-1 16
+  · F-1 15 · G-1 2 = **81**. La lectura del DXF dio exactamente eso.
+- La manzana chica de dos lotes debajo de la A-1 es la **G-1**: en el plano
+  dice «BLOQUE F-1» (rótulo repetido del ingeniero).
+- Entran a **L 1,000.00/vr²**.
+
+**Lo que se decidió al leer** (vetable): D-1-8 y F-1-11 llevan el área del
+impreso del 29-ago (250.00 y 271.69), no la del DXF del 22-ago (388.84 y
+189.50); el dibujo le da la razón al impreso. Detalle en `docs/plano-real.md`.
+
+**Archivos:** `database/data/praderas-plano.json` (+81 al final, los 309 de
+antes intactos byte a byte), `public/planos/rps-fondo.json` (el calco crece
+al final: segunda etapa y la fila de atrás de la I), `PlanoRealPraderasSeederTest`
+(390 lotes, 31 manzanas, 290 tipo, dos tests nuevos), el docblock de
+`PlanoRealPraderasSeeder` y `docs/plano-real.md`.
+
+**Cómo se carga** (local, pruebas y producción, igual):
+`olympo:completar-plano RPS database/data/praderas-plano.json --precio-vara=1000`,
+primero con `--ensayo`.
+
+**Pendiente con el ingeniero:** corregir el rótulo «BLOQUE F-1» de la G-1.
+
 ## 28-sep — La cartera de Residencial Río Blanco, y el proyecto pasa de CRB a RRB
+
+**YA EN PRODUCCIÓN** — `bbe2a1e`, 28-sep: renombre y carga corridos en local,
+pruebas y producción (con `pg_dump` antes). En las tres: 83 lotes RRB, 9
+expedientes, «Todos cuadran». Falta en el panel: el número desde el que
+imprime RRB (pestaña Facturación).
 
 **El pedido.** Cargar el cuaderno de Río Blanco (Elder Dionel Pinto Molina, La
 Unión): un directorio y nueve fichas con su historial, escaneados en PDF.
