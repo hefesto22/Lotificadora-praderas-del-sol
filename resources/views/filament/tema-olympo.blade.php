@@ -453,6 +453,20 @@
     }
 
     /*
+       ── 12-bis-b. El riel que baja de renglón (8-oct-2026) ─────────────
+
+       «¿A quién se le carga?» lleva una pastilla por socio, con su nombre
+       completo y su parte. Con dos o tres socios no entra en el ancho de un
+       celular, y el `nowrap` de arriba lo sacaba del modal. Esto deja que
+       las pastillas bajen de renglón; el riel y la señal son los mismos.
+    */
+    .olympo-modo-envuelve {
+        flex-wrap: wrap;
+        justify-content: center;
+        max-width: 100%;
+    }
+
+    /*
        ── 12-ter. El renglón de un lote (8-sep-2026) ────────────────────
 
        «Eso de "qué viene a pagar" también mejorémosle el diseño» — Mauricio.

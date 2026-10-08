@@ -37,6 +37,12 @@ final readonly class ParteDeUnSocio
         public Monto $entregado,
         public Monto $porEntregar,
         public Monto $entregadoDeMas,
+        /**
+         * Los gastos de ESTE mes que se le cargaron a él solo (8-oct-2026).
+         * Se descuentan como lo entregado: `$porEntregar` y `$entregadoDeMas`
+         * ya los tienen restados.
+         */
+        public Monto $cargado,
     ) {}
 
     /**
@@ -49,6 +55,17 @@ final readonly class ParteDeUnSocio
     public function estaSobregirado(): bool
     {
         return ! $this->entregadoDeMas->esCero();
+    }
+
+    /**
+     * Cómo se rotula en el papel lo que se llevó de más.
+     *
+     * Con un gasto cargado de por medio no fue un adelanto: el proyecto pagó
+     * algo suyo que pasa lo que le tocaba en el mes, y eso se lee como deuda.
+     */
+    public function marcaDelSobregiro(): string
+    {
+        return $this->cargado->esCero() ? 'Se le adelantó' : 'Queda debiendo';
     }
 
     public function nombre(): string

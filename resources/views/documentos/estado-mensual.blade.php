@@ -368,6 +368,40 @@
         </tbody>
     </table>
 
+    {{-- Lo cargado a un socio NO es egreso del proyecto: no baja la utilidad
+         de los demás (8-oct-2026). Va aparte para que la hoja siga cuadrando
+         contra la pestaña Gastos, y en el reparto se le descuenta a cada uno.
+         Sale aunque el mes cierre con pérdida: ahí el reparto no se imprime
+         y esta tabla es el único lugar donde se ve. --}}
+    @if ($cierre->hayGastosCargados())
+        <table>
+            <thead>
+                <tr>
+                    <th>Gastos cargados a un socio</th>
+                    <th class="cifra">Monto</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach ($cierre->cargadoASocios as $cargo)
+                    <tr class="renglon">
+                        <td class="rotulo">{{ $cargo['nombre'] }}</td>
+                        <td>{{ $cargo['monto']->formateado() }}</td>
+                    </tr>
+                @endforeach
+
+                <tr class="subtotal">
+                    <td>Total cargado a socios</td>
+                    <td>{{ $cierre->cargadoDelMes->formateado() }}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p class="vacio-nota">
+            No son egresos del proyecto: no bajan la utilidad que se reparte. A cada socio se le
+            descuentan de lo que le toca en el mes, igual que lo que ya se le entregó.
+        </p>
+    @endif
+
     {{-- ── 3 · El reparto ────────────────────────────────────────── --}}
 
     <h2><span class="numeral">3</span> Qué hay que entregarle a cada socio</h2>
@@ -387,6 +421,9 @@
                     <th>Parte</th>
                     <th>Le toca</th>
                     <th>Ya se le entregó</th>
+                    @if ($cierre->hayGastosCargados())
+                        <th>Gastos a su cuenta</th>
+                    @endif
                     <th>Hay que entregarle</th>
                 </tr>
             </thead>
@@ -397,9 +434,12 @@
                         <td>{{ $parte->porcentajeEscrito() }}</td>
                         <td>{{ $parte->leToca->formateado() }}</td>
                         <td>{{ $parte->entregado->formateado() }}</td>
+                        @if ($cierre->hayGastosCargados())
+                            <td>{{ $parte->cargado->formateado() }}</td>
+                        @endif
                         <td>
                             @if ($parte->estaSobregirado())
-                                <span class="marca">Se le adelantó</span>
+                                <span class="marca">{{ $parte->marcaDelSobregiro() }}</span>
                                 {{ $parte->entregadoDeMas->formateado() }}
                             @else
                                 {{ $parte->porEntregar->formateado() }}
@@ -414,6 +454,9 @@
                     <td></td>
                     <td>{{ $cierre->utilidadDelMes->formateado() }}</td>
                     <td>{{ $cierre->entregadoDelMes->formateado() }}</td>
+                    @if ($cierre->hayGastosCargados())
+                        <td>{{ $cierre->cargadoEnElReparto()->formateado() }}</td>
+                    @endif
                     <td>{{ $cierre->porEntregar->formateado() }}</td>
                 </tr>
             </tfoot>
@@ -551,7 +594,8 @@
         Los egresos son los gastos del proyecto más lo devuelto a clientes; lo retenido de una seña
         no sale de caja y no se cuenta. El reparto se calcula sobre la utilidad del mes por el
         porcentaje de cada socio, y «ya se le entregó» son las entregas anotadas a cuenta de este
-        mes aunque se hayan pagado otro día. En la tabla del año, un resultado entre paréntesis es
+        mes aunque se hayan pagado otro día. Un gasto cargado a un socio no es egreso del proyecto:
+        se le descuenta solo a él, junto con lo entregado. En la tabla del año, un resultado entre paréntesis es
         pérdida. Base de efectivo: no entra lo que los clientes todavía deben.
         <b>Sobre el anexo 5:</b> son las cuotas con vencimiento dentro del período que todavía
         tienen saldo —incluidas las abonadas a medias— de expedientes vigentes; no incluye atrasos

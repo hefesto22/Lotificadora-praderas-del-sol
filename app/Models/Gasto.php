@@ -11,6 +11,8 @@ use App\Domain\ValueObjects\Monto;
 use App\Traits\HasAuditFields;
 use Database\Factories\GastoFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -48,10 +50,21 @@ use Spatie\Activitylog\Support\LogOptions;
  *
  * A diferencia de `Devolucion` y `Reprogramacion`, el pluralizador inglés
  * saca `gastos` de `Gasto` sin ayuda.
+ *
+ * ═══ A QUIEN SE LE CARGA (8-OCT-2026) ═══
+ *
+ * `socio_id` en NULL: el gasto es del proyecto y lo pagan todos los socios
+ * según su parte — lo de siempre. Con un socio: lo paga SOLO él. No baja la
+ * utilidad que se reparte, y en el Estado mensual se le descuenta a ese socio
+ * de lo que le toca, igual que un adelanto (regla de Mauricio, 8-oct).
+ *
+ * Que el socio sea del mismo proyecto no lo cuida este modelo: lo garantiza la
+ * FK compuesta `gastos_socio_del_mismo_proyecto_fk`.
  */
 #[Fillable([
     'numero',
     'proyecto_id',
+    'socio_id',
     'categoria',
     'descripcion',
     'beneficiario',
@@ -139,7 +152,7 @@ class Gasto extends Model
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['numero', 'categoria', 'descripcion', 'beneficiario', 'factura',
+            ->logOnly(['numero', 'socio_id', 'categoria', 'descripcion', 'beneficiario', 'factura',
                 'monto', 'forma_pago', 'referencia', 'fecha', 'archivo'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges()
@@ -154,6 +167,60 @@ class Gasto extends Model
     public function proyecto(): BelongsTo
     {
         return $this->belongsTo(Proyecto::class);
+    }
+
+    /**
+     * El socio al que se le carga. NULL es «al proyecto».
+     *
+     * `withTrashed()` a propósito: un socio que salió del repetidor queda
+     * borrado con SoftDeletes, pero el gasto que se le cargó sigue siendo
+     * suyo. Sin esto la tabla diría «Al proyecto» de un gasto que no lo es.
+     *
+     * @return BelongsTo<Socio, $this>
+     */
+    public function socio(): BelongsTo
+    {
+        return $this->belongsTo(Socio::class)->withTrashed();
+    }
+
+    // ─── Consultas ────────────────────────────────────────────────────
+
+    /**
+     * Los gastos del PROYECTO: los que pagan todos los socios según su parte.
+     *
+     * Es lo que baja la utilidad del mes y lo que el tablero cuenta como
+     * invertido. Un gasto cargado a un socio no es costo del desarrollo: es
+     * plata de ese socio, como una entrega.
+     *
+     * @param Builder<Gasto> $query
+     *
+     * @return Builder<Gasto>
+     */
+    #[Scope]
+    protected function comunes(Builder $query): Builder
+    {
+        return $query->whereNull('gastos.socio_id');
+    }
+
+    /**
+     * Los que se le cargaron a un socio en particular.
+     *
+     * @param Builder<Gasto> $query
+     *
+     * @return Builder<Gasto>
+     */
+    #[Scope]
+    protected function cargadosASocio(Builder $query): Builder
+    {
+        return $query->whereNotNull('gastos.socio_id');
+    }
+
+    /**
+     * ¿Este gasto se le carga a un socio y no al proyecto?
+     */
+    public function esDeUnSocio(): bool
+    {
+        return $this->getAttribute('socio_id') !== null;
     }
 
     // ─── El dinero ────────────────────────────────────────────────────

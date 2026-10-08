@@ -87,6 +87,23 @@ use Illuminate\Database\Eloquent\Collection;
  * suma al socio de MAYOR porcentaje, que es la convención que menos discusión
  * genera. Repartir sin juntar el residuo es exactamente como se pierden los
  * centavos que después nadie sabe de quién eran.
+ *
+ * ═══ UN GASTO CARGADO A UN SOCIO (8-OCT-2026) ═══
+ *
+ * El cliente pidió registrar «a quién de los socios se le carga el gasto», y
+ * Mauricio eligió la regla: **se le descuenta**. Ese gasto lo paga solo ese
+ * socio, así que:
+ *
+ *   - NO es egreso del proyecto: no baja la utilidad del mes ni la tabla del
+ *     año. Si bajara, los demás socios pagarían su parte de algo que no es
+ *     suyo.
+ *   - En el reparto se le descuenta a él, junto con lo ya entregado: es plata
+ *     suya que el proyecto pagó por él, igual que un adelanto.
+ *   - Sale en su propia tabla (`$cargadoASocios`), para que la hoja siga
+ *     cuadrando, al céntimo, contra la pestaña Gastos del proyecto.
+ *
+ * La caja cierra igual: lo cobrado menos los gastos del proyecto y los
+ * cargados es exactamente lo que queda por entregar entre todos.
  */
 final readonly class CierreDelMes
 {
@@ -108,6 +125,7 @@ final readonly class CierreDelMes
      * @param array<string, Monto> $cobradoPorForma clave: el `value` de la FormaDePago
      * @param array<string, Monto> $gastadoPorCategoria clave: el `value` de la CategoriaDeGasto
      * @param list<ParteDeUnSocio> $reparto
+     * @param list<array{nombre: string, monto: Monto}> $cargadoASocios
      */
     private function __construct(
         public Proyecto $proyecto,
@@ -129,6 +147,10 @@ final readonly class CierreDelMes
         public LoSinCobrarDelMes $sinCobrar,
         /** Lo que vencía en el mes, se haya pagado o no: el denominador del cumplimiento. */
         public Monto $vencioEnElMes,
+        /** Los gastos del mes cargados a un socio. NO entran en el resultado: se le descuentan a cada uno. */
+        public Monto $cargadoDelMes,
+        /** Uno por socio que tuvo algo cargado en el mes, también si ya no participa. */
+        public array $cargadoASocios,
     ) {}
 
     /**
@@ -169,6 +191,7 @@ final readonly class CierreDelMes
 
         $partes = self::repartir($utilidadDelMes, $socios);
         $entregas = self::entregadoPorSocio($id, $primerDia);
+        $cargos = self::cargadoPorSocio($id, $primerDia, $ultimoDia);
 
         $reparto = [];
         $entregadoDelMes = Monto::cero();
@@ -177,8 +200,16 @@ final readonly class CierreDelMes
         foreach ($socios as $indice => $socio) {
             $leToca = $partes[$indice] ?? Monto::cero();
             $recibido = $entregas[(int) $socio->getKey()] ?? Monto::cero();
+            $cargado = $cargos[(int) $socio->getKey()] ?? Monto::cero();
 
-            $falta = $recibido->mayorQue($leToca) ? Monto::cero() : $leToca->restar($recibido);
+            /*
+             * Lo que ya se lleva: lo entregado MÁS lo que se le cargó. Un
+             * gasto cargado a un socio es plata suya que el proyecto pagó por
+             * él, y se descuenta igual que un adelanto (8-oct-2026).
+             */
+            $seLleva = $recibido->sumar($cargado);
+
+            $falta = $seLleva->mayorQue($leToca) ? Monto::cero() : $leToca->restar($seLleva);
 
             $entregadoDelMes = $entregadoDelMes->sumar($recibido);
             $porEntregar = $porEntregar->sumar($falta);
@@ -189,7 +220,8 @@ final readonly class CierreDelMes
                 leToca: $leToca,
                 entregado: $recibido,
                 porEntregar: $falta,
-                entregadoDeMas: $recibido->mayorQue($leToca) ? $recibido->restar($leToca) : Monto::cero(),
+                entregadoDeMas: $seLleva->mayorQue($leToca) ? $seLleva->restar($leToca) : Monto::cero(),
+                cargado: $cargado,
             );
         }
 
@@ -211,6 +243,8 @@ final readonly class CierreDelMes
             reparto: $reparto,
             sinCobrar: LoSinCobrarDelMes::de(self::cuotasSinPagar($id, $primerDia, $ultimoDia)),
             vencioEnElMes: self::loQueVencio($id, $primerDia, $ultimoDia),
+            cargadoDelMes: self::sumar($cargos),
+            cargadoASocios: self::cargadoConNombre($cargos),
         );
     }
 
@@ -235,9 +269,39 @@ final readonly class CierreDelMes
             : Monto::cero();
     }
 
+    /**
+     * ¿Algún gasto del mes se le cargó a un socio? Decide si la hoja muestra
+     * la tabla de cargos y la columna del reparto: un mes sin cargos se
+     * imprime igual que antes del 8-oct-2026.
+     */
+    public function hayGastosCargados(): bool
+    {
+        return ! $this->cargadoDelMes->esCero();
+    }
+
+    /**
+     * Lo cargado a los socios que están en el reparto, para el total de la
+     * columna. Puede ser menos que `$cargadoDelMes` si a un socio que ya no
+     * participa se le cargó algo: ese sale en la tabla de cargos, no acá.
+     */
+    public function cargadoEnElReparto(): Monto
+    {
+        $total = Monto::cero();
+
+        foreach ($this->reparto as $parte) {
+            $total = $total->sumar($parte->cargado);
+        }
+
+        return $total;
+    }
+
     public function huboMovimiento(): bool
     {
         if (! $this->cobradoDelMes->esCero()) {
+            return true;
+        }
+
+        if ($this->hayGastosCargados()) {
             return true;
         }
 
@@ -396,9 +460,12 @@ final readonly class CierreDelMes
      */
     private static function gastadoPorCategoria(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): array
     {
+        // Solo los del PROYECTO: el cargado a un socio no es egreso del
+        // desarrollo, se le descuenta a él en el reparto.
         $filas = Gasto::query()
             ->reorder()
             ->where('proyecto_id', $proyecto)
+            ->comunes()
             ->whereBetween('fecha', [$desde->toDateString(), $hasta->toDateString()])
             ->groupBy('categoria')
             ->selectRaw('categoria, COALESCE(SUM(monto), 0) AS total')
@@ -479,6 +546,73 @@ final readonly class CierreDelMes
         }
 
         return $porSocio;
+    }
+
+    /**
+     * Los gastos del mes cargados a cada socio, indexados por su id.
+     *
+     * Por la FECHA del gasto, igual que los egresos del proyecto —no por un
+     * «mes» aparte como las entregas—: un gasto se imputa al mes en que se
+     * gastó, y eso ya lo dice su fecha.
+     *
+     * @return array<int, Monto>
+     */
+    private static function cargadoPorSocio(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): array
+    {
+        $filas = Gasto::query()
+            ->reorder()
+            ->where('proyecto_id', $proyecto)
+            ->cargadosASocio()
+            ->whereBetween('fecha', [$desde->toDateString(), $hasta->toDateString()])
+            ->groupBy('socio_id')
+            ->selectRaw('socio_id, COALESCE(SUM(monto), 0) AS total')
+            ->pluck('total', 'socio_id');
+
+        $porSocio = [];
+
+        foreach ($filas as $socio => $total) {
+            $porSocio[(int) $socio] = self::aMonto($total);
+        }
+
+        return $porSocio;
+    }
+
+    /**
+     * Lo cargado, con el nombre de cada socio, de mayor a menor.
+     *
+     * `withTrashed()`: a un socio que ya salió se le pudo cargar algo antes
+     * de irse, y ese renglón tiene que salir con su nombre — es justo el que
+     * alguien va a preguntar.
+     *
+     * @param array<int, Monto> $cargos
+     *
+     * @return list<array{nombre: string, monto: Monto}>
+     */
+    private static function cargadoConNombre(array $cargos): array
+    {
+        if ($cargos === []) {
+            return [];
+        }
+
+        /** @var array<int, string> $nombres */
+        $nombres = Socio::query()
+            ->withTrashed()
+            ->whereIn('id', array_keys($cargos))
+            ->pluck('nombre', 'id')
+            ->all();
+
+        // De mayor a menor. Se ordena el mapa —que sabe que son Monto— y no
+        // la lista: un closure con `array $a` no puede llevar `@param`, pierde
+        // la forma y PHPStan deja de saber que adentro hay un Monto.
+        uasort($cargos, static fn (Monto $a, Monto $b): int => $b->mayorQue($a) ? 1 : ($a->mayorQue($b) ? -1 : 0));
+
+        $lista = [];
+
+        foreach ($cargos as $id => $monto) {
+            $lista[] = ['nombre' => $nombres[$id] ?? '—', 'monto' => $monto];
+        }
+
+        return $lista;
     }
 
     // ─── Lo que vencía en el mes y no se pagó ─────────────────────────
@@ -602,9 +736,13 @@ final readonly class CierreDelMes
      */
     private function gastadoPorMes(int $proyecto, int $anio): array
     {
+        // Los mismos egresos que el cierre del mes: un renglón del año que
+        // no coincide con la hoja de ese mes es la discrepancia que hace que
+        // nadie le crea a ninguna de las dos.
         $filas = Gasto::query()
             ->reorder()
             ->where('proyecto_id', $proyecto)
+            ->comunes()
             ->whereBetween('fecha', $this->elAnio($anio))
             ->groupByRaw("to_char(fecha, 'YYYY-MM')")
             ->selectRaw("to_char(fecha, 'YYYY-MM') AS mes, COALESCE(SUM(monto), 0) AS total")
@@ -748,7 +886,7 @@ final readonly class CierreDelMes
     }
 
     /**
-     * @param array<string, Monto> $montos
+     * @param array<array-key, Monto> $montos
      */
     private static function sumar(array $montos): Monto
     {

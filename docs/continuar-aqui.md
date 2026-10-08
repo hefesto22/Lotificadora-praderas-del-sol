@@ -1,7 +1,53 @@
-# Continuar acá — 2-oct-2026
+# Continuar acá — 8-oct-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 8-oct — Gastos más rápidos, compartir el plano, y a qué socio se le carga un gasto
+
+**EN LOCAL** — falta `migrate`, la puerta, mirarlo en el navegador y commitear.
+
+**El pedido del cliente** (por Mauricio):
+
+1. Un botón para registrar un gasto en cada proyecto de la lista, «para
+   registrarlo más rápido».
+2. Un botón para compartir el link del plano, solo si el plano público está
+   activo.
+3. «Lo más importante»: al registrar un gasto, a quién de los socios se le
+   carga.
+
+**La regla de plata, elegida por Mauricio: SE LE DESCUENTA.** Un gasto cargado a
+un socio lo paga solo él: no es egreso del proyecto (no baja la utilidad del
+mes, ni la tabla del año, ni el «invertido» del tablero) y en el Estado mensual
+se le resta de lo que le toca, junto con lo ya entregado. Si pasa lo que le
+toca, el renglón dice «Queda debiendo». Sin socio elegido = «Al proyecto», lo
+de siempre (NULL en la base; los gastos viejos no se tocan).
+
+**Piezas:** migración `2026_10_08_100000_a_quien_se_le_carga_un_gasto` (`gastos.socio_id`
+con FK compuesta al socio del MISMO proyecto) · `Gasto::socio()`, scopes
+`comunes()` / `cargadosASocio()` · `GastoForm` (el formulario salió de
+`GastosRelationManager` y lo comparten la pestaña y la lista) · columna y filtro
+«Se le carga a» en la pestaña Gastos · `ProyectosTable`: botones «Registrar
+gasto» (pide `Create:Gasto`) y «Compartir» (copiar, WhatsApp, abrir) ·
+`Proyecto::enlaceDelPlanoPublico()` (las mismas tres condiciones del
+controlador) · `CierreDelMes` + `ParteDeUnSocio` + la hoja impresa ·
+`ComoVanLosProyectos` cuenta solo los gastos del proyecto. El corte de caja del
+día NO cambia: un gasto cargado pagado en efectivo igual salió de la caja.
+
+**Tests:** `GastoCargadoAUnSocioTest` (60/40: L 100,000 cobrados, L 20,000 del
+proyecto y L 10,000 cargados a uno → utilidad 80,000, a él 38,000 por
+entregar, al otro 32,000, caja 70,000) y `BotonesDeLaListaDeProyectosTest`.
+
+**Diseño del modal** («se ve feo, y no aparece a qué socio se le carga»): la
+pregunta se ve SIEMPRE, arriba, con el riel de pastillas del cobro. No aparecía
+porque en local ningún proyecto tiene socios cargados y la versión anterior la
+escondía; ahora ofrece solo «Al proyecto» y enlaza a Editar → pestaña «Socios»
+(`?tab=socios::data::tab`). Para ver las pastillas de los socios hay que
+cargarlos primero en esa pestaña.
+
+⚠️ `RepartoDelMes` (app/Domain/Socios) no se usa en ninguna pantalla y NO se
+tocó: sigue restando todos los gastos. Si algún día vuelve a usarse, tiene que
+aprender la regla de arriba o borrarse.
 
 ## 2-oct — La segunda etapa de Praderas del Sol: 81 lotes, A-1 a G-1
 

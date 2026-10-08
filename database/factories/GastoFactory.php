@@ -8,6 +8,7 @@ use App\Domain\Enums\CategoriaDeGasto;
 use App\Domain\Enums\FormaDePago;
 use App\Models\Gasto;
 use App\Models\Proyecto;
+use App\Models\Socio;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -74,5 +75,17 @@ class GastoFactory extends Factory
     public function conFecha(string $fecha): static
     {
         return $this->state(fn (array $atributos): array => ['fecha' => $fecha]);
+    }
+
+    /**
+     * Cargado a un socio: lo paga solo él. El proyecto va con el del socio,
+     * porque la FK compuesta no admite otro.
+     */
+    public function cargadoA(Socio $socio): static
+    {
+        return $this->state(fn (array $atributos): array => [
+            'proyecto_id' => $socio->getAttribute('proyecto_id'),
+            'socio_id'    => $socio->getKey(),
+        ]);
     }
 }

@@ -476,6 +476,32 @@ class Proyecto extends Model
         return $this->belongsTo(Facturacion::class);
     }
 
+    // ─── El plano público ─────────────────────────────────────────────
+
+    /**
+     * La dirección del plano público, o null si hoy no abre.
+     *
+     * Son las MISMAS tres condiciones con las que `PlanoPublicoController`
+     * decide si responde o da 404: el proyecto activo, el plano publicado y
+     * un slug. Si un botón ofreciera compartir un enlace que el controlador
+     * rechaza, el cliente que lo recibe por WhatsApp ve una página de error
+     * con el nombre de la lotificadora arriba.
+     */
+    public function enlaceDelPlanoPublico(): ?string
+    {
+        $slug = $this->getAttribute('slug');
+
+        if ($this->getAttribute('activo') !== true || $this->getAttribute('plano_publico') !== true) {
+            return null;
+        }
+
+        if (! is_string($slug) || trim($slug) === '') {
+            return null;
+        }
+
+        return route('plano.publico', ['slug' => $slug]);
+    }
+
     // ─── Donaciones ───────────────────────────────────────────────────
 
     /**

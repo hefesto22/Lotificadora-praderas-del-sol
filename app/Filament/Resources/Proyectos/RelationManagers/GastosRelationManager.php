@@ -4,13 +4,11 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Proyectos\RelationManagers;
 
-use App\Domain\Archivos\GuardadoDeArchivos;
 use App\Domain\Enums\CategoriaDeGasto;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Gastos\RegistroDeGastos;
 use App\Domain\ValueObjects\Monto;
-use App\Filament\Schemas\Components\MayusculasField;
-use App\Filament\Schemas\Components\MontoField;
+use App\Filament\Resources\Proyectos\Schemas\GastoForm;
 use App\Models\Gasto;
 use App\Models\Proyecto;
 use BackedEnum;
@@ -18,14 +16,7 @@ use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
-use Filament\Forms\Components\BaseFileUpload;
-use Filament\Forms\Components\DatePicker;
-use Filament\Forms\Components\FileUpload;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Textarea;
-use Filament\Forms\Components\TextInput;
 use Filament\Resources\RelationManagers\RelationManager;
-use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
@@ -36,7 +27,6 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\HtmlString;
-use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Override;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -94,113 +84,15 @@ class GastosRelationManager extends RelationManager
     #[Override]
     protected static string|BackedEnum|null $icon = 'heroicon-o-banknotes';
 
+    /**
+     * El formulario vive en `GastoForm` desde el 8-oct-2026: lo comparte con
+     * el botón «Registrar gasto» de la lista de proyectos, y dos copias del
+     * mismo formulario se separan solas.
+     */
     #[Override]
     public function form(Schema $schema): Schema
     {
-        return $schema
-            ->components([
-                DatePicker::make('fecha')
-                    ->label('Fecha del gasto')
-                    ->required()
-                    ->native(false)
-                    ->displayFormat('d/m/Y')
-                    ->default(today())
-                    /*
-                     * No se puede fechar un gasto en el futuro. No lo frena la
-                     * base —un CHECK con CURRENT_DATE no es inmutable y
-                     * Postgres no lo admite—, así que la raya se pone acá.
-                     */
-                    ->maxDate(today())
-                    ->helperText('La del comprobante, no la de hoy si son distintas.'),
-
-                Select::make('categoria')
-                    ->label('En qué se gastó')
-                    ->options(CategoriaDeGasto::opciones())
-                    ->required()
-                    ->native(false)
-                    ->searchable()
-                    ->helperText('Es lo que después permite sumar por rubro.'),
-
-                Textarea::make('descripcion')
-                    ->label('Detalle')
-                    ->required()
-                    ->rows(2)
-                    ->maxLength(500)
-                    ->columnSpanFull()
-                    ->helperText('Concreto: «cunetas del bloque H, segunda etapa». Dentro de un año «Materiales — L 48,000» no le dice nada a nadie.'),
-
-                MontoField::make('monto', 'Monto')
-                    // La base exige > 0 (`gastos_monto_positivo_chk`). Acá se
-                    // dice antes, para que no se entere al guardar.
-                    ->rules(['numeric', 'decimal:0,2', 'gt:0']),
-
-                MayusculasField::make('beneficiario')
-                    ->label('A quién se le pagó')
-                    ->maxLength(120)
-                    ->helperText('Opcional: hay gastos sin contraparte con nombre.'),
-
-                Select::make('forma_pago')
-                    ->label('Cómo se pagó')
-                    ->options($this->formasDePago())
-                    ->required()
-                    ->live()
-                    ->native(false)
-                    ->default(FormaDePago::Efectivo->value),
-
-                TextInput::make('referencia')
-                    ->label('Número de referencia')
-                    ->maxLength(60)
-                    ->visible(static fn (Get $get): bool => self::exigeReferencia($get))
-                    ->required(static fn (Get $get): bool => self::exigeReferencia($get))
-                    ->helperText('Es lo único que después permite cruzar esta salida contra el estado de cuenta del banco (R11).'),
-
-                TextInput::make('factura')
-                    ->label('Nº de factura o recibo')
-                    ->maxLength(60)
-                    ->helperText('El del papel que dio el proveedor. No se confunde con la referencia del banco.'),
-
-                /*
-                 * `preserveFilenames` NO: el nombre original trae acentos,
-                 * espacios y a veces el nombre del proveedor. Filament le pone
-                 * un uuid, y el nombre legible se arma al descargar.
-                 */
-                FileUpload::make('archivo')
-                    ->label('Comprobante')
-                    ->disk(Gasto::DISCO)
-                    ->directory('gastos')
-                    ->visibility('private')
-                    ->maxSize(10240)
-                    ->acceptedFileTypes(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
-                    ->columnSpanFull()
-                    ->helperText('La foto de la factura o el PDF, hasta 10 MB. Las fotos se guardan convertidas a WebP: pesan seis veces menos y abren al instante.')
-                    /*
-                     * 🔴 El guardado pasa por `GuardadoDeArchivos`: una foto de
-                     * teléfono entra en 2–5 MB y sale en WebP de 250–400 KB,
-                     * con el lado largo topado en 2,400 px. El PDF pasa
-                     * intacto, y ante cualquier problema —GD sin WebP, imagen
-                     * corrupta— se guarda el original: un comprobante no se
-                     * pierde por optimizarlo.
-                     *
-                     * El PESO no se calcula acá. Lo lee el modelo del disco
-                     * después de convertir, que es el único momento en que el
-                     * número es cierto.
-                     */
-                    /*
-                     * 🔴 LOS NOMBRES `$component` Y `$file` SON UN CONTRATO.
-                     *
-                     * Filament evalúa este closure con `evaluate($callback,
-                     * ['file' => $file])`: busca los parámetros POR NOMBRE en
-                     * ese arreglo y, al que no encuentra, lo pide al
-                     * contenedor. Llamarle `$subido` hace que Filament intente
-                     * construir un `TemporaryUploadedFile` desde cero y
-                     * reviente con `BindingResolutionException:
-                     * Unresolvable dependency [$path]`.
-                     *
-                     * Por eso van en inglés, contra el estilo del resto del
-                     * repo: acá el nombre no es una decisión nuestra.
-                     */
-                    ->saveUploadedFileUsing(static fn (BaseFileUpload $component, TemporaryUploadedFile $file): ?string => resolve(GuardadoDeArchivos::class)->guardar($component, $file)),
-            ]);
+        return $schema->components(GastoForm::componentes($this->proyecto()));
     }
 
     #[Override]
@@ -254,6 +146,19 @@ class GastosRelationManager extends RelationManager
                     ->tooltip(static fn (Gasto $record): string => (string) $record->getAttribute('descripcion'))
                     ->searchable(),
 
+                /*
+                 * A quién se le carga (8-oct-2026). Vacío es «al proyecto»:
+                 * lo pagan todos según su parte. El socio sale con el color
+                 * de advertencia porque ese gasto NO baja la utilidad de los
+                 * demás: se le descuenta solo a él en el Estado mensual.
+                 */
+                TextColumn::make('socio.nombre')
+                    ->label('Se le carga a')
+                    ->badge()
+                    ->color('warning')
+                    ->placeholder('Al proyecto')
+                    ->toggleable(),
+
                 TextColumn::make('beneficiario')
                     ->label('A quién')
                     ->placeholder('—')
@@ -301,7 +206,20 @@ class GastosRelationManager extends RelationManager
 
                 SelectFilter::make('forma_pago')
                     ->label('Forma de pago')
-                    ->options($this->formasDePago()),
+                    ->options(GastoForm::formasDePago()),
+
+                SelectFilter::make('cargo')
+                    ->label('Se le carga a')
+                    ->options(fn (): array => GastoForm::opcionesDelFiltro($this->proyecto()))
+                    ->query(static function (Builder $query, array $data): Builder {
+                        $valor = $data['value'] ?? null;
+
+                        if ($valor === GastoForm::AL_PROYECTO) {
+                            return $query->whereNull('socio_id');
+                        }
+
+                        return is_numeric($valor) ? $query->where('socio_id', (int) $valor) : $query;
+                    }),
 
                 Filter::make('este_mes')
                     ->label('Solo este mes')
@@ -321,8 +239,10 @@ class GastosRelationManager extends RelationManager
                  */
                 CreateAction::make()
                     ->label('Registrar un gasto')
-                    ->modalHeading('Registrar un gasto del proyecto')
-                    ->modalSubmitActionLabel('Registrar')
+                    ->modalIcon(Heroicon::OutlinedBanknotes)
+                    ->modalHeading('Registrar un gasto')
+                    ->modalWidth('2xl')
+                    ->modalSubmitActionLabel('Registrar el gasto')
                     ->using(fn (array $data): Gasto => resolve(RegistroDeGastos::class)->registrar(
                         /*
                          * Se relee y no se castea `getOwnerRecord()`: viene
@@ -352,6 +272,7 @@ class GastosRelationManager extends RelationManager
                         ->download((string) $record->getAttribute('archivo'), $record->nombreDeDescarga())),
 
                 EditAction::make()
+                    ->modalWidth('2xl')
                     ->modalDescription('Todo lo que cambie queda en la bitácora, con tu nombre y la hora.'),
 
                 DeleteAction::make()
@@ -499,27 +420,17 @@ class GastosRelationManager extends RelationManager
     // ─── Interno ──────────────────────────────────────────────────────
 
     /**
-     * @return array<string, string>
+     * El proyecto de la ficha, ya tipado.
+     *
+     * `getOwnerRecord()` viene declarado `Model`; acá siempre es un
+     * `Proyecto`, y si algún día no lo fuera se relee en vez de castear.
      */
-    private function formasDePago(): array
+    private function proyecto(): Proyecto
     {
-        $opciones = [];
+        $dueno = $this->getOwnerRecord();
 
-        foreach (FormaDePago::cases() as $forma) {
-            $opciones[$forma->value] = $forma->etiqueta();
-        }
-
-        return $opciones;
-    }
-
-    /**
-     * R11: en todo lo que no es efectivo la referencia es obligatoria, y el
-     * CHECK `gastos_referencia_segun_forma_chk` no admite lo contrario.
-     */
-    private static function exigeReferencia(Get $get): bool
-    {
-        $forma = FormaDePago::tryFrom(is_string($get('forma_pago')) ? $get('forma_pago') : '');
-
-        return $forma instanceof FormaDePago && $forma->exigeReferencia();
+        return $dueno instanceof Proyecto
+            ? $dueno
+            : Proyecto::query()->whereKey($dueno->getKey())->firstOrFail();
     }
 }
