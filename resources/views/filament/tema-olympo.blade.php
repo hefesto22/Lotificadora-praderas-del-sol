@@ -453,18 +453,95 @@
     }
 
     /*
-       ── 12-bis-b. El riel que baja de renglón (8-oct-2026) ─────────────
+       ── 12-quater. Una tarjeta por opción (8-oct-2026) ────────────────
 
-       «¿A quién se le carga?» lleva una pastilla por socio, con su nombre
-       completo y su parte. Con dos o tres socios no entra en el ancho de un
-       celular, y el `nowrap` de arriba lo sacaba del modal. Esto deja que
-       las pastillas bajen de renglón; el riel y la señal son los mismos.
+       «Me gusta el toggle, pero se ve raro, como si fuese uno solo» —
+       Mauricio, con «¿A quién se le carga?» abierto y dos socios cargados.
+
+       El riel de arriba es para tres palabras cortas. Con nombres completos
+       las pastillas bajaban de renglón DENTRO del mismo fondo gris, y el ojo
+       leía un solo bloque partido en dos, no tres opciones. Acá cada opción es
+       su propia tarjeta, con aire entre una y otra:
+
+         - el nombre arriba, en negrita, y su parte del reparto abajo;
+         - la elegida, con el borde y el tinte del color primario — el que
+           elige cada lotificadora (Ley L0), así que no hay color fijo acá;
+         - el punto del radio se queda: es la señal que todo el mundo ya
+           sabe leer, y deja la tarjeta usable con el teclado.
+
+       `auto-fill` y no `auto-fit`: con una sola opción —un proyecto sin
+       socios— la tarjeta queda de su tamaño, no estirada a todo el ancho.
+
+       Lo usa un `Radio` con `->extraAttributes(['class' => 'olympo-tarjetas'])`:
+       en el `Radio` la clase cae en el contenedor `div.fi-fo-radio`, que es
+       el que se vuelve cuadrícula. El `div.` delante le gana al `fi-inline`
+       de Filament sin depender del orden de las hojas.
     */
-    .olympo-modo-envuelve {
-        flex-wrap: wrap;
-        justify-content: center;
-        max-width: 100%;
+    div.fi-fo-radio.olympo-tarjetas {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+        gap: .625rem;
     }
+
+    .olympo-tarjetas .fi-fo-radio-label {
+        display: flex;
+        align-items: flex-start;
+        gap: .625rem;
+        margin: 0;
+        padding: .75rem .875rem;
+        border: 1px solid rgb(228 230 235);
+        border-radius: .75rem;
+        background: rgb(255 255 255);
+        cursor: pointer;
+        transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+    }
+
+    .olympo-tarjetas .fi-fo-radio-label:hover { border-color: rgb(196 201 210); }
+
+    .olympo-tarjetas .fi-fo-radio-label:has(.fi-radio-input:checked) {
+        border-color: var(--primary-500);
+        background: var(--primary-50);
+        box-shadow: 0 0 0 1px var(--primary-500);
+    }
+
+    .olympo-tarjetas .fi-fo-radio-label:has(.fi-radio-input:focus-visible) {
+        outline: 2px solid var(--primary-500);
+        outline-offset: 2px;
+    }
+
+    .olympo-tarjetas .fi-radio-input { flex-shrink: 0; margin-top: .125rem; }
+
+    .olympo-tarjetas .fi-fo-radio-label-text { display: grid; gap: .1875rem; min-width: 0; }
+
+    .olympo-tarjetas .fi-fo-radio-label-text > p:first-child {
+        font-size: .8125rem;
+        font-weight: 600;
+        line-height: 1.3;
+        color: rgb(24 24 27);
+    }
+
+    .olympo-tarjetas .fi-fo-radio-label-description {
+        font-size: .75rem;
+        line-height: 1.3;
+        color: rgb(107 114 128);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .dark .olympo-tarjetas .fi-fo-radio-label {
+        background: rgba(255, 255, 255, .03);
+        border-color: rgba(255, 255, 255, .10);
+    }
+
+    .dark .olympo-tarjetas .fi-fo-radio-label:hover { border-color: rgba(255, 255, 255, .22); }
+
+    .dark .olympo-tarjetas .fi-fo-radio-label:has(.fi-radio-input:checked) {
+        border-color: var(--primary-400);
+        background: color-mix(in oklab, var(--primary-500) 14%, transparent);
+        box-shadow: 0 0 0 1px var(--primary-400);
+    }
+
+    .dark .olympo-tarjetas .fi-fo-radio-label-text > p:first-child { color: rgb(244 244 245); }
+    .dark .olympo-tarjetas .fi-fo-radio-label-description { color: rgb(148 154 165); }
 
     /*
        ── 12-ter. El renglón de un lote (8-sep-2026) ────────────────────

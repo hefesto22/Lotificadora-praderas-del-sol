@@ -11,6 +11,7 @@ use App\Domain\ValueObjects\Monto;
 use App\Filament\Resources\Proyectos\Schemas\GastoForm;
 use App\Models\Gasto;
 use App\Models\Proyecto;
+use App\Models\Socio;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
@@ -19,7 +20,6 @@ use Filament\Actions\EditAction;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
-use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
@@ -114,56 +114,75 @@ class GastosRelationManager extends RelationManager
              * navegador saca el contenido de su lugar.
              */
             ->description(fn (): HtmlString => $this->resumen())
+            /*
+             * ═══ CINCO COLUMNAS, NO NUEVE (8-OCT-2026) ═══
+             *
+             * «Mejorar un poco más lo de gastos, mejor diseño» — Mauricio,
+             * con la pestaña abierta en producción. Eran nueve columnas en
+             * un ancho de mil pixeles: la tabla se corría de lado, el
+             * detalle quedaba en una tira de cinco renglones y cada fila
+             * medía lo que una tarjeta.
+             *
+             * Ahora cada celda dice dos cosas, una fuerte y una de apoyo:
+             *
+             *   Fecha      — la del comprobante, y debajo el folio.
+             *   Detalle    — lo que se compró, y debajo el rubro con su
+             *                color y a quién se le pagó.
+             *   Se le carga a — el socio o «Al proyecto».
+             *   Monto      — la cifra, y debajo cómo se pagó.
+             *
+             * El comprobante dejó de ser una columna: el clip aparece entre
+             * las acciones solo cuando hay archivo, y el filtro «Sin
+             * comprobante adjunto» sigue para buscar los que faltan.
+             */
             ->columns([
                 TextColumn::make('fecha')
                     ->label('Fecha')
                     ->date('d/m/Y')
-                    ->sortable(),
+                    ->weight('semibold')
+                    ->description(static fn (Gasto $record): string => $record->folio())
+                    /*
+                     * El folio ya no tiene columna, pero se sigue buscando:
+                     * «G-000012», «000012» y «12» son el mismo gasto. Se
+                     * quedan los dígitos y se compara contra el número.
+                     *
+                     * Sin dígitos —alguien buscando «cemento»— no agrega
+                     * condición: Laravel descarta el grupo vacío y la
+                     * búsqueda sigue por las demás columnas. Nueve dígitos
+                     * alcanzan para cualquier folio y no desbordan un integer.
+                     */
+                    ->searchable(query: static function (Builder $query, string $search): Builder {
+                        $digitos = preg_replace('/\D+/', '', $search) ?? '';
 
-                TextColumn::make('numero')
-                    ->label('Nº')
-                    ->badge()
-                    ->color('gray')
-                    ->formatStateUsing(static fn (Gasto $record): string => $record->folio())
-                    ->searchable()
-                    ->sortable(),
-
-                TextColumn::make('categoria')
-                    ->label('Categoría')
-                    ->badge()
-                    ->color(static fn (Gasto $record): string => $record->getAttribute('categoria') instanceof CategoriaDeGasto
-                        ? $record->getAttribute('categoria')->color()
-                        : 'gray')
-                    ->formatStateUsing(static fn (Gasto $record): string => $record->getAttribute('categoria') instanceof CategoriaDeGasto
-                        ? $record->getAttribute('categoria')->etiqueta()
-                        : '—')
+                        return $digitos === '' || strlen($digitos) > 9
+                            ? $query
+                            : $query->where('gastos.numero', (int) $digitos);
+                    })
                     ->sortable(),
 
                 TextColumn::make('descripcion')
                     ->label('Detalle')
                     ->wrap()
-                    ->limit(70)
+                    ->lineClamp(2)
                     ->tooltip(static fn (Gasto $record): string => (string) $record->getAttribute('descripcion'))
-                    ->searchable(),
+                    ->description(static fn (Gasto $record): HtmlString => self::rubroYBeneficiario($record))
+                    // Busca también por el beneficiario, que ya no tiene
+                    // columna propia: vive en la línea de abajo.
+                    ->searchable(['descripcion', 'beneficiario']),
 
                 /*
                  * A quién se le carga (8-oct-2026). Vacío es «al proyecto»:
-                 * lo pagan todos según su parte. El socio sale con el color
-                 * de advertencia porque ese gasto NO baja la utilidad de los
-                 * demás: se le descuenta solo a él en el Estado mensual.
+                 * lo pagan todos según su parte, y va en gris porque es lo
+                 * de siempre. El socio va en azul con su ícono: ese gasto NO
+                 * baja la utilidad de los demás, se le descuenta solo a él en
+                 * el Estado mensual, y tiene que saltar a la vista sin gritar.
                  */
                 TextColumn::make('socio.nombre')
                     ->label('Se le carga a')
                     ->badge()
-                    ->color('warning')
-                    ->placeholder('Al proyecto')
-                    ->toggleable(),
-
-                TextColumn::make('beneficiario')
-                    ->label('A quién')
-                    ->placeholder('—')
-                    ->toggleable()
-                    ->searchable(),
+                    ->default('Al proyecto')
+                    ->color(static fn (Gasto $record): string => $record->esDeUnSocio() ? 'info' : 'gray')
+                    ->icon(static fn (Gasto $record): Heroicon => $record->esDeUnSocio() ? Heroicon::OutlinedUser : Heroicon::OutlinedBuildingOffice2),
 
                 /*
                  * ⚠️ Ni `->money()` ni `->numeric()`: los dos castean a float
@@ -175,28 +194,10 @@ class GastosRelationManager extends RelationManager
                     ->alignEnd()
                     ->weight('bold')
                     ->formatStateUsing(static fn (Gasto $record): string => $record->monto()->formateado())
-                    ->sortable(),
-
-                TextColumn::make('forma_pago')
-                    ->label('Forma')
-                    ->badge()
-                    ->color(static fn (Gasto $record): string => $record->getAttribute('forma_pago') instanceof FormaDePago
-                        ? $record->getAttribute('forma_pago')->color()
-                        : 'gray')
-                    ->formatStateUsing(static fn (Gasto $record): string => $record->getAttribute('forma_pago') instanceof FormaDePago
+                    ->description(static fn (Gasto $record): string => $record->getAttribute('forma_pago') instanceof FormaDePago
                         ? $record->getAttribute('forma_pago')->etiqueta()
-                        : '—')
-                    ->toggleable(),
-
-                IconColumn::make('archivo')
-                    ->label('Comprobante')
-                    ->alignCenter()
-                    ->boolean()
-                    ->trueIcon('heroicon-o-paper-clip')
-                    ->falseIcon('heroicon-o-minus-small')
-                    ->trueColor('success')
-                    ->falseColor('gray')
-                    ->state(static fn (Gasto $record): bool => $record->tieneComprobante()),
+                        : '')
+                    ->sortable(),
             ])
             ->filters([
                 SelectFilter::make('categoria')
@@ -262,9 +263,17 @@ class GastosRelationManager extends RelationManager
                  * política antes de abrir el archivo. Una factura trae el
                  * nombre del proveedor, su RTN y montos que no son públicos.
                  */
+                /*
+                 * Las tres como ÍCONO con su globito (8-oct-2026): con texto
+                 * se llevaban un cuarto del ancho de la tabla. El clip solo
+                 * aparece si hay comprobante, así que de paso dice cuáles lo
+                 * tienen sin necesidad de una columna.
+                 */
                 Action::make('comprobante')
                     ->label('Comprobante')
-                    ->icon(Heroicon::OutlinedArrowDownTray)
+                    ->tooltip('Descargar el comprobante')
+                    ->iconButton()
+                    ->icon(Heroicon::OutlinedPaperClip)
                     ->color('gray')
                     ->visible(static fn (Gasto $record): bool => $record->tieneComprobante()
                         && auth()->user()?->can('view', $record) === true)
@@ -272,10 +281,14 @@ class GastosRelationManager extends RelationManager
                         ->download((string) $record->getAttribute('archivo'), $record->nombreDeDescarga())),
 
                 EditAction::make()
+                    ->tooltip('Editar')
+                    ->iconButton()
                     ->modalWidth('2xl')
                     ->modalDescription('Todo lo que cambie queda en la bitácora, con tu nombre y la hora.'),
 
                 DeleteAction::make()
+                    ->tooltip('Borrar')
+                    ->iconButton()
                     ->modalDescription('El gasto desaparece del total del proyecto. Si lo que está mal es el monto, es mejor editarlo: así queda el rastro de la corrección.')
                     ->after(static function (Gasto $record): void {
                         // Sin esto el comprobante queda huérfano en el disco:
@@ -296,18 +309,32 @@ class GastosRelationManager extends RelationManager
     // ─── El cuadro de totales ─────────────────────────────────────────
 
     /**
-     * Cuánto se lleva gastado, repartido por categoría.
+     * Cuánto se lleva gastado: el total, quién lo paga y en qué rubros.
+     *
+     * ═══ COMO SE VE (8-OCT-2026) ═══
+     *
+     * Era un párrafo —«Total gastado L. 485,125.00 en 6 movimientos. Suma lo
+     * que se está viendo…»— con las pastillas de los rubros debajo. Ahora son
+     * cifras en tarjetas, con el rótulo en versalitas como en el Escritorio:
+     *
+     *   TOTAL GASTADO · DEL PROYECTO · CARGADO A SOCIOS
+     *
+     * Las dos últimas salen SOLO si en lo que se está viendo hay algún gasto
+     * cargado a un socio: sin cargos, «del proyecto» sería el total repetido.
+     * Y «del proyecto» es lo que entra en la utilidad que se reparte; lo
+     * cargado se le descuenta a cada socio en el Estado mensual.
      *
      * Sale de la consulta FILTRADA, así que contesta por lo que se está
      * mirando. Las clases CSS viven en el partial `filament.estilos-olympo`
      * —el CSS de Filament está precompilado y no ve las clases que arma un
-     * `HtmlString` del lado de PHP (§9.A7)—.
+     * `HtmlString` del lado de PHP (§9.A7)—, y todo es `span`: esto se
+     * imprime DENTRO del `<p>` de la descripción de la tabla.
      */
     private function resumen(): HtmlString
     {
-        $renglones = $this->totalesPorCategoria();
+        $rubros = $this->totalesPorCategoria();
 
-        if ($renglones === []) {
+        if ($rubros === []) {
             // `span` y no `p`: esto se imprime DENTRO de un parrafo.
             return new HtmlString('<span class="olympo-vacio">Todavía no hay nada que sumar.</span>');
         }
@@ -315,31 +342,138 @@ class GastosRelationManager extends RelationManager
         $total = Monto::cero();
         $movimientos = 0;
 
-        foreach ($renglones as $renglon) {
-            $total = $total->sumar($renglon['total']);
-            $movimientos += $renglon['cuantos'];
+        foreach ($rubros as $rubro) {
+            $total = $total->sumar($rubro['total']);
+            $movimientos += $rubro['cuantos'];
+        }
+
+        $cifras = $this->cifra('Total gastado', $total, sprintf('%d movimiento%s', $movimientos, $movimientos === 1 ? '' : 's'));
+
+        $cargos = $this->cargadoASocios();
+
+        if ($cargos !== []) {
+            $cargado = Monto::cero();
+            $quienes = '';
+
+            foreach ($cargos as $cargo) {
+                $cargado = $cargado->sumar($cargo['total']);
+                $quienes .= sprintf(
+                    '<span class="olympo-gastos-nota">%s · %s</span>',
+                    e($cargo['nombre']),
+                    e($cargo['total']->formateado()),
+                );
+            }
+
+            $cifras .= $this->cifra('Del proyecto', $total->restar($cargado), 'Lo pagan todos, según su parte');
+
+            $cifras .= sprintf(
+                '<span class="olympo-gastos-cifra socios"><span class="olympo-gastos-rotulo">Cargado a socios</span>'
+                .'<span class="olympo-gastos-monto">%s</span>%s</span>',
+                e($cargado->formateado()),
+                $quienes,
+            );
         }
 
         $pastillas = '';
 
-        foreach ($renglones as $renglon) {
+        foreach ($rubros as $rubro) {
             $pastillas .= sprintf(
-                '<span class="olympo-pill" style="margin: 0 .375rem .375rem 0;">%s — %s · %s</span>',
-                e($renglon['categoria']->etiqueta()),
-                e($renglon['total']->formateado()),
-                e($this->porcentaje($renglon['total'], $total)),
+                '<span class="olympo-gastos-rubro">%s%s <strong>%s</strong> <span class="olympo-gastos-tenue">%s</span></span>',
+                self::punto($rubro['categoria']->color()),
+                e($rubro['categoria']->etiqueta()),
+                e($rubro['total']->formateado()),
+                e($this->porcentaje($rubro['total'], $total)),
             );
         }
 
         return new HtmlString(
-            '<span style="display: block; margin-bottom: .5rem;">'
-            .'<strong style="font-size: 1rem; font-variant-numeric: tabular-nums;">Total gastado '
-            .e($total->formateado()).'</strong> '
-            .'<span>en '.e((string) $movimientos).' movimiento'.($movimientos === 1 ? '' : 's')
-            .'. Suma lo que se está viendo: si hay un filtro puesto, el total es el del filtro.</span>'
+            '<span class="olympo-gastos">'
+            .'<span class="olympo-gastos-cifras">'.$cifras.'</span>'
+            .'<span class="olympo-gastos-rubros">'.$pastillas.'</span>'
+            .'<span class="olympo-gastos-pie">Suma lo que se está viendo: con un filtro puesto, las cifras son las del filtro.</span>'
             .'</span>'
-            .$pastillas
         );
+    }
+
+    /**
+     * Una tarjeta del resumen: el rótulo, la cifra y una línea de apoyo.
+     */
+    private function cifra(string $rotulo, Monto $monto, string $nota): string
+    {
+        return sprintf(
+            '<span class="olympo-gastos-cifra"><span class="olympo-gastos-rotulo">%s</span>'
+            .'<span class="olympo-gastos-monto">%s</span><span class="olympo-gastos-nota">%s</span></span>',
+            e($rotulo),
+            e($monto->formateado()),
+            e($nota),
+        );
+    }
+
+    /**
+     * Lo cargado a cada socio en lo que se está viendo, de mayor a menor.
+     *
+     * Los nombres se buscan con `withTrashed()`: lo que se le cargó a un socio
+     * que ya salió sigue siendo suyo, y es justo el renglón que alguien va a
+     * preguntar.
+     *
+     * @return list<array{nombre: string, total: Monto}>
+     */
+    private function cargadoASocios(): array
+    {
+        $consulta = $this->getFilteredTableQuery();
+
+        if (! $consulta instanceof Builder) {
+            return [];
+        }
+
+        // Las mismas dos trampas que `totalesPorCategoria()`: `reorder()`
+        // antes del `GROUP BY`, y la suma en Postgres, nunca en float.
+        $filas = $consulta->clone()
+            ->reorder()
+            ->toBase()
+            ->select([])
+            ->selectRaw('gastos.socio_id AS socio_id, COALESCE(SUM(gastos.monto), 0) AS total')
+            ->whereNotNull('gastos.socio_id')
+            ->groupBy('gastos.socio_id')
+            ->orderByDesc('total')
+            ->get();
+
+        $totales = [];
+
+        foreach ($filas as $fila) {
+            $datos = (array) $fila;
+
+            $id = $datos['socio_id'] ?? null;
+            $total = $datos['total'] ?? '0';
+
+            if (! is_int($id) && (! is_string($id) || ! ctype_digit($id))) {
+                continue;
+            }
+
+            $totales[(int) $id] = new Monto(is_string($total) || is_int($total) ? $total : '0');
+        }
+
+        if ($totales === []) {
+            return [];
+        }
+
+        $nombres = Socio::query()
+            ->withTrashed()
+            ->whereKey(array_keys($totales))
+            ->pluck('nombre', 'id');
+
+        $cargos = [];
+
+        foreach ($totales as $id => $total) {
+            $nombre = $nombres->get($id);
+
+            $cargos[] = [
+                'nombre' => is_string($nombre) ? $nombre : 'Socio',
+                'total'  => $total,
+            ];
+        }
+
+        return $cargos;
     }
 
     /**
@@ -415,6 +549,47 @@ class GastosRelationManager extends RelationManager
         }
 
         return $parte->multiplicarPor(100)->dividirPor($total->valor)->redondeado(1).' %';
+    }
+
+    // ─── Las celdas de la tabla ───────────────────────────────────────
+
+    /**
+     * La línea de apoyo del detalle: el rubro con su color, y a quién se le
+     * pagó si se anotó. «● Comisiones de venta · DAGOBERTO AGUILAR».
+     */
+    private static function rubroYBeneficiario(Gasto $gasto): HtmlString
+    {
+        $partes = [];
+
+        $categoria = $gasto->getAttribute('categoria');
+
+        if ($categoria instanceof CategoriaDeGasto) {
+            $partes[] = self::punto($categoria->color()).e($categoria->etiqueta());
+        }
+
+        $beneficiario = $gasto->getAttribute('beneficiario');
+
+        if (is_string($beneficiario) && $beneficiario !== '') {
+            $partes[] = e($beneficiario);
+        }
+
+        return new HtmlString(sprintf(
+            '<span class="olympo-gastos-linea">%s</span>',
+            implode('<span class="olympo-gastos-tenue"> · </span>', $partes),
+        ));
+    }
+
+    /**
+     * El puntito de color del rubro: el mismo color que tenía su badge.
+     *
+     * El nombre del color termina dentro de un `style`, así que solo pasan los
+     * seis del panel; cualquier otra cosa cae en gris.
+     */
+    private static function punto(string $color): string
+    {
+        $color = in_array($color, ['primary', 'gray', 'info', 'success', 'warning', 'danger'], true) ? $color : 'gray';
+
+        return sprintf('<span class="olympo-gastos-punto" style="background: var(--%s-500);"></span>', $color);
     }
 
     // ─── Interno ──────────────────────────────────────────────────────

@@ -45,6 +45,13 @@ escondía; ahora ofrece solo «Al proyecto» y enlaza a Editar → pestaña «So
 (`?tab=socios::data::tab`). Para ver las pastillas de los socios hay que
 cargarlos primero en esa pestaña.
 
+**Tercera vuelta (8/9-oct, después de producción):** «me gusta el toggle pero se
+ve raro, como si fuese uno solo» → `Radio` con una tarjeta por opción
+(`.olympo-tarjetas` en `tema-olympo`), dentro de su sección. Y «mejor diseño» en
+la pestaña Gastos → cuatro columnas en vez de nueve, acciones como íconos, y el
+resumen en tarjetas (total / del proyecto / cargado a socios) con
+`.olympo-gastos-*` en `estilos-olympo`.
+
 ⚠️ `RepartoDelMes` (app/Domain/Socios) no se usa en ninguna pantalla y NO se
 tocó: sigue restando todos los gastos. Si algún día vuelve a usarse, tiene que
 aprender la regla de arriba o borrarse.

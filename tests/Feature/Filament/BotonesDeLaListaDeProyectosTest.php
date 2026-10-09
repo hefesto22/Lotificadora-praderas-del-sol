@@ -109,12 +109,18 @@ describe('A quién se le carga, desde la pestaña Gastos', function (): void {
         expect(Gasto::query()->sole()->getAttribute('socio_id'))->toBe($this->elder->getKey());
     });
 
+    // Una tarjeta por opción: el nombre arriba, su parte del reparto abajo.
     test('las opciones son el proyecto y cada socio con su parte', function (): void {
         expect(array_values(GastoForm::aQuienSeLeCarga($this->proyecto)))->toBe([
             'Al proyecto',
-            'ELDER DIONEL · 66.67 %',
-            'EDWIN ADONAY · 33.33 %',
-        ]);
+            'ELDER DIONEL',
+            'EDWIN ADONAY',
+        ])
+            ->and(array_values(GastoForm::comoSeReparte($this->proyecto)))->toBe([
+                'Lo pagan todos, según su parte',
+                '66.67 % del reparto',
+                '33.33 % del reparto',
+            ]);
     });
 
     /*
@@ -150,7 +156,8 @@ describe('A quién se le carga, desde la pestaña Gastos', function (): void {
 
         $opciones = GastoForm::aQuienSeLeCarga($this->proyecto, $gasto);
 
-        expect($opciones[(int) $this->elder->getKey()] ?? null)->toBe('ELDER DIONEL (ya no participa)')
+        expect($opciones[(int) $this->elder->getKey()] ?? null)->toBe('ELDER DIONEL')
+            ->and(GastoForm::comoSeReparte($this->proyecto, $gasto)[(int) $this->elder->getKey()] ?? null)->toBe('Ya no participa del reparto')
             // Para un gasto NUEVO, el que salió ya no se ofrece.
             ->and(array_key_exists((int) $this->elder->getKey(), GastoForm::aQuienSeLeCarga($this->proyecto)))->toBeFalse();
     });

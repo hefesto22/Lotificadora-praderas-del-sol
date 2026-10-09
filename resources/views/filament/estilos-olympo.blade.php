@@ -155,6 +155,94 @@
     .dark .olympo-nota { color: rgb(161 161 170); }
     .olympo-vacio { font-size: .875rem; color: rgb(113 113 122); }
     .dark .olympo-vacio { color: rgb(161 161 170); }
+
+    /*
+       ── La pestaña «Gastos» del proyecto (8-oct-2026) ──
+
+       El resumen de arriba son cifras en tarjetas —total, del proyecto,
+       cargado a socios— y una fila de rubros con su puntito de color. Todo
+       son `span`: se imprime DENTRO del `<p>` de la descripción de la tabla,
+       y un `div` ahí adentro cierra el párrafo y el navegador saca el
+       contenido de su lugar. El `display: block` / `grid` lo da el CSS.
+
+       `.olympo-gastos-punto` y `.olympo-gastos-linea` también los usa la
+       línea de apoyo de la columna «Detalle».
+    */
+    .olympo-gastos { display: block; margin-top: .5rem; }
+
+    .olympo-gastos-cifras {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+        gap: .75rem;
+        margin-bottom: .875rem;
+    }
+    .olympo-gastos-cifra {
+        display: block;
+        padding: .75rem 1rem;
+        border: 1px solid rgb(228 230 235);
+        border-radius: .75rem;
+        background: rgb(250 250 251);
+    }
+    .olympo-gastos-cifra.socios {
+        border-color: rgba(59, 130, 246, .28);
+        background: rgba(239, 246, 255, .7);
+    }
+    .olympo-gastos-rotulo {
+        display: block;
+        font-size: .6875rem;
+        font-weight: 600;
+        letter-spacing: .055em;
+        text-transform: uppercase;
+        color: rgb(107 114 128);
+    }
+    .olympo-gastos-monto {
+        display: block;
+        margin-top: .25rem;
+        font-size: 1.25rem;
+        font-weight: 700;
+        line-height: 1.2;
+        color: rgb(9 9 11);
+        font-variant-numeric: tabular-nums;
+    }
+    .olympo-gastos-nota {
+        display: block;
+        margin-top: .1875rem;
+        font-size: .75rem;
+        color: rgb(107 114 128);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .olympo-gastos-rubros { display: flex; flex-wrap: wrap; gap: .375rem; }
+    .olympo-gastos-rubro {
+        display: inline-flex;
+        align-items: center;
+        gap: .375rem;
+        padding: .25rem .625rem;
+        border: 1px solid rgb(228 230 235);
+        border-radius: 9999px;
+        background: rgb(255 255 255);
+        font-size: .75rem;
+        color: rgb(63 63 70);
+        white-space: nowrap;
+    }
+    .olympo-gastos-rubro strong { font-weight: 600; color: rgb(9 9 11); font-variant-numeric: tabular-nums; }
+
+    .olympo-gastos-punto {
+        display: inline-block;
+        width: .5rem;
+        height: .5rem;
+        border-radius: 9999px;
+        flex-shrink: 0;
+    }
+    .olympo-gastos-linea { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .25rem .375rem; }
+    .olympo-gastos-tenue { color: rgb(161 161 170); }
+    .olympo-gastos-pie { display: block; margin-top: .625rem; font-size: .75rem; color: rgb(161 161 170); }
+
+    .dark .olympo-gastos-cifra { border-color: rgba(255, 255, 255, .10); background: rgba(255, 255, 255, .03); }
+    .dark .olympo-gastos-cifra.socios { border-color: rgba(96, 165, 250, .35); background: rgba(59, 130, 246, .10); }
+    .dark .olympo-gastos-rotulo, .dark .olympo-gastos-nota { color: rgb(148 154 165); }
+    .dark .olympo-gastos-monto, .dark .olympo-gastos-rubro strong { color: rgb(244 244 245); }
+    .dark .olympo-gastos-rubro { border-color: rgba(255, 255, 255, .10); background: rgba(255, 255, 255, .03); color: rgb(212 212 216); }
 </style>
 
 {{-- ═══ IMPRIMIR SIN ABRIR UNA PESTAÑA ═══
