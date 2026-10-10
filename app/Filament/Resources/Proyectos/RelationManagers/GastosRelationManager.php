@@ -128,7 +128,7 @@ class GastosRelationManager extends RelationManager
              *   Fecha      — la del comprobante, y debajo el folio.
              *   Detalle    — lo que se compró, y debajo el rubro con su
              *                color y a quién se le pagó.
-             *   Se le carga a — el socio o «Al proyecto».
+             *   Lo pagó    — la caja del proyecto o el socio que lo puso.
              *   Monto      — la cifra, y debajo cómo se pagó.
              *
              * El comprobante dejó de ser una columna: el clip aparece entre
@@ -171,18 +171,18 @@ class GastosRelationManager extends RelationManager
                     ->searchable(['descripcion', 'beneficiario']),
 
                 /*
-                 * A quién se le carga (8-oct-2026). Vacío es «al proyecto»:
-                 * lo pagan todos según su parte, y va en gris porque es lo
-                 * de siempre. El socio va en azul con su ícono: ese gasto NO
-                 * baja la utilidad de los demás, se le descuenta solo a él en
-                 * el Estado mensual, y tiene que saltar a la vista sin gritar.
+                 * Quién lo pagó (8-oct, corregido el 10-oct-2026). Vacío es
+                 * la caja del proyecto, y va en gris porque es lo de siempre.
+                 * El socio va en azul con su ícono: lo puso de su bolsa, y en
+                 * el Estado mensual se le devuelve. Tiene que saltar a la
+                 * vista sin gritar.
                  */
                 TextColumn::make('socio.nombre')
-                    ->label('Se le carga a')
+                    ->label('Lo pagó')
                     ->badge()
-                    ->default('Al proyecto')
-                    ->color(static fn (Gasto $record): string => $record->esDeUnSocio() ? 'info' : 'gray')
-                    ->icon(static fn (Gasto $record): Heroicon => $record->esDeUnSocio() ? Heroicon::OutlinedUser : Heroicon::OutlinedBuildingOffice2),
+                    ->default('Caja del proyecto')
+                    ->color(static fn (Gasto $record): string => $record->loPagoUnSocio() ? 'info' : 'gray')
+                    ->icon(static fn (Gasto $record): Heroicon => $record->loPagoUnSocio() ? Heroicon::OutlinedUser : Heroicon::OutlinedBuildingOffice2),
 
                 /*
                  * ⚠️ Ni `->money()` ni `->numeric()`: los dos castean a float
@@ -210,12 +210,12 @@ class GastosRelationManager extends RelationManager
                     ->options(GastoForm::formasDePago()),
 
                 SelectFilter::make('cargo')
-                    ->label('Se le carga a')
+                    ->label('Lo pagó')
                     ->options(fn (): array => GastoForm::opcionesDelFiltro($this->proyecto()))
                     ->query(static function (Builder $query, array $data): Builder {
                         $valor = $data['value'] ?? null;
 
-                        if ($valor === GastoForm::AL_PROYECTO) {
+                        if ($valor === GastoForm::DE_LA_CAJA) {
                             return $query->whereNull('socio_id');
                         }
 
@@ -317,12 +317,12 @@ class GastosRelationManager extends RelationManager
      * que se está viendo…»— con las pastillas de los rubros debajo. Ahora son
      * cifras en tarjetas, con el rótulo en versalitas como en el Escritorio:
      *
-     *   TOTAL GASTADO · DEL PROYECTO · CARGADO A SOCIOS
+     *   TOTAL GASTADO · PAGADO CON LA CAJA · PAGADO POR SOCIOS
      *
      * Las dos últimas salen SOLO si en lo que se está viendo hay algún gasto
-     * cargado a un socio: sin cargos, «del proyecto» sería el total repetido.
-     * Y «del proyecto» es lo que entra en la utilidad que se reparte; lo
-     * cargado se le descuenta a cada socio en el Estado mensual.
+     * que un socio pagó de su bolsa: sin eso, «pagado con la caja» sería el
+     * total repetido. Todo es gasto del proyecto (10-oct-2026); lo que pagó un
+     * socio se le devuelve en el Estado mensual.
      *
      * Sale de la consulta FILTRADA, así que contesta por lo que se está
      * mirando. Las clases CSS viven en el partial `filament.estilos-olympo`
@@ -349,27 +349,28 @@ class GastosRelationManager extends RelationManager
 
         $cifras = $this->cifra('Total gastado', $total, sprintf('%d movimiento%s', $movimientos, $movimientos === 1 ? '' : 's'));
 
-        $cargos = $this->cargadoASocios();
+        $porSocio = $this->pagadoPorSocios();
 
-        if ($cargos !== []) {
-            $cargado = Monto::cero();
+        if ($porSocio !== []) {
+            $deSocios = Monto::cero();
             $quienes = '';
 
-            foreach ($cargos as $cargo) {
-                $cargado = $cargado->sumar($cargo['total']);
+            foreach ($porSocio as $puso) {
+                $deSocios = $deSocios->sumar($puso['total']);
                 $quienes .= sprintf(
                     '<span class="olympo-gastos-nota">%s · %s</span>',
-                    e($cargo['nombre']),
-                    e($cargo['total']->formateado()),
+                    e($puso['nombre']),
+                    e($puso['total']->formateado()),
                 );
             }
 
-            $cifras .= $this->cifra('Del proyecto', $total->restar($cargado), 'Lo pagan todos, según su parte');
+            $cifras .= $this->cifra('Pagado con la caja', $total->restar($deSocios), 'Salió de lo cobrado');
 
             $cifras .= sprintf(
-                '<span class="olympo-gastos-cifra socios"><span class="olympo-gastos-rotulo">Cargado a socios</span>'
-                .'<span class="olympo-gastos-monto">%s</span>%s</span>',
-                e($cargado->formateado()),
+                '<span class="olympo-gastos-cifra socios"><span class="olympo-gastos-rotulo">Pagado por socios</span>'
+                .'<span class="olympo-gastos-monto">%s</span>%s'
+                .'<span class="olympo-gastos-nota">Se les devuelve en el Estado mensual</span></span>',
+                e($deSocios->formateado()),
                 $quienes,
             );
         }
@@ -410,15 +411,16 @@ class GastosRelationManager extends RelationManager
     }
 
     /**
-     * Lo cargado a cada socio en lo que se está viendo, de mayor a menor.
+     * Lo que pagó cada socio de su bolsa en lo que se está viendo, de mayor a
+     * menor.
      *
-     * Los nombres se buscan con `withTrashed()`: lo que se le cargó a un socio
-     * que ya salió sigue siendo suyo, y es justo el renglón que alguien va a
+     * Los nombres se buscan con `withTrashed()`: lo que puso un socio que ya
+     * salió sigue siendo suyo, y es justo el renglón que alguien va a
      * preguntar.
      *
      * @return list<array{nombre: string, total: Monto}>
      */
-    private function cargadoASocios(): array
+    private function pagadoPorSocios(): array
     {
         $consulta = $this->getFilteredTableQuery();
 
@@ -462,18 +464,18 @@ class GastosRelationManager extends RelationManager
             ->whereKey(array_keys($totales))
             ->pluck('nombre', 'id');
 
-        $cargos = [];
+        $lista = [];
 
         foreach ($totales as $id => $total) {
             $nombre = $nombres->get($id);
 
-            $cargos[] = [
+            $lista[] = [
                 'nombre' => is_string($nombre) ? $nombre : 'Socio',
                 'total'  => $total,
             ];
         }
 
-        return $cargos;
+        return $lista;
     }
 
     /**

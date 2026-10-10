@@ -1,11 +1,43 @@
-# Continuar acá — 8-oct-2026
+# Continuar acá — 10-oct-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
 
+## 10-oct — 🔴 El gasto de un socio es A SU FAVOR, no en su contra
+
+**EN LOCAL** — falta la puerta, commitear (con el `git mv` del test) y desplegar.
+
+Lo del 8-oct (abajo) se construyó al revés. Mauricio, ya en producción: «los
+gastos que se cargan a x persona, es dinero que ellos ponen de su bolsa al
+proyecto, ese dinero es a favor de ellos». Eligió **devolvérselo en el reparto
+del mes**. La regla que manda ahora:
+
+- `gastos.socio_id` = **quién pagó** (NULL = la caja del proyecto). No hubo
+  migración: la columna y la FK quedan igual, cambió lo que significan.
+- **Todo gasto es costo del proyecto**: entra en los egresos, baja la utilidad
+  y la tabla del año, y cuenta como invertido en el Escritorio.
+- Al socio que lo pagó **se le devuelve encima de lo suyo**
+  (`ParteDeUnSocio::$puso`). Ejemplo 60/40: cobrados 100,000, caja pagó
+  20,000, Elder puso 10,000 → utilidad 70,000 → Elder 42,000 + 10,000 =
+  52,000, Edwin 28,000; suman 80,000 = la caja.
+- Si la caja del mes no alcanza para devolverlo, lo que falta lo **cubren
+  todos según su parte** (`ParteDeUnSocio::$cubre`) y el que no puso «queda
+  debiendo». Solo se cubre la parte de la pérdida que viene de lo puesto; el
+  rojo que la caja traía sola no se reparte (mes a mes, sin acumulado).
+- El **corte de caja** ya no resta lo que pagó un socio: no salió de la gaveta
+  (`Gasto::pagadosConCaja()`).
+- Renombrados: scopes `pagadosConCaja()` / `pagadosPorUnSocio()`,
+  `Gasto::loPagoUnSocio()`, factory `pagadoPor()`, `GastoForm::DE_LA_CAJA`
+  (valor `caja`), `quienLoPago()`, `detalleDeCadaUno()`. En pantalla:
+  «¿Quién lo pagó?», columna «Lo pagó», resumen «Pagado con la caja / Pagado
+  por socios». El test pasa a `GastoPagadoPorUnSocioTest`.
+- Los 6 gastos de producción marcados a ELDER pasan a leerse como «los pagó
+  Elder de su bolsa»: es lo que el cliente quiso decir al marcarlos.
+
 ## 8-oct — Gastos más rápidos, compartir el plano, y a qué socio se le carga un gasto
 
-**EN LOCAL** — falta `migrate`, la puerta, mirarlo en el navegador y commitear.
+**EN PRODUCCIÓN** (4d80a14 y 7495ce9). ⚠️ La regla de plata de esta sección
+quedó corregida el 10-oct, arriba.
 
 **El pedido del cliente** (por Mauricio):
 

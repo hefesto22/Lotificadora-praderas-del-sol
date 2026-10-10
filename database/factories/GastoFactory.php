@@ -78,10 +78,10 @@ class GastoFactory extends Factory
     }
 
     /**
-     * Cargado a un socio: lo paga solo él. El proyecto va con el del socio,
-     * porque la FK compuesta no admite otro.
+     * Lo pagó un socio de su bolsa. El proyecto va con el del socio, porque la
+     * FK compuesta no admite otro.
      */
-    public function cargadoA(Socio $socio): static
+    public function pagadoPor(Socio $socio): static
     {
         return $this->state(fn (array $atributos): array => [
             'proyecto_id' => $socio->getAttribute('proyecto_id'),

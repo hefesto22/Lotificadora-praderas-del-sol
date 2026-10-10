@@ -368,37 +368,35 @@
         </tbody>
     </table>
 
-    {{-- Lo cargado a un socio NO es egreso del proyecto: no baja la utilidad
-         de los demás (8-oct-2026). Va aparte para que la hoja siga cuadrando
-         contra la pestaña Gastos, y en el reparto se le descuenta a cada uno.
-         Sale aunque el mes cierre con pérdida: ahí el reparto no se imprime
-         y esta tabla es el único lugar donde se ve. --}}
-    @if ($cierre->hayGastosCargados())
+    {{-- Lo que un socio pagó de su bolsa (10-oct-2026). YA está en los
+         egresos de arriba —es costo del proyecto—; esta tabla dice quién lo
+         puso, porque no salió de la caja y en el reparto se le devuelve. --}}
+    @if ($cierre->hayGastosDeSocios())
         <table>
             <thead>
                 <tr>
-                    <th>Gastos cargados a un socio</th>
+                    <th>Pagado por socios, de su bolsa</th>
                     <th class="cifra">Monto</th>
                 </tr>
             </thead>
             <tbody>
-                @foreach ($cierre->cargadoASocios as $cargo)
+                @foreach ($cierre->puestoPorSocios as $puesto)
                     <tr class="renglon">
-                        <td class="rotulo">{{ $cargo['nombre'] }}</td>
-                        <td>{{ $cargo['monto']->formateado() }}</td>
+                        <td class="rotulo">{{ $puesto['nombre'] }}</td>
+                        <td>{{ $puesto['monto']->formateado() }}</td>
                     </tr>
                 @endforeach
 
                 <tr class="subtotal">
-                    <td>Total cargado a socios</td>
-                    <td>{{ $cierre->cargadoDelMes->formateado() }}</td>
+                    <td>Total pagado por socios</td>
+                    <td>{{ $cierre->puestoPorSociosDelMes->formateado() }}</td>
                 </tr>
             </tbody>
         </table>
 
         <p class="vacio-nota">
-            No son egresos del proyecto: no bajan la utilidad que se reparte. A cada socio se le
-            descuentan de lo que le toca en el mes, igual que lo que ya se le entregó.
+            Ya están en los egresos de arriba. No salieron de la caja: a cada socio se le devuelve
+            lo que puso, encima de lo que le toca en el reparto.
         </p>
     @endif
 
@@ -411,7 +409,10 @@
             Este proyecto todavía no tiene socios cargados. Se agregan en el proyecto, pestaña
             «Socios», con el porcentaje de cada uno.
         </p>
-    @elseif (! $cierre->perdidaDelMes->esCero())
+    {{-- Con pérdida y sin nada que devolverle a nadie, no hay reparto. Con
+         pérdida y un socio que puso de su bolsa, SÍ: la caja se le devuelve
+         a él y lo que no alcanza lo cubren todos según su parte. --}}
+    @elseif (! $cierre->perdidaDelMes->esCero() && $cierre->puestoEnElReparto()->esCero())
         <p class="vacio-nota">El mes cerró con pérdida: no hay utilidad que repartir.</p>
     @else
         <table class="reparto">
@@ -420,10 +421,13 @@
                     <th>Socio</th>
                     <th>Parte</th>
                     <th>Le toca</th>
-                    <th>Ya se le entregó</th>
-                    @if ($cierre->hayGastosCargados())
-                        <th>Gastos a su cuenta</th>
+                    @if ($cierre->hayGastosDeSocios())
+                        <th>Puso de su bolsa</th>
                     @endif
+                    @if ($cierre->hayQueCubrir())
+                        <th>Cubre</th>
+                    @endif
+                    <th>Ya se le entregó</th>
                     <th>Hay que entregarle</th>
                 </tr>
             </thead>
@@ -433,10 +437,13 @@
                         <td>{{ $parte->nombre() }}</td>
                         <td>{{ $parte->porcentajeEscrito() }}</td>
                         <td>{{ $parte->leToca->formateado() }}</td>
-                        <td>{{ $parte->entregado->formateado() }}</td>
-                        @if ($cierre->hayGastosCargados())
-                            <td>{{ $parte->cargado->formateado() }}</td>
+                        @if ($cierre->hayGastosDeSocios())
+                            <td>{{ $parte->puso->formateado() }}</td>
                         @endif
+                        @if ($cierre->hayQueCubrir())
+                            <td>{{ $parte->cubre->formateado() }}</td>
+                        @endif
+                        <td>{{ $parte->entregado->formateado() }}</td>
                         <td>
                             @if ($parte->estaSobregirado())
                                 <span class="marca">{{ $parte->marcaDelSobregiro() }}</span>
@@ -453,14 +460,25 @@
                     <td>Totales</td>
                     <td></td>
                     <td>{{ $cierre->utilidadDelMes->formateado() }}</td>
-                    <td>{{ $cierre->entregadoDelMes->formateado() }}</td>
-                    @if ($cierre->hayGastosCargados())
-                        <td>{{ $cierre->cargadoEnElReparto()->formateado() }}</td>
+                    @if ($cierre->hayGastosDeSocios())
+                        <td>{{ $cierre->puestoEnElReparto()->formateado() }}</td>
                     @endif
+                    @if ($cierre->hayQueCubrir())
+                        <td>{{ $cierre->cubiertoEnElReparto()->formateado() }}</td>
+                    @endif
+                    <td>{{ $cierre->entregadoDelMes->formateado() }}</td>
                     <td>{{ $cierre->porEntregar->formateado() }}</td>
                 </tr>
             </tfoot>
         </table>
+
+        @if ($cierre->hayQueCubrir())
+            <p class="vacio-nota">
+                La caja del mes no alcanzó a devolver lo que pusieron los socios. Lo que falta,
+                {{ $cierre->cubiertoEnElReparto()->formateado() }}, lo cubren todos según su parte:
+                quien «queda debiendo» se lo debe a quien puso de su bolsa.
+            </p>
+        @endif
 
         @unless ($cierre->sinRepartir()->esCero())
             <div class="aviso">
@@ -594,8 +612,8 @@
         Los egresos son los gastos del proyecto más lo devuelto a clientes; lo retenido de una seña
         no sale de caja y no se cuenta. El reparto se calcula sobre la utilidad del mes por el
         porcentaje de cada socio, y «ya se le entregó» son las entregas anotadas a cuenta de este
-        mes aunque se hayan pagado otro día. Un gasto cargado a un socio no es egreso del proyecto:
-        se le descuenta solo a él, junto con lo entregado. En la tabla del año, un resultado entre paréntesis es
+        mes aunque se hayan pagado otro día. Un gasto que un socio pagó de su bolsa es egreso del
+        proyecto como cualquier otro, y se le devuelve en el reparto. En la tabla del año, un resultado entre paréntesis es
         pérdida. Base de efectivo: no entra lo que los clientes todavía deben.
         <b>Sobre el anexo 5:</b> son las cuotas con vencimiento dentro del período que todavía
         tienen saldo —incluidas las abonadas a medias— de expedientes vigentes; no incluye atrasos

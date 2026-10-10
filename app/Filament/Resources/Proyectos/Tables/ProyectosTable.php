@@ -187,8 +187,8 @@ class ProyectosTable
                 $socio = $gasto->getRelationValue('socio');
 
                 $aQuien = $socio instanceof Socio
-                    ? sprintf('cargado a %s', (string) $socio->getAttribute('nombre'))
-                    : 'del proyecto';
+                    ? sprintf('lo pagó %s, se le devuelve', (string) $socio->getAttribute('nombre'))
+                    : 'pagado con la caja';
 
                 Notification::make()
                     ->success()

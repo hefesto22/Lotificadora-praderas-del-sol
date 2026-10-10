@@ -59,10 +59,10 @@ use Override;
  * esto sale de esa utilidad ya calculada». Sumarlas acá lo restaría dos veces y
  * el proyecto parecería menos rentable cada vez que un socio retira lo suyo.
  *
- * Por lo mismo, un gasto CARGADO A UN SOCIO tampoco es invertido (8-oct-2026):
- * lo paga ese socio, y en el Estado mensual se le descuenta como un adelanto.
- * Acá cuentan solo los gastos del proyecto (`Gasto::comunes()`), los mismos
- * que bajan la utilidad del mes.
+ * Un gasto que un socio pagó de su bolsa SÍ es invertido (10-oct-2026): es
+ * costo del desarrollo como cualquier otro, y baja la utilidad del mes igual.
+ * Que se le devuelva al socio lo resuelve el reparto del Estado mensual, no
+ * este cuadro. Por eso acá cuentan TODOS los gastos.
  *
  * Las devoluciones SÍ se restan de lo recuperado: es dinero que volvió al
  * cliente. Es la misma cuenta que hace `CorteDeCajaDeHoy` con el egreso del día.
@@ -229,7 +229,7 @@ class ComoVanLosProyectos extends StatsOverviewWidget
 
     private function cuantosGastos(): string
     {
-        $cuantos = Gasto::query()->reorder()->comunes()->count();
+        $cuantos = Gasto::query()->reorder()->count();
 
         return $cuantos === 0
             ? 'Todavía no se ha registrado ningún gasto'
@@ -363,7 +363,6 @@ class ComoVanLosProyectos extends StatsOverviewWidget
         return $this->enMontos(
             Gasto::query()
                 ->reorder()
-                ->comunes()
                 ->selectRaw('proyecto_id AS proyecto, COALESCE(SUM(monto), 0) AS total')
                 ->groupBy('proyecto')
                 ->pluck('total', 'proyecto'),

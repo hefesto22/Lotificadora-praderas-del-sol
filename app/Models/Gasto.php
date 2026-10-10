@@ -51,12 +51,19 @@ use Spatie\Activitylog\Support\LogOptions;
  * A diferencia de `Devolucion` y `Reprogramacion`, el pluralizador inglés
  * saca `gastos` de `Gasto` sin ayuda.
  *
- * ═══ A QUIEN SE LE CARGA (8-OCT-2026) ═══
+ * ═══ QUIEN LO PAGO (8-OCT, CORREGIDO EL 10-OCT-2026) ═══
  *
- * `socio_id` en NULL: el gasto es del proyecto y lo pagan todos los socios
- * según su parte — lo de siempre. Con un socio: lo paga SOLO él. No baja la
- * utilidad que se reparte, y en el Estado mensual se le descuenta a ese socio
- * de lo que le toca, igual que un adelanto (regla de Mauricio, 8-oct).
+ * `socio_id` dice QUIÉN PUSO LA PLATA, no a quién se le cobra. El 8-oct se
+ * construyó al revés —«se le carga a un socio» y se le descontaba— y Mauricio
+ * lo corrigió el 10-oct, ya en producción: «es dinero que ellos ponen de su
+ * bolsa al proyecto, ese dinero es a favor de ellos».
+ *
+ * Todo gasto es costo del proyecto y baja la utilidad de todos según su parte,
+ * lo haya pagado quien lo haya pagado. Lo que cambia es de dónde salió:
+ *
+ *   - `socio_id` en NULL: de la caja del proyecto. Resta en el corte de caja.
+ *   - un socio: de su bolsa. NO resta en el corte de caja, y en el Estado
+ *     mensual se le devuelve encima de lo que le toca. Ver `CierreDelMes`.
  *
  * Que el socio sea del mismo proyecto no lo cuida este modelo: lo garantiza la
  * FK compuesta `gastos_socio_del_mismo_proyecto_fk`.
@@ -170,11 +177,11 @@ class Gasto extends Model
     }
 
     /**
-     * El socio al que se le carga. NULL es «al proyecto».
+     * El socio que lo pagó de su bolsa. NULL es «la caja del proyecto».
      *
      * `withTrashed()` a propósito: un socio que salió del repetidor queda
-     * borrado con SoftDeletes, pero el gasto que se le cargó sigue siendo
-     * suyo. Sin esto la tabla diría «Al proyecto» de un gasto que no lo es.
+     * borrado con SoftDeletes, pero lo que puso sigue siendo suyo. Sin esto la
+     * tabla diría «Caja del proyecto» de un gasto que no salió de ahí.
      *
      * @return BelongsTo<Socio, $this>
      */
@@ -186,39 +193,36 @@ class Gasto extends Model
     // ─── Consultas ────────────────────────────────────────────────────
 
     /**
-     * Los gastos del PROYECTO: los que pagan todos los socios según su parte.
-     *
-     * Es lo que baja la utilidad del mes y lo que el tablero cuenta como
-     * invertido. Un gasto cargado a un socio no es costo del desarrollo: es
-     * plata de ese socio, como una entrega.
+     * Los que pagó la caja del proyecto: los únicos que restan en el corte de
+     * caja, porque son los únicos que salieron de ahí.
      *
      * @param Builder<Gasto> $query
      *
      * @return Builder<Gasto>
      */
     #[Scope]
-    protected function comunes(Builder $query): Builder
+    protected function pagadosConCaja(Builder $query): Builder
     {
         return $query->whereNull('gastos.socio_id');
     }
 
     /**
-     * Los que se le cargaron a un socio en particular.
+     * Los que un socio pagó de su bolsa: se le devuelven en el reparto.
      *
      * @param Builder<Gasto> $query
      *
      * @return Builder<Gasto>
      */
     #[Scope]
-    protected function cargadosASocio(Builder $query): Builder
+    protected function pagadosPorUnSocio(Builder $query): Builder
     {
         return $query->whereNotNull('gastos.socio_id');
     }
 
     /**
-     * ¿Este gasto se le carga a un socio y no al proyecto?
+     * ¿Lo pagó un socio de su bolsa, y no la caja del proyecto?
      */
-    public function esDeUnSocio(): bool
+    public function loPagoUnSocio(): bool
     {
         return $this->getAttribute('socio_id') !== null;
     }

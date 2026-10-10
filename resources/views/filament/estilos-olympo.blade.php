@@ -159,8 +159,8 @@
     /*
        ── La pestaña «Gastos» del proyecto (8-oct-2026) ──
 
-       El resumen de arriba son cifras en tarjetas —total, del proyecto,
-       cargado a socios— y una fila de rubros con su puntito de color. Todo
+       El resumen de arriba son cifras en tarjetas —total, pagado con la caja,
+       pagado por socios— y una fila de rubros con su puntito de color. Todo
        son `span`: se imprime DENTRO del `<p>` de la descripción de la tabla,
        y un `div` ahí adentro cierra el párrafo y el navegador saca el
        contenido de su lugar. El `display: block` / `grid` lo da el CSS.

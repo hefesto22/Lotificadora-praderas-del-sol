@@ -139,9 +139,13 @@ class CorteDeCajaDeHoy extends StatsOverviewWidget
          * interpolada es un error de PHPStan —y la regla no es capricho: ese
          * parámetro va crudo al SQL—. El alias `total` es lo que vuelve
          * intercambiables a las dos tablas.
+         *
+         * Solo los gastos que pagó la CAJA (10-oct-2026): el que un socio
+         * pagó de su bolsa no salió de esta gaveta, y restarlo haría que quien
+         * cuenta el efectivo encuentre de más.
          */
         $gastos = $this->egresoEnEfectivo(
-            Gasto::query()->reorder()->selectRaw('COALESCE(SUM(monto), 0) AS total'),
+            Gasto::query()->reorder()->pagadosConCaja()->selectRaw('COALESCE(SUM(monto), 0) AS total'),
         );
 
         $devoluciones = $this->egresoEnEfectivo(

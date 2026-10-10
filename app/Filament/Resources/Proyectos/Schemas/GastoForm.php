@@ -42,20 +42,25 @@ use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
  * El proyecto llega por parámetro y no se lee del `$record`: desde la lista,
  * el `$record` es el proyecto; desde la pestaña, es el gasto.
  *
- * ═══ A QUIEN SE LE CARGA (8-OCT-2026) ═══
+ * ═══ QUIEN LO PAGO (8-OCT, CORREGIDO EL 10-OCT-2026) ═══
  *
  * «Lo más importante: al registrar un gasto, registrar a quién de los socios
- * se le carga.» Va PRIMERO en el formulario por eso. Las reglas de plata están
- * en `Gasto` y en `CierreDelMes`; acá solo se pregunta.
+ * se le carga.» Va PRIMERO en el formulario por eso.
+ *
+ * El 8-oct se leyó «se le carga» como «se le cobra». Era al revés: Mauricio,
+ * el 10-oct, «es dinero que ellos ponen de su bolsa al proyecto, ese dinero es
+ * a favor de ellos». Así que la pregunta es QUIÉN PUSO LA PLATA: la caja del
+ * proyecto o un socio de su bolsa. Las reglas de plata están en `Gasto` y en
+ * `CierreDelMes`; acá solo se pregunta.
  */
 final class GastoForm
 {
     /**
-     * El valor de la opción «Al proyecto». En la base es NULL; un botón de
+     * El valor de la opción «La caja del proyecto». En la base es NULL; una
      * opción no puede tener NULL como valor, así que viaja con nombre y se
      * traduce al guardar (`dehydrateStateUsing`).
      */
-    public const string AL_PROYECTO = 'proyecto';
+    public const string DE_LA_CAJA = 'caja';
 
     /**
      * La pestaña «Socios» del formulario del proyecto, tal como Filament la
@@ -72,7 +77,7 @@ final class GastoForm
      * desde la lista: un campo debajo del otro, a todo el ancho, cada uno con
      * su párrafo de ayuda. Era una planilla, no un formulario.
      *
-     *   - Tres tarjetas, en el orden en que se decide: a quién se le carga, el
+     *   - Tres tarjetas, en el orden en que se decide: quién lo pagó, el
      *     gasto, el comprobante.
      *   - Los datos del gasto en DOS columnas, en el orden en que se leen de
      *     la factura: cuándo y en qué, el detalle, cuánto y cómo, a quién.
@@ -81,8 +86,8 @@ final class GastoForm
      *     dentro del campo (`placeholder`), que desaparece al escribir.
      *
      * Y la pregunta del socio se ve SIEMPRE, también en un proyecto sin
-     * socios: escondida, nadie sabía que existía. Sin socios ofrece solo «Al
-     * proyecto» y dice dónde se cargan.
+     * socios: escondida, nadie sabía que existía. Sin socios ofrece solo «La
+     * caja del proyecto» y dice dónde se cargan.
      *
      * ═══ UNA TARJETA POR OPCION, NO UN RIEL (TERCERA VUELTA) ═══
      *
@@ -93,7 +98,7 @@ final class GastoForm
      * se leían como un solo bloque partido.
      *
      * Ahora cada opción es su propia tarjeta (`olympo-tarjetas`, §12-quater de
-     * `tema-olympo`): el nombre arriba, su parte del reparto abajo, y la
+     * `tema-olympo`): el nombre arriba, qué quiere decir abajo, y la
      * elegida con el borde y el tinte del color primario. Con uno, dos o cinco
      * socios se acomodan solas en la cuadrícula, y en el celular quedan una
      * debajo de la otra.
@@ -103,11 +108,11 @@ final class GastoForm
     public static function componentes(Proyecto $proyecto): array
     {
         return [
-            Section::make('¿A quién se le carga?')
+            Section::make('¿Quién lo pagó?')
                 ->icon(Heroicon::OutlinedUsers)
                 ->description(static fn (mixed $record): string|HtmlString => self::queQuiereDecir(
                     $proyecto,
-                    self::aQuienSeLeCarga($proyecto, self::elGasto($record)),
+                    self::quienLoPago($proyecto, self::elGasto($record)),
                 ))
                 ->compact()
                 ->columnSpanFull()
@@ -115,7 +120,7 @@ final class GastoForm
                     Radio::make('socio_id')
                         // El rótulo no se dibuja —lo dice la tarjeta—, pero
                         // es el que usa el mensaje de validación.
-                        ->label('A quién se le carga')
+                        ->label('Quién lo pagó')
                         ->hiddenLabel()
                         /*
                          * `$record` es el GASTO cuando se edita desde la
@@ -123,13 +128,13 @@ final class GastoForm
                          * lista. Solo en el primer caso hay un socio actual
                          * que conservar.
                          */
-                        ->options(static fn (mixed $record): array => self::aQuienSeLeCarga($proyecto, self::elGasto($record)))
-                        ->descriptions(static fn (mixed $record): array => self::comoSeReparte($proyecto, self::elGasto($record)))
-                        ->default(self::AL_PROYECTO)
+                        ->options(static fn (mixed $record): array => self::quienLoPago($proyecto, self::elGasto($record)))
+                        ->descriptions(static fn (mixed $record): array => self::detalleDeCadaUno($proyecto, self::elGasto($record)))
+                        ->default(self::DE_LA_CAJA)
                         ->required()
                         ->inline()
                         ->extraAttributes(['class' => 'olympo-tarjetas'])
-                        ->formatStateUsing(static fn (mixed $state): string => self::esUnSocio($state) ? (string) $state : self::AL_PROYECTO)
+                        ->formatStateUsing(static fn (mixed $state): string => self::esUnSocio($state) ? (string) $state : self::DE_LA_CAJA)
                         ->dehydrateStateUsing(static fn (mixed $state): ?int => self::esUnSocio($state) ? (int) $state : null),
                 ]),
 
@@ -258,12 +263,12 @@ final class GastoForm
     }
 
     /**
-     * Las opciones de «¿A quién se le carga?» — el NOMBRE de cada tarjeta: el
-     * proyecto y cada socio que hoy participa del reparto.
+     * Las opciones de «¿Quién lo pagó?» — el NOMBRE de cada tarjeta: la caja
+     * del proyecto y cada socio que hoy participa del reparto.
      *
      * @return array<int|string, string>
      */
-    public static function aQuienSeLeCarga(Proyecto $proyecto, ?Gasto $gasto = null): array
+    public static function quienLoPago(Proyecto $proyecto, ?Gasto $gasto = null): array
     {
         $opciones = [];
 
@@ -275,12 +280,12 @@ final class GastoForm
     }
 
     /**
-     * La segunda línea de cada tarjeta: qué parte del reparto tiene ese socio,
-     * o qué quiere decir «Al proyecto».
+     * La segunda línea de cada tarjeta: de dónde salió la plata y qué pasa
+     * con ella.
      *
      * @return array<int|string, string>
      */
-    public static function comoSeReparte(Proyecto $proyecto, ?Gasto $gasto = null): array
+    public static function detalleDeCadaUno(Proyecto $proyecto, ?Gasto $gasto = null): array
     {
         $detalles = [];
 
@@ -292,15 +297,15 @@ final class GastoForm
     }
 
     /**
-     * Las opciones del filtro de la pestaña: el proyecto y TODOS los socios
-     * que tuvo, también los que salieron. Un filtro que no deja buscar lo que
-     * se le cargó a un socio que ya se fue esconde justo lo que hay que mirar.
+     * Las opciones del filtro de la pestaña: la caja y TODOS los socios que
+     * tuvo el proyecto, también los que salieron. Un filtro que no deja buscar
+     * lo que puso un socio que ya se fue esconde justo lo que hay que mirar.
      *
      * @return array<int|string, string>
      */
     public static function opcionesDelFiltro(Proyecto $proyecto): array
     {
-        $opciones = [self::AL_PROYECTO => 'Al proyecto'];
+        $opciones = [self::DE_LA_CAJA => 'La caja del proyecto'];
 
         $socios = Socio::query()
             ->withTrashed()
@@ -342,11 +347,11 @@ final class GastoForm
     // ─── Interno ──────────────────────────────────────────────────────
 
     /**
-     * Las tarjetas de «¿A quién se le carga?», con sus dos renglones.
+     * Las tarjetas de «¿Quién lo pagó?», con sus dos renglones.
      *
      * Al EDITAR se agrega el socio que el gasto ya tiene aunque hoy esté
      * inactivo o borrado: si no, no habría tarjeta que marcar y guardar el
-     * formulario le cambiaría en silencio a quién se le carga.
+     * formulario le cambiaría en silencio quién lo pagó.
      *
      * @return array<int|string, array{nombre: string, detalle: string}>
      */
@@ -355,16 +360,16 @@ final class GastoForm
         $socios = $proyecto->socios()->activos()->get();
 
         $tarjetas = [
-            self::AL_PROYECTO => [
-                'nombre'  => 'Al proyecto',
-                'detalle' => $socios->isEmpty() ? 'Es del desarrollo' : 'Lo pagan todos, según su parte',
+            self::DE_LA_CAJA => [
+                'nombre'  => 'La caja del proyecto',
+                'detalle' => 'Salió de lo cobrado',
             ],
         ];
 
         foreach ($socios as $socio) {
             $tarjetas[(int) $socio->getKey()] = [
                 'nombre'  => (string) $socio->getAttribute('nombre'),
-                'detalle' => sprintf('%s %% del reparto', self::parte($socio)),
+                'detalle' => 'De su bolsa · se le devuelve',
             ];
         }
 
@@ -412,7 +417,7 @@ final class GastoForm
     private static function queQuiereDecir(Proyecto $proyecto, array $opciones): string|HtmlString
     {
         if (count($opciones) <= 1) {
-            $texto = 'Este proyecto todavía no tiene socios cargados, así que el gasto es del proyecto.';
+            $texto = 'Este proyecto todavía no tiene socios cargados, así que el gasto sale de la caja del proyecto.';
 
             if (! ProyectoResource::canEdit($proyecto)) {
                 return sprintf('%s Los socios se cargan al editar el proyecto, pestaña «Socios».', $texto);
@@ -425,23 +430,15 @@ final class GastoForm
             ));
         }
 
-        return 'Si es de un socio, lo paga solo él: no le baja la utilidad a los demás, y en el Estado mensual se le descuenta de lo que le toca.';
+        return 'Todo gasto es del proyecto: baja la utilidad de todos según su parte. Si lo pagó un socio de su bolsa, en el Estado mensual se le devuelve encima de lo que le toca.';
     }
 
     /**
-     * «66.67», y «50» sin los ceros.
-     */
-    private static function parte(Socio $socio): string
-    {
-        return rtrim(rtrim($socio->porcentaje()->redondeado(2), '0'), '.');
-    }
-
-    /**
-     * ¿El estado del botón es un socio, o es «Al proyecto»?
+     * ¿Lo elegido es un socio, o es «La caja del proyecto»?
      *
      * Llega como entero desde la base y como texto desde el navegador; los dos
-     * valen. Cualquier otra cosa —el `proyecto` de la primera opción, un NULL—
-     * es «al proyecto».
+     * valen. Cualquier otra cosa —la `caja` de la primera opción, un NULL— es
+     * la caja.
      */
     private static function esUnSocio(mixed $estado): bool
     {

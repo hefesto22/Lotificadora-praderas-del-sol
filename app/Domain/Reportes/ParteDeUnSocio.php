@@ -38,11 +38,17 @@ final readonly class ParteDeUnSocio
         public Monto $porEntregar,
         public Monto $entregadoDeMas,
         /**
-         * Los gastos de ESTE mes que se le cargaron a él solo (8-oct-2026).
-         * Se descuentan como lo entregado: `$porEntregar` y `$entregadoDeMas`
-         * ya los tienen restados.
+         * Lo que pagó de su bolsa en gastos del proyecto en ESTE mes
+         * (10-oct-2026). Es a su favor: se le devuelve encima de lo que le
+         * toca, y `$porEntregar` ya lo tiene sumado.
          */
-        public Monto $cargado,
+        public Monto $puso,
+        /**
+         * Su parte de lo que la caja del mes no alcanzó a devolver a los que
+         * pusieron de su bolsa. Solo hay en un mes en pérdida; si no, es cero.
+         * `$porEntregar` y `$entregadoDeMas` ya lo tienen restado.
+         */
+        public Monto $cubre,
     ) {}
 
     /**
@@ -60,12 +66,13 @@ final readonly class ParteDeUnSocio
     /**
      * Cómo se rotula en el papel lo que se llevó de más.
      *
-     * Con un gasto cargado de por medio no fue un adelanto: el proyecto pagó
-     * algo suyo que pasa lo que le tocaba en el mes, y eso se lee como deuda.
+     * Si le tocó cubrir parte de lo que la caja no alcanzó a devolver, no fue
+     * un adelanto: le debe esa parte al socio que puso de su bolsa, y eso se
+     * lee como deuda.
      */
     public function marcaDelSobregiro(): string
     {
-        return $this->cargado->esCero() ? 'Se le adelantó' : 'Queda debiendo';
+        return $this->cubre->esCero() ? 'Se le adelantó' : 'Queda debiendo';
     }
 
     public function nombre(): string
