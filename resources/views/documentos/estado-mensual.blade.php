@@ -126,6 +126,19 @@
         .formas .par b { color: #18181b; font-weight: 600; }
         .formas .titulo-franja { font-size: 9px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: #a1a1aa; width: 100%; }
 
+        /* ── Lo que cobró cada persona (10-oct-2026) ──
+           La misma franja gris de arriba, con una tabla chica adentro: es una
+           cuenta de dos entradas —persona por forma de cobro— y en renglones
+           sueltos no se leería. Las cifras no se parten; el nombre sí. */
+        .formas.recibio { display: block; }
+        .formas.recibio table { margin-top: .25rem; font-size: 10.5px; }
+        .formas.recibio th { padding: .1875rem .5rem; border-bottom-color: #e4e4e7; }
+        .formas.recibio td { padding: .25rem .5rem; color: #52525b; white-space: nowrap; }
+        .formas.recibio td:first-child { white-space: normal; color: #18181b; }
+        .formas.recibio tbody tr + tr td { border-top: 1px dotted #e4e4e7; }
+        .formas.recibio td.total { color: #18181b; font-weight: 700; }
+        .formas.recibio td.apagado { color: #d4d4d8; }
+
         /* ── El año ── */
         table.anio td, table.anio th { font-size: 10.5px; padding: .1875rem .4375rem; }
         table.anio tbody tr td { border-bottom: 1px dotted #e4e4e7; }
@@ -152,6 +165,12 @@
         /* ── Reparto ── */
         table.reparto tbody td { border-bottom: 1px dotted #e4e4e7; }
         table.reparto tfoot td { border-top: 2px solid #18181b; border-bottom: 3px double #18181b; font-weight: 700; padding-top: .3125rem; }
+        /* Las cifras no se parten en dos renglones (10-oct-2026). Con la columna
+           de lo que pagó cada socio la tabla se angostó y salía «L.» arriba y
+           el número abajo. Solo el nombre del socio —la primera— puede bajar.
+           ⚠️ El texto de un <style> SÍ llega a assertSeeText: acá no se
+           escriben los rótulos de la hoja, o un assertDontSeeText los encuentra. */
+        table.reparto td:not(:first-child), table.reparto th { white-space: nowrap; }
         tr.sobregirado td { color: #b91c1c; }
         .marca { font-size: 8.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; display: block; }
 
@@ -310,6 +329,42 @@
                 <span class="par">{{ \App\Domain\Enums\FormaDePago::from($clave)->etiqueta() }}
                     <b>{{ $monto->formateado() }}</b></span>
             @endforeach
+        </div>
+    @endunless
+
+    {{-- Quién recibió el dinero y en qué forma (10-oct-2026). Las columnas son
+         las formas que hubo en el mes, en el mismo orden que la franja de
+         arriba: cada columna suma lo que dice la franja, y la columna Total
+         suma el total de ingresos. --}}
+    @unless ($cierre->cobradoPorPersona === [])
+        <div class="formas recibio">
+            <span class="titulo-franja">Quién recibió el dinero</span>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Persona</th>
+                        @foreach (array_keys($cierre->cobradoPorForma) as $clave)
+                            <th>{{ \App\Domain\Enums\FormaDePago::from($clave)->etiqueta() }}</th>
+                        @endforeach
+                        <th>Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach ($cierre->cobradoPorPersona as $persona)
+                        <tr>
+                            <td>{{ $persona['nombre'] }}</td>
+                            @foreach (array_keys($cierre->cobradoPorForma) as $clave)
+                                @if (isset($persona['porForma'][$clave]))
+                                    <td>{{ $persona['porForma'][$clave]->formateado() }}</td>
+                                @else
+                                    <td class="apagado">—</td>
+                                @endif
+                            @endforeach
+                            <td class="total">{{ $persona['total']->formateado() }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
         </div>
     @endunless
 

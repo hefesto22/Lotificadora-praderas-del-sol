@@ -16,6 +16,7 @@ use App\Models\Gasto;
 use App\Models\Proyecto;
 use App\Models\Recibo;
 use App\Models\Socio;
+use App\Models\User;
 use App\Models\Venta;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -143,6 +144,7 @@ final readonly class CierreDelMes
      * @param array<string, Monto> $gastadoPorCategoria clave: el `value` de la CategoriaDeGasto
      * @param list<ParteDeUnSocio> $reparto
      * @param list<array{nombre: string, monto: Monto}> $puestoPorSocios
+     * @param list<array{nombre: string, porForma: array<string, Monto>, total: Monto}> $cobradoPorPersona
      */
     private function __construct(
         public Proyecto $proyecto,
@@ -168,6 +170,11 @@ final readonly class CierreDelMes
         public Monto $puestoPorSociosDelMes,
         /** Uno por socio que puso algo en el mes, también si ya no participa. */
         public array $puestoPorSocios,
+        /**
+         * Quién recibió el dinero del mes y en qué forma (10-oct-2026): uno
+         * por persona, de mayor a menor. Suma exactamente lo cobrado.
+         */
+        public array $cobradoPorPersona,
     ) {}
 
     /**
@@ -277,6 +284,7 @@ final readonly class CierreDelMes
             vencioEnElMes: self::loQueVencio($id, $primerDia, $ultimoDia),
             puestoPorSociosDelMes: self::sumar($puesto),
             puestoPorSocios: self::puestoConNombre($puesto),
+            cobradoPorPersona: self::cobradoPorPersona($id, $primerDia, $ultimoDia),
         );
     }
 
@@ -501,6 +509,97 @@ final readonly class CierreDelMes
         }
 
         return $porForma;
+    }
+
+    /**
+     * Quién recibió el dinero del mes, y en qué forma.
+     *
+     * Mauricio, 10-oct-2026: «cuánto dinero recibió cada uno, en pagos y en
+     * qué tipo de pagos, ya que ellos dos reciben el dinero». Sale de
+     * `recibos.recibido_por` —el «¿Quién recibió el dinero?» del cobro, R24—,
+     * con el MISMO filtro que los ingresos: la suma de todas las personas es
+     * exactamente el total de ingresos de la hoja, al céntimo.
+     *
+     * Un recibo sin quién lo recibió —los de antes del 27-ago— va a «Sin
+     * anotar»: esconderlo haría que la tabla no sume lo cobrado.
+     *
+     * @return list<array{nombre: string, porForma: array<string, Monto>, total: Monto}>
+     */
+    private static function cobradoPorPersona(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): array
+    {
+        $filas = Recibo::query()
+            ->reorder()
+            ->whereNull('anulado_el')
+            ->whereIn('venta_id', self::ventasDelProyecto($proyecto))
+            ->whereBetween('fecha', [$desde->toDateString(), $hasta->toDateString()])
+            ->groupBy('recibido_por', 'forma_pago')
+            ->selectRaw('recibido_por, forma_pago, COALESCE(SUM(monto), 0) AS total')
+            ->toBase()
+            ->get();
+
+        /** @var array<int, array<string, Monto>> $porPersona clave 0: sin anotar */
+        $porPersona = [];
+
+        foreach ($filas as $fila) {
+            // El query builder entrega stdClass: se convierte en el borde.
+            $datos = (array) $fila;
+
+            $quien = $datos['recibido_por'] ?? null;
+            $forma = $datos['forma_pago'] ?? null;
+
+            if (! is_string($forma)) {
+                continue;
+            }
+
+            $id = is_int($quien) || (is_string($quien) && ctype_digit($quien)) ? (int) $quien : 0;
+
+            $porPersona[$id][$forma] = self::aMonto($datos['total'] ?? '0');
+        }
+
+        if ($porPersona === []) {
+            return [];
+        }
+
+        // `withTrashed()`: quien cobró y después dejó de trabajar ahí sigue
+        // siendo quien recibió ese dinero, y su renglón es justo el que alguien
+        // va a preguntar.
+        /** @var array<int, string> $nombres */
+        $nombres = User::query()
+            ->withTrashed()
+            ->whereKey(array_keys($porPersona))
+            ->pluck('name', 'id')
+            ->all();
+
+        // De mayor a menor. Se ordena el mapa de Monto y no la lista: un
+        // closure con `array $a` no puede llevar `@param` y pierde la forma.
+        $totales = [];
+
+        foreach ($porPersona as $id => $formas) {
+            $totales[$id] = self::sumar($formas);
+        }
+
+        uasort($totales, static fn (Monto $a, Monto $b): int => $b->mayorQue($a) ? 1 : ($a->mayorQue($b) ? -1 : 0));
+
+        $lista = [];
+
+        foreach ($totales as $id => $total) {
+            // En el orden del enum, igual que la franja de formas de cobro.
+            $ordenadas = [];
+
+            foreach (FormaDePago::cases() as $forma) {
+                if (isset($porPersona[$id][$forma->value])) {
+                    $ordenadas[$forma->value] = $porPersona[$id][$forma->value];
+                }
+            }
+
+            $lista[] = [
+                'nombre'   => $id === 0 ? 'Sin anotar' : mb_strtoupper($nombres[$id] ?? '—'),
+                'porForma' => $ordenadas,
+                'total'    => $total,
+            ];
+        }
+
+        return $lista;
     }
 
     /**
