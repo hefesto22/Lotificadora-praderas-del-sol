@@ -477,7 +477,7 @@
                     <th>Parte</th>
                     <th>Le toca</th>
                     @if ($cierre->hayGastosDeSocios())
-                        <th>Puso de su bolsa</th>
+                        <th>Gastos que pagó</th>
                     @endif
                     @if ($cierre->hayQueCubrir())
                         <th>Cubre</th>
@@ -526,6 +526,16 @@
                 </tr>
             </tfoot>
         </table>
+
+        {{-- «Eso de puso no se entiende bien» (Mauricio, 10-oct-2026): la
+             columna dice qué es, y esta nota dice cómo se llega a lo que hay
+             que entregar. --}}
+        @if ($cierre->hayGastosDeSocios())
+            <p class="vacio-nota">
+                <b>Gastos que pagó</b>: lo que el socio pagó de su propio dinero en gastos del proyecto este
+                mes. Se le devuelve: <b>hay que entregarle = le toca + gastos que pagó − lo ya entregado</b>.
+            </p>
+        @endif
 
         @if ($cierre->hayQueCubrir())
             <p class="vacio-nota">

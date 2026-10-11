@@ -646,7 +646,7 @@
                             <th>Parte</th>
                             <th>Le toca</th>
                             @if ($general->hayGastosDeSocios())
-                                <th>Puso</th>
+                                <th>Gastos que pagó</th>
                             @endif
                             @unless ($socios->cubierto()->esCero())
                                 <th>Cubre</th>
@@ -696,6 +696,16 @@
                     </tfoot>
                 </table>
             </div>
+
+            {{-- Mauricio, 10-oct-2026, mirando la hoja en producción: «eso de
+                 puso no se entiende bien, especificalo mejor». La columna dice
+                 qué es, y esta nota dice cómo se llega a lo que falta entregar. --}}
+            @if ($general->hayGastosDeSocios())
+                <p class="vacio-nota">
+                    <b>Gastos que pagó</b>: lo que el socio pagó de su propio dinero en gastos del proyecto.
+                    Se le devuelve: <b>por entregarle = le toca + gastos que pagó − lo ya entregado</b>.
+                </p>
+            @endif
 
             <p class="vacio-nota">
                 Sobre la utilidad de toda la vida del proyecto. Puede no coincidir con la suma de los

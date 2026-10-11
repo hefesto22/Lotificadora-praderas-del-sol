@@ -226,7 +226,7 @@ describe('La hoja impresa', function (): void {
         $this->get(route('documentos.estado-mensual', ['proyecto' => $this->proyecto, 'mes' => '2026-07']))
             ->assertOk()
             ->assertSeeText('Pagado por socios, de su bolsa')
-            ->assertSeeText('Puso de su bolsa')
+            ->assertSeeText('Gastos que pagó')
             ->assertDontSeeText('Cubre');
     });
 
@@ -251,6 +251,6 @@ describe('La hoja impresa', function (): void {
         $this->get(route('documentos.estado-mensual', ['proyecto' => $this->proyecto, 'mes' => '2026-07']))
             ->assertOk()
             ->assertDontSeeText('Pagado por socios, de su bolsa')
-            ->assertDontSeeText('Puso de su bolsa');
+            ->assertDontSeeText('Gastos que pagó');
     });
 });
