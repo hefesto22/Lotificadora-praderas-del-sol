@@ -250,7 +250,6 @@
     $pct = static fn ($parte, $total, $decimales = 0) => \App\Domain\Reportes\EstadoGeneral::porcentaje($parte, $total, $decimales);
     $pctTexto = static fn ($parte, $total) => \App\Domain\Reportes\EstadoGeneral::porcentajeEscrito($parte, $total);
     $cobrarTodo = $general->siSeCobraTodo();
-    $venderTodo = $general->siSeVendeTodo();
     $enPerdida = ! $general->perdida->esCero();
     $formasDeEntrega = $general->formasDeEntrega();
     $mayorAnual = $general->mayorIngresoAnual();
@@ -876,8 +875,7 @@
                 <tr>
                     <th>Estado</th>
                     <th>Lotes</th>
-                    <th>Del total</th>
-                    <th class="cifra-col">Valor de lista</th>
+                    <th class="cifra-col">Del total</th>
                 </tr>
             </thead>
             <tbody>
@@ -886,7 +884,6 @@
                         <td><i class="punto" style="background: {{ $fila['estado']->colorHex() }}"></i>{{ $fila['estado']->etiquetaInterna() }}</td>
                         <td>{{ $fila['cuantos'] }}</td>
                         <td class="apagado">{{ $general->parteDeLotes($fila['cuantos']) }} %</td>
-                        <td>{{ $fila['valor']->formateado() }}</td>
                     </tr>
                 @endforeach
             </tbody>
@@ -895,25 +892,19 @@
                     <td>Total</td>
                     <td>{{ $general->totalDeLotes() }}</td>
                     <td>100 %</td>
-                    <td>{{ $general->valorDeLosLotes()->formateado() }}</td>
                 </tr>
             </tfoot>
         </table>
-
-        @if ($general->lotesSinPrecio() > 0)
-            <div class="aviso">
-                {{ $general->lotesSinPrecio() }} {{ $general->lotesSinPrecio() === 1 ? 'lote por vender no tiene' : 'lotes por vender no tienen' }}
-                precio cargado: lo que falta vender sale más bajo de lo que es.
-            </div>
-        @endif
     @endif
 
     {{-- ── 7 · Hacia dónde va ────────────────────────────────────── --}}
 
     <h2><span class="numeral">7</span> Hacia dónde va el proyecto</h2>
 
-    @if (! $general->huboMovimiento() && $general->vendido->esCero() && $general->lotesPorVender() === 0)
-        <p class="vacio-nota">Sin cobros, ventas ni lotes por vender todavía: no hay nada que proyectar.</p>
+    {{-- Solo lo ya vendido. Mauricio, 10-oct-2026: «los que no se han vendido
+         que no se proyecten, ya que unos quizás no pertenezcan al proyecto». --}}
+    @if (! $general->huboMovimiento() && $general->vendido->esCero())
+        <p class="vacio-nota">Sin cobros ni ventas todavía: no hay nada que proyectar.</p>
     @else
     <table>
         <tbody>
@@ -925,7 +916,7 @@
                 <td class="rotulo sangria">Más lo que falta cobrar de lo vendido</td>
                 <td>{{ $general->porCobrar->formateado() }}</td>
             </tr>
-            <tr @class(['subtotal', 'perdida' => ! $cobrarTodo['perdida']->esCero()])>
+            <tr @class(['cierre', 'perdida' => ! $cobrarTodo['perdida']->esCero()])>
                 <td>Si se cobra todo lo vendido</td>
                 <td>
                     {{ $cobrarTodo['perdida']->esCero()
@@ -933,30 +924,12 @@
                         : '('.$cobrarTodo['perdida']->formateado().')' }}
                 </td>
             </tr>
-            <tr class="renglon">
-                <td class="rotulo sangria">
-                    @if ($general->lotesPorVender() === 0)
-                        No quedan lotes por vender
-                    @else
-                        Más {{ $general->lotesPorVender() }} {{ $general->lotesPorVender() === 1 ? 'lote' : 'lotes' }} por vender, a precio de lista
-                    @endif
-                </td>
-                <td>{{ $general->porVender()->formateado() }}</td>
-            </tr>
-            <tr @class(['cierre', 'perdida' => ! $venderTodo['perdida']->esCero()])>
-                <td>Si además se vende todo</td>
-                <td>
-                    {{ $venderTodo['perdida']->esCero()
-                        ? $venderTodo['utilidad']->formateado()
-                        : '('.$venderTodo['perdida']->formateado().')' }}
-                </td>
-            </tr>
         </tbody>
     </table>
 
     <p class="vacio-nota">
-        Es una proyección, no una promesa: no cuenta gastos que todavía no se hicieron, ni mora, ni descuentos
-        futuros. Lo que falta vender va a su precio de lista de hoy.
+        Es una proyección de lo ya vendido, no una promesa: los lotes que no se han vendido no entran, y no
+        cuenta gastos que todavía no se hicieron, ni mora, ni descuentos futuros.
     </p>
     @endif
 

@@ -63,10 +63,11 @@ use Illuminate\Database\Eloquent\Collection;
  *  - **Lo que falta cobrar** son las cuotas con saldo de los expedientes
  *    vigentes y de lotes vivos: la misma cuenta del Escritorio. Lo atrasado
  *    va aparte; lo que viene, año por año según su vencimiento.
- *  - **Lo que falta vender** son los lotes disponibles y apartados a su precio
- *    de lista. Va como un renglón aparte de la proyección y dicho así, porque
- *    no es una promesa de nadie.
- *  - Ninguna de las dos cuenta gastos futuros: no hay de dónde sacarlos.
+ *  - **Lo que no se ha vendido NO se proyecta.** Mauricio, 10-oct-2026: «los
+ *    que no se han vendido que no se proyecten, ya que unos quizás no
+ *    pertenezcan al proyecto». El inventario cuenta cuántos lotes hay en cada
+ *    estado, sin ponerles precio.
+ *  - No cuenta gastos futuros: no hay de dónde sacarlos.
  *
  * ═══ SIN NEGATIVOS, COMO EN TODA LA CASA ═══
  *
@@ -93,7 +94,7 @@ final readonly class EstadoGeneral
      * @param list<array{nombre: string, puso: Monto, entregado: Monto, porForma: array<string, Monto>}> $exSocios
      * @param list<array{anio: int, ingresos: Monto, egresos: Monto, utilidad: Monto, perdida: Monto}> $anioPorAnio
      * @param list<array{anio: int, cuotas: int, monto: Monto}> $porCobrarPorAnio
-     * @param list<array{estado: EstadoLote, cuantos: int, valor: Monto, sinPrecio: int}> $lotes
+     * @param list<array{estado: EstadoLote, cuantos: int}> $lotes
      */
     private function __construct(
         public Proyecto $proyecto,
@@ -314,72 +315,6 @@ final readonly class EstadoGeneral
     public function siSeCobraTodo(): array
     {
         return self::resultado($this->cobrado->sumar($this->porCobrar), $this->salidas);
-    }
-
-    /**
-     * Y si además se venden los lotes que quedan, a su precio de lista.
-     *
-     * @return array{utilidad: Monto, perdida: Monto}
-     */
-    public function siSeVendeTodo(): array
-    {
-        return self::resultado(
-            $this->cobrado->sumar($this->porCobrar)->sumar($this->porVender()),
-            $this->salidas,
-        );
-    }
-
-    /**
-     * Lo que vale lo que todavía no se vendió: disponibles y apartados, a su
-     * precio de lista. El apartado cuenta porque todavía no es venta — su
-     * seña, por la misma regla, todavía no es ingreso.
-     */
-    public function porVender(): Monto
-    {
-        $total = Monto::cero();
-
-        foreach ($this->lotesSinVender() as $fila) {
-            $total = $total->sumar($fila['valor']);
-        }
-
-        return $total;
-    }
-
-    public function lotesPorVender(): int
-    {
-        $cuantos = 0;
-
-        foreach ($this->lotesSinVender() as $fila) {
-            $cuantos += $fila['cuantos'];
-        }
-
-        return $cuantos;
-    }
-
-    /**
-     * Los lotes por vender que todavía no tienen precio cargado. Si hay, la
-     * proyección se queda corta y la hoja lo dice.
-     */
-    public function lotesSinPrecio(): int
-    {
-        $cuantos = 0;
-
-        foreach ($this->lotesSinVender() as $fila) {
-            $cuantos += $fila['sinPrecio'];
-        }
-
-        return $cuantos;
-    }
-
-    public function valorDeLosLotes(): Monto
-    {
-        $total = Monto::cero();
-
-        foreach ($this->lotes as $fila) {
-            $total = $total->sumar($fila['valor']);
-        }
-
-        return $total;
     }
 
     public function totalDeLotes(): int
@@ -858,9 +793,10 @@ final readonly class EstadoGeneral
     // ─── Los lotes ────────────────────────────────────────────────────
 
     /**
-     * Cuántos lotes hay en cada estado y cuánto valen a su precio de lista.
+     * Cuántos lotes hay en cada estado. Sin precio: lo que no se ha vendido no
+     * se proyecta (ver la cabecera).
      *
-     * @return list<array{estado: EstadoLote, cuantos: int, valor: Monto, sinPrecio: int}>
+     * @return list<array{estado: EstadoLote, cuantos: int}>
      */
     private static function lotes(int $proyecto): array
     {
@@ -868,7 +804,7 @@ final readonly class EstadoGeneral
             ->reorder()
             ->where('proyecto_id', $proyecto)
             ->groupBy('estado')
-            ->selectRaw('estado, COUNT(*) AS cuantos, COALESCE(SUM(valor), 0) AS valor, COUNT(*) FILTER (WHERE valor <= 0) AS sin_precio')
+            ->selectRaw('estado, COUNT(*) AS cuantos')
             ->toBase()
             ->get();
 
@@ -895,32 +831,12 @@ final readonly class EstadoGeneral
             }
 
             $lista[] = [
-                'estado'    => $estado,
-                'cuantos'   => self::entero($datos['cuantos'] ?? 0),
-                'valor'     => self::aMonto($datos['valor'] ?? '0'),
-                'sinPrecio' => self::entero($datos['sin_precio'] ?? 0),
+                'estado'  => $estado,
+                'cuantos' => self::entero($datos['cuantos'] ?? 0),
             ];
         }
 
         return $lista;
-    }
-
-    /**
-     * Disponibles y apartados: lo que todavía se puede vender.
-     *
-     * @return list<array{estado: EstadoLote, cuantos: int, valor: Monto, sinPrecio: int}>
-     */
-    private function lotesSinVender(): array
-    {
-        $sinVender = [];
-
-        foreach ($this->lotes as $fila) {
-            if ($fila['estado']->seVende()) {
-                $sinVender[] = $fila;
-            }
-        }
-
-        return $sinVender;
     }
 
     // ─── Herramientas ─────────────────────────────────────────────────

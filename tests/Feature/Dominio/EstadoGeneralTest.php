@@ -281,7 +281,7 @@ describe('La cartera y la proyección', function (): void {
             ->and($general->cobrado)->toBeMonto('0.00');
     });
 
-    test('los lotes por estado, y lo que falta vender a precio de lista', function (): void {
+    test('los lotes por estado, sin ponerle precio a lo que no se vendió', function (): void {
         $general = ($this->general)();
         $porEstado = [];
 
@@ -295,22 +295,31 @@ describe('La cartera y la proyección', function (): void {
             EstadoLote::Vendido->value    => 2,
         ])
             ->and($general->totalDeLotes())->toBe(5)
-            ->and($general->lotesPorVender())->toBe(3)
-            ->and($general->lotesSinPrecio())->toBe(1)
-            ->and($general->porVender())->toBeMonto('200000.00');
+            ->and($general->parteDeLotes(2))->toBe('40');
     });
 
-    test('la proyección suma lo que falta cobrar y lo que falta vender', function (): void {
+    test('la proyección suma lo que falta cobrar de lo vendido', function (): void {
         Gasto::factory()->delProyecto($this->proyecto)->de('20000.00')->conFecha('2026-07-05')->create();
 
         $general = ($this->general)();
 
         // Sin un cobro y con 20,000 gastados: pérdida 20,000. Si entra lo
-        // que falta (17,000), sigue en rojo por 3,000; si además se vende lo
-        // disponible (200,000), cierra arriba por 197,000.
+        // que falta (17,000), sigue en rojo por 3,000.
         expect($general->perdida)->toBeMonto('20000.00')
-            ->and($general->siSeCobraTodo()['perdida'])->toBeMonto('3000.00')
-            ->and($general->siSeVendeTodo()['utilidad'])->toBeMonto('197000.00');
+            ->and($general->siSeCobraTodo()['perdida'])->toBeMonto('3000.00');
+    });
+
+    /*
+    | Mauricio, 10-oct-2026: «los que no se han vendido que no se proyecten,
+    | ya que unos quizás no pertenezcan al proyecto». Acá hay dos lotes
+    | disponibles y uno apartado, y la hoja no les pone precio.
+    */
+    test('lo que no se ha vendido no se proyecta', function (): void {
+        $this->get(route('documentos.estado-general', ['proyecto' => $this->proyecto]))
+            ->assertOk()
+            ->assertSeeText('Si se cobra todo lo vendido')
+            ->assertDontSeeText('Si además se vende todo')
+            ->assertDontSeeText('precio de lista');
     });
 });
 

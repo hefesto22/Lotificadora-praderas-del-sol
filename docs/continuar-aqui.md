@@ -5,7 +5,7 @@
 
 ## 10-oct (tarde) — El estado general del proyecto
 
-**EN LOCAL** — falta la puerta, commitear y desplegar.
+**EN PRODUCCIÓN** (e54b84f). Falta subir: no proyectar lo que no se vendió.
 
 Pedido de Mauricio desde la pantalla del Estado mensual: un estado de
 resultados «general de todo» —ganancias, gastos, cuánto recibió cada socio y
@@ -28,9 +28,12 @@ en qué forma— «con proyección de lo que ya se vendió y falta de cobrar».
   saldo, expedientes vigentes, lotes vivos), con lo atrasado aparte y lo que
   viene por año; las señas de apartados en curso van en un aviso (no son
   ingreso hasta formalizarse, regla del 13-ago).
-- **La proyección:** resultado a la fecha → si se cobra todo lo vendido → si
-  además se venden los disponibles y apartados a precio de lista. Avisa si hay
-  lotes por vender sin precio.
+- **La proyección:** resultado a la fecha → si se cobra todo lo vendido. **Lo
+  que no se ha vendido NO se proyecta** (Mauricio: «unos quizás no pertenezcan
+  al proyecto»): el inventario de lotes cuenta cuántos hay por estado, sin
+  precio.
+- La columna «Puso» del reparto pasó a **«Gastos que pagó»** en las dos hojas,
+  con la cuenta escrita debajo (638eb32).
 - El membrete de las dos hojas vive en el trait
   `Http\Controllers\Concerns\MembreteDelProyecto`.
 
