@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\EstadoDeCuentaController;
+use App\Http\Controllers\EstadoGeneralController;
 use App\Http\Controllers\EstadoMensualController;
 use App\Http\Controllers\ImprimirDevolucionController;
 use App\Http\Controllers\ImprimirReciboController;
@@ -78,6 +79,14 @@ Route::middleware(UsuarioActivoDelPanel::class, SuspensionPorMora::class)
          * esta ruta: el receptor entra al grupo igual, para su recibo.
          */
         Route::get('estado-mensual/{proyecto}', EstadoMensualController::class)->name('estado-mensual');
+
+        /*
+         * El mismo papel, de toda la vida del proyecto y con lo que falta
+         * cobrar (10-oct-2026). Las mismas llaves que el del mes.
+         *
+         *     /documentos/estado-general/1
+         */
+        Route::get('estado-general/{proyecto}', EstadoGeneralController::class)->name('estado-general');
 
         /*
          * El papel de una SALIDA: la devolución de una seña (R14) y el acta

@@ -21,7 +21,6 @@ use App\Models\Venta;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Collection;
 
 /**
  * El cierre de un mes: qué entró, qué salió, qué quedó y cuánto hay que entregar.
@@ -122,6 +121,14 @@ use Illuminate\Database\Eloquent\Collection;
  * La identidad que lo prueba: lo que queda por entregar entre todos, menos lo
  * que quedan debiendo, es lo cobrado menos lo que salió de la caja y menos lo
  * ya entregado. Al céntimo.
+ *
+ * ═══ POR QUE ALGUNAS CONSULTAS SON PUBLICAS (10-OCT-2026) ═══
+ *
+ * El estado general del proyecto (`EstadoGeneral`) cuenta lo mismo que esta
+ * hoja, pero de toda la vida del proyecto. Usa ESTAS consultas —qué es un
+ * ingreso, qué es un egreso, quién recibió el dinero— con un rango que lo
+ * abarca todo. Una sola definición: así la suma de los meses da lo mismo que
+ * el estado general, y nadie tiene que explicar por qué no.
  */
 final readonly class CierreDelMes
 {
@@ -201,68 +208,18 @@ final readonly class CierreDelMes
             $salidasDelMes,
         );
 
-        /*
-         * Ordenados por porcentaje descendente: así el sobrante de centavos
-         * —que `repartir()` le suma al primero— cae siempre en el socio de
-         * mayor parte, y de paso el papel se lee de mayor a menor.
-         */
-        $socios = Socio::query()
-            ->where('proyecto_id', $id)
-            ->activos()
-            ->orderByDesc('porcentaje')
-            ->orderBy('nombre')
-            ->get();
-
-        $partes = self::repartir($utilidadDelMes, $socios);
-        $entregas = self::entregadoPorSocio($id, $primerDia);
+        $socios = RepartoEntreSocios::sociosDe($id);
         $puesto = self::puestoPorSocio($id, $primerDia, $ultimoDia);
 
-        /*
-         * Lo que la caja no alcanza a devolver, y que cubren todos según su
-         * parte. Es la pérdida del mes, pero solo hasta lo que pusieron los
-         * socios del reparto: el rojo que la caja ya traía por sí sola no se
-         * le cobra a nadie. Ver «Y SI LA CAJA NO ALCANZA» en la cabecera.
-         */
-        $aDevolver = Monto::cero();
-
-        foreach ($socios as $socio) {
-            $aDevolver = $aDevolver->sumar($puesto[(int) $socio->getKey()] ?? Monto::cero());
-        }
-
-        $cubren = self::repartir($perdidaDelMes->mayorQue($aDevolver) ? $aDevolver : $perdidaDelMes, $socios);
-
-        $reparto = [];
-        $entregadoDelMes = Monto::cero();
-        $porEntregar = Monto::cero();
-
-        foreach ($socios as $indice => $socio) {
-            $leToca = $partes[$indice] ?? Monto::cero();
-            $recibido = $entregas[(int) $socio->getKey()] ?? Monto::cero();
-            $puso = $puesto[(int) $socio->getKey()] ?? Monto::cero();
-            $cubre = $cubren[$indice] ?? Monto::cero();
-
-            // A su favor: su parte y lo que puso de su bolsa (10-oct-2026).
-            $aFavor = $leToca->sumar($puso);
-
-            // En contra: lo que ya se llevó y su parte de lo que no alcanzó.
-            $enContra = $recibido->sumar($cubre);
-
-            $falta = $enContra->mayorQue($aFavor) ? Monto::cero() : $aFavor->restar($enContra);
-
-            $entregadoDelMes = $entregadoDelMes->sumar($recibido);
-            $porEntregar = $porEntregar->sumar($falta);
-
-            $reparto[] = new ParteDeUnSocio(
-                socio: $socio,
-                porcentaje: $socio->porcentaje(),
-                leToca: $leToca,
-                entregado: $recibido,
-                porEntregar: $falta,
-                entregadoDeMas: $enContra->mayorQue($aFavor) ? $enContra->restar($aFavor) : Monto::cero(),
-                puso: $puso,
-                cubre: $cubre,
-            );
-        }
+        // La regla del reparto vive en `RepartoEntreSocios`: la usa también el
+        // estado general del proyecto, y dos copias acabarían repartiendo distinto.
+        $elReparto = RepartoEntreSocios::armar(
+            utilidad: $utilidadDelMes,
+            perdida: $perdidaDelMes,
+            socios: $socios,
+            entregas: self::entregadoPorSocio($id, $primerDia),
+            puesto: $puesto,
+        );
 
         return new self(
             proyecto: $proyecto,
@@ -277,9 +234,9 @@ final readonly class CierreDelMes
             salidasDelMes: $salidasDelMes,
             utilidadDelMes: $utilidadDelMes,
             perdidaDelMes: $perdidaDelMes,
-            entregadoDelMes: $entregadoDelMes,
-            porEntregar: $porEntregar,
-            reparto: $reparto,
+            entregadoDelMes: $elReparto->entregado,
+            porEntregar: $elReparto->porEntregar,
+            reparto: $elReparto->partes,
             sinCobrar: LoSinCobrarDelMes::de(self::cuotasSinPagar($id, $primerDia, $ultimoDia)),
             vencioEnElMes: self::loQueVencio($id, $primerDia, $ultimoDia),
             puestoPorSociosDelMes: self::sumar($puesto),
@@ -448,7 +405,7 @@ final readonly class CierreDelMes
      *
      * @return array<string, Monto>
      */
-    private static function cobradoPorConcepto(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): array
+    public static function cobradoPorConcepto(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): array
     {
         $filas = Recibo::query()
             ->reorder()
@@ -485,7 +442,7 @@ final readonly class CierreDelMes
      *
      * @return array<string, Monto>
      */
-    private static function cobradoPorForma(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): array
+    public static function cobradoPorForma(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): array
     {
         $filas = Recibo::query()
             ->reorder()
@@ -525,7 +482,7 @@ final readonly class CierreDelMes
      *
      * @return list<array{nombre: string, porForma: array<string, Monto>, total: Monto}>
      */
-    private static function cobradoPorPersona(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): array
+    public static function cobradoPorPersona(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): array
     {
         $filas = Recibo::query()
             ->reorder()
@@ -605,7 +562,7 @@ final readonly class CierreDelMes
     /**
      * @return array<string, Monto>
      */
-    private static function gastadoPorCategoria(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): array
+    public static function gastadoPorCategoria(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): array
     {
         // TODOS: el que pagó un socio de su bolsa también es costo del
         // desarrollo. Que se le devuelva lo resuelve el reparto (10-oct-2026).
@@ -643,7 +600,7 @@ final readonly class CierreDelMes
      *
      * Solo `monto_devuelto`: lo retenido no salió de la caja, se quedó.
      */
-    private static function devuelto(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): Monto
+    public static function devuelto(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): Monto
     {
         $entre = [$desde->toDateString(), $hasta->toDateString()];
 
@@ -703,7 +660,7 @@ final readonly class CierreDelMes
      *
      * @return array<int, Monto>
      */
-    private static function puestoPorSocio(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): array
+    public static function puestoPorSocio(int $proyecto, CarbonImmutable $desde, CarbonImmutable $hasta): array
     {
         $filas = Gasto::query()
             ->reorder()
@@ -734,7 +691,7 @@ final readonly class CierreDelMes
      *
      * @return list<array{nombre: string, monto: Monto}>
      */
-    private static function puestoConNombre(array $puesto): array
+    public static function puestoConNombre(array $puesto): array
     {
         if ($puesto === []) {
             return [];
@@ -994,40 +951,6 @@ final readonly class CierreDelMes
         return $salidas->mayorQue($entradas)
             ? ['utilidad' => Monto::cero(), 'perdida' => $salidas->restar($entradas)]
             : ['utilidad' => $entradas->restar($salidas), 'perdida' => Monto::cero()];
-    }
-
-    /**
-     * El total repartido entre los socios, al céntimo.
-     *
-     * El sobrante del redondeo va al de MAYOR porcentaje —los socios vienen
-     * ordenados así— porque hay que dárselo a alguien y esa es la convención
-     * que menos discusión genera. Sin esto, la suma de las partes no da el
-     * total y el papel no cuadra consigo mismo.
-     *
-     * @param Collection<int, Socio> $socios
-     *
-     * @return list<Monto>
-     */
-    private static function repartir(Monto $total, Collection $socios): array
-    {
-        if ($socios->isEmpty() || $total->esCero()) {
-            return array_fill(0, $socios->count(), Monto::cero());
-        }
-
-        $partes = [];
-        $asignado = Monto::cero();
-
-        foreach ($socios as $socio) {
-            $parte = new Monto($socio->suParteDe($total)->redondeado());
-            $partes[] = $parte;
-            $asignado = $asignado->sumar($parte);
-        }
-
-        if ($total->mayorQue($asignado)) {
-            $partes[0] = $partes[0]->sumar($total->restar($asignado));
-        }
-
-        return $partes;
     }
 
     /**

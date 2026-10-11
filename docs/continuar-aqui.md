@@ -3,9 +3,40 @@
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
 
+## 10-oct (tarde) — El estado general del proyecto
+
+**EN LOCAL** — falta la puerta, commitear y desplegar.
+
+Pedido de Mauricio desde la pantalla del Estado mensual: un estado de
+resultados «general de todo» —ganancias, gastos, cuánto recibió cada socio y
+en qué forma— «con proyección de lo que ya se vendió y falta de cobrar».
+
+- **Dónde:** botón gris «Estado general» en la pantalla Estado mensual, al lado
+  de «Ver el estado del mes». Abre la hoja en la misma ventana flotante.
+  Ruta `/documentos/estado-general/{proyecto}`, mismas llaves que la del mes
+  (ver el proyecto + ver gastos; el receptor recibe 403).
+- **El cálculo:** `App\Domain\Reportes\EstadoGeneral`. Ingresos, egresos y
+  quién recibió el dinero salen de las MISMAS consultas de `CierreDelMes`
+  (que pasaron a `public static`) con un rango que lo abarca todo: la suma de
+  los meses da lo mismo que esta hoja. La tabla año por año lo prueba.
+- **El reparto** salió de `CierreDelMes::de()` a `RepartoEntreSocios` (una sola
+  regla para las dos hojas). En la general se reparte la utilidad de TODA la
+  vida: puede no coincidir con la suma de los meses, porque el mes no descuenta
+  los meses en pérdida. La hoja lo dice.
+- **La cartera:** vendido = compromisos de venta vivos de expedientes vigentes
+  o liquidados; falta cobrar = la misma cuenta del Escritorio (cuotas con
+  saldo, expedientes vigentes, lotes vivos), con lo atrasado aparte y lo que
+  viene por año; las señas de apartados en curso van en un aviso (no son
+  ingreso hasta formalizarse, regla del 13-ago).
+- **La proyección:** resultado a la fecha → si se cobra todo lo vendido → si
+  además se venden los disponibles y apartados a precio de lista. Avisa si hay
+  lotes por vender sin precio.
+- El membrete de las dos hojas vive en el trait
+  `Http\Controllers\Concerns\MembreteDelProyecto`.
+
 ## 10-oct — 🔴 El gasto de un socio es A SU FAVOR, no en su contra
 
-**EN LOCAL** — falta la puerta, commitear (con el `git mv` del test) y desplegar.
+**EN PRODUCCIÓN** (793e694; la tabla «Quién recibió el dinero» en 049ff3a).
 
 Lo del 8-oct (abajo) se construyó al revés. Mauricio, ya en producción: «los
 gastos que se cargan a x persona, es dinero que ellos ponen de su bolsa al

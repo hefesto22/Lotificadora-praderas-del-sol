@@ -134,7 +134,7 @@ class EstadoMensual extends Page
             ->statePath('data')
             ->components([
                 Section::make('Qué mes se quiere ver')
-                    ->description('Se abre el estado de resultados de ese mes: lo que entró, lo que se gastó, cuánto le toca a cada socio y qué cuotas quedaron sin pagar.')
+                    ->description('Se abre el estado de resultados de ese mes: lo que entró, lo que se gastó, cuánto le toca a cada socio y qué cuotas quedaron sin pagar. «Estado general» abre todo el proyecto junto, desde el principio, con lo que falta cobrar.')
                     ->schema([
                         /*
                          * ⚠️ `selectablePlaceholder(false)` en los dos: sin eso
@@ -192,6 +192,27 @@ class EstadoMensual extends Page
     protected function getHeaderActions(): array
     {
         return [
+            /*
+             * El estado general del proyecto (10-oct-2026): toda su vida y
+             * hacia dónde va. Usa el proyecto elegido y no el mes, y se abre
+             * en la misma ventana flotante que la hoja del mes.
+             *
+             * Gris y a la izquierda: la acción principal de esta pantalla
+             * sigue siendo el mes, que es la que se saca todos los meses.
+             */
+            Action::make('general')
+                ->label('Estado general')
+                ->icon(Heroicon::OutlinedPresentationChartLine)
+                ->color('gray')
+                ->modalHeading(fn (): string => 'Estado general · '.($this->nombreDelProyectoElegido() ?? 'Proyecto'))
+                ->modalDescription('Desde el inicio del proyecto hasta hoy, con lo que falta cobrar de lo vendido.')
+                ->modalWidth(Width::FourExtraLarge)
+                ->modalContent(fn (): View => view('filament.pages.estado-mensual-marco', [
+                    'url' => route('documentos.estado-general', ['proyecto' => $this->proyectoElegido() ?? 0]),
+                ]))
+                ->modalSubmitAction(false)
+                ->modalCancelActionLabel('Cerrar'),
+
             Action::make('ver')
                 ->label('Ver el estado del mes')
                 ->icon(Heroicon::OutlinedDocumentText)
