@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use App\Models\User;
+use App\Support\LatidoDelCron;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Storage;
 
 /*
 |--------------------------------------------------------------------------
@@ -38,6 +40,10 @@ beforeEach(function (): void {
 
     // El cron acaba de latir.
     Cache::put('health:checks:schedule:latestHeartbeatAt', time());
+
+    // El latido en archivo, vacío: en la Mac el scheduler de Herd escribe el
+    // de verdad cada minuto, y el test de «nunca corrió» lo encontraría.
+    Storage::fake('local');
 });
 
 test('un servidor bien configurado pasa la revisión', function (): void {
@@ -87,6 +93,27 @@ test('se da cuenta de que el cron nunca corrió', function (): void {
 
 test('se da cuenta de que el cron se murió hace rato', function (): void {
     Cache::put('health:checks:schedule:latestHeartbeatAt', time() - 3600);
+
+    $this->artisan('olympo:verificar-produccion')->assertExitCode(1);
+});
+
+/*
+| Mauricio, 10-oct-2026: «ese del cron se presenta la falla cada que hacemos
+| commit». El despliegue vacía la caché, y con ella el latido. El del archivo
+| no se borra: con él, la revisión de justo después de desplegar ya pasa.
+*/
+test('el latido sobrevive a que el despliegue vacíe la caché', function (): void {
+    LatidoDelCron::latir();
+    Cache::forget('health:checks:schedule:latestHeartbeatAt');
+
+    $this->artisan('olympo:verificar-produccion')->assertExitCode(0);
+});
+
+test('un latido viejo en el archivo no tapa un cron caído', function (): void {
+    Storage::disk('local')->put('latido-del-cron', (string) (time() - 3600));
+    Cache::forget('health:checks:schedule:latestHeartbeatAt');
+
+    expect(LatidoDelCron::ultimo())->toBeLessThan(time() - 3000);
 
     $this->artisan('olympo:verificar-produccion')->assertExitCode(1);
 });

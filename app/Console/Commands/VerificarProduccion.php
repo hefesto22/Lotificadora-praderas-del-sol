@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Domain\Enums\ConceptoDeRecibo;
 use App\Models\User;
+use App\Support\LatidoDelCron;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -160,11 +161,10 @@ final class VerificarProduccion extends Command
          * que este comando HABLE, no que tire un stack trace.
          */
         try {
-            $latido = Cache::get('health:checks:schedule:latestHeartbeatAt');
-            $legible = is_numeric($latido);
+            $enCache = Cache::get('health:checks:schedule:latestHeartbeatAt');
+            $latido = is_numeric($enCache) ? (int) $enCache : null;
         } catch (Throwable $error) {
             $latido = null;
-            $legible = false;
             $this->revisar(
                 'La caché responde',
                 false,
@@ -173,7 +173,18 @@ final class VerificarProduccion extends Command
             );
         }
 
-        $minutos = $legible ? (int) floor((time() - (int) $latido) / 60) : null;
+        /*
+         * 🔴 El de la caché se borra en cada despliegue (`optimize:clear`), y
+         * la revisión de justo después decía «nunca latió» con el cron sano
+         * (10-oct-2026). El del archivo sobrevive: manda el más reciente.
+         */
+        $enArchivo = LatidoDelCron::ultimo();
+
+        if ($enArchivo !== null && ($latido === null || $enArchivo > $latido)) {
+            $latido = $enArchivo;
+        }
+
+        $minutos = $latido !== null ? (int) floor((time() - $latido) / 60) : null;
 
         $this->revisar(
             'El cron del servidor está corriendo',
@@ -181,8 +192,13 @@ final class VerificarProduccion extends Command
             $minutos === null
                 ? 'Nunca latió: schedule:run no corrió en este servidor'
                 : "Último latido hace {$minutos} minuto(s)",
-            'Agregar al crontab del servidor:'."\n".
-            '        * * * * * cd '.base_path().' && php artisan schedule:run >> /dev/null 2>&1'."\n".
+            /*
+             * Como el usuario de la web y con el PHP que corre esta revisión:
+             * la línea vieja —`php artisan` a secas— corría como root con el
+             * PHP por defecto del servidor, y eso fue el 500 del 27-ago.
+             */
+            'Agregar al crontab, como el usuario de la web y con el PHP de esta revisión:'."\n".
+            '        * * * * * cd '.base_path().' && sudo -u www-data '.PHP_BINARY.' artisan schedule:run >> /dev/null 2>&1'."\n".
             '        Sin cron no hay respaldo, ni limpieza, ni monitoreo — y nada de eso avisa que falta.',
         );
     }

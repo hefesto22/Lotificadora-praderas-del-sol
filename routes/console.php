@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Support\Infraestructura;
+use App\Support\LatidoDelCron;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -64,6 +65,15 @@ Schedule::command('health:schedule-check-heartbeat')
     ->everyMinute()
     ->onOneServer()
     ->name('health-heartbeat');
+
+// El mismo latido, en un archivo que el despliegue no borra (10-oct-2026).
+// El de arriba vive en la caché y `optimize:clear` lo vacía: la revisión de
+// después de cada despliegue decía «el cron nunca latió». Ver LatidoDelCron.
+Schedule::call(static function (): void {
+    LatidoDelCron::latir();
+})
+    ->everyMinute()
+    ->name('latido-del-cron');
 
 /*
 |─── Horizon ───────────────────────────────────────────────────────────
