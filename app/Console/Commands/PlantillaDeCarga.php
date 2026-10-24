@@ -54,7 +54,10 @@ final class PlantillaDeCarga extends Command
 {
     public function handle(): int
     {
-        $codigo = mb_strtoupper((string) $this->argument('codigo'));
+        // Laravel 13.30 tipa `argument()` como array|bool|float|int|string|null:
+        // un `(string)` sobre eso ya no pasa PHPStan. Se estrecha de verdad.
+        $argumento = $this->argument('codigo');
+        $codigo = mb_strtoupper(is_string($argumento) ? $argumento : '');
 
         $proyecto = Proyecto::query()->where('codigo', $codigo)->first();
 
@@ -64,7 +67,8 @@ final class PlantillaDeCarga extends Command
             return self::FAILURE;
         }
 
-        $carpeta = storage_path('app/'.trim((string) $this->option('salida'), '/'));
+        $salida = $this->option('salida');
+        $carpeta = storage_path('app/'.trim(is_string($salida) ? $salida : '', '/'));
 
         if (! is_dir($carpeta) && ! mkdir($carpeta, 0755, true) && ! is_dir($carpeta)) {
             $this->error("No se pudo crear la carpeta {$carpeta}.");

@@ -136,7 +136,9 @@ describe('Quién puede tocar la carpeta', function (): void {
 
         $this->actingAs($user);
 
-        ($this->carpeta)()->assertActionHidden(TestAction::make('create')->table());
+        // Desde Filament 5.10 la carpeta entera se niega (403) a quien no
+        // puede verla: ni se monta, así que no hay botón que esconder.
+        ($this->carpeta)()->assertForbidden();
     });
 });
 

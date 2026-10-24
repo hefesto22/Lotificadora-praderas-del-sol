@@ -70,7 +70,10 @@ final class LimpiarCartera extends Command
 {
     public function handle(): int
     {
-        $codigo = mb_strtoupper((string) $this->argument('codigo'));
+        // Laravel 13.30 tipa `argument()` como array|bool|float|int|string|null:
+        // un `(string)` sobre eso ya no pasa PHPStan. Se estrecha de verdad.
+        $argumento = $this->argument('codigo');
+        $codigo = mb_strtoupper(is_string($argumento) ? $argumento : '');
 
         $proyecto = Proyecto::query()->where('codigo', $codigo)->first();
 

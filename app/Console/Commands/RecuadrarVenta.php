@@ -114,7 +114,9 @@ final class RecuadrarVenta extends Command
             return self::SUCCESS;
         }
 
-        $motivo = trim((string) $this->option('motivo'));
+        // Laravel 13.30 tipa `option()` como array|bool|float|int|string|null.
+        $escrito = $this->option('motivo');
+        $motivo = trim(is_string($escrito) ? $escrito : '');
 
         if ($motivo === '') {
             $this->components->error('Falta --motivo. Un recuadre sin motivo es un saldo que cambió sin que nadie tenga que explicarlo.');

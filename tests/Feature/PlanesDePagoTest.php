@@ -217,13 +217,18 @@ describe('La pestaña del proyecto', function (): void {
     | uno por uno, Filament —que permite lo que no tiene politica— dejaba a
     | cualquiera editar el precio de lista del proyecto entero.
     */
+    /*
+    | Desde Filament 5.10 la pestaña entera se niega (403) a quien no puede
+    | verla: ya ni se monta, así que ni hay botón que esconder. Es una
+    | garantía más fuerte que la de antes, no una distinta.
+    */
     test('un usuario sin permisos no puede tocar los precios', function (): void {
         actingAsPanelUser();
 
         Livewire::test(PlanesDePagoRelationManager::class, [
             'ownerRecord' => $this->proyecto,
             'pageClass'   => ViewProyecto::class,
-        ])->assertActionHidden(TestAction::make('create')->table());
+        ])->assertForbidden();
     });
 
     /*

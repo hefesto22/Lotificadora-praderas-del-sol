@@ -14,8 +14,11 @@ use App\Models\Cuota;
 use App\Models\Gasto;
 use App\Models\Lote;
 use App\Models\Proyecto;
+use App\Models\User;
 use App\Support\Roles;
+use Database\Seeders\RoleSeeder;
 use Livewire\Livewire;
+use Spatie\Permission\PermissionRegistrar;
 
 /*
 |--------------------------------------------------------------------------
@@ -131,7 +134,7 @@ describe('Corte de caja de hoy', function (): void {
     test('un receptor ve solo lo que cobró él', function (): void {
         $cobradoPorOtro = ($this->cobrar)('25000.00');
 
-        $this->actingAs(crearUsuarioConRol(Roles::RECEPTOR));
+        $this->actingAs(receptorDeVerdad());
 
         Livewire::test(CorteDeCajaDeHoy::class)
             ->assertSee('Cobrado por vos hoy')
@@ -183,10 +186,28 @@ describe('Corte de caja de hoy', function (): void {
     test('al receptor no se le restan los gastos de la administración', function (): void {
         Gasto::factory()->de('12000.00')->create();
 
-        $this->actingAs(crearUsuarioConRol(Roles::RECEPTOR));
+        $this->actingAs(receptorDeVerdad());
 
+        // El primer assert es el que hace valer a los otros dos: sin él, una
+        // pantalla que no se dibujó también «no muestra» el gasto.
         Livewire::test(CorteDeCajaDeHoy::class)
+            ->assertSee('Cobrado por vos hoy')
             ->assertDontSee('Salió de la caja hoy')
             ->assertDontSee('L. 12,000.00');
     });
 });
+
+/**
+ * Un receptor con los permisos que le da el RoleSeeder de verdad.
+ *
+ * Desde Filament 5.10 un widget se niega (403) a quien no pasa su `canView()`,
+ * y un rol armado a mano no trae `ViewAny:Recibo`: el corte de caja ni se
+ * dibujaba. Con el seeder, el test prueba la matriz real.
+ */
+function receptorDeVerdad(): User
+{
+    test()->seed(RoleSeeder::class);
+    resolve(PermissionRegistrar::class)->forgetCachedPermissions();
+
+    return crearUsuarioConRol(Roles::RECEPTOR);
+}

@@ -120,7 +120,8 @@ describe('Los grupos', function (): void {
 
         // El orden es por frecuencia de uso: quien atiende vive arriba.
         expect(array_map(
-            static fn (NavigationGroup $grupo): ?string => $grupo->getLabel(),
+            // Filament 5.8 tipa `getLabel()` con Htmlable también.
+            static fn (NavigationGroup $grupo): ?string => enTextoPlano($grupo->getLabel()),
             gruposDeclarados(),
         ))->toBe(Menu::grupos());
     });
