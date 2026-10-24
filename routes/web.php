@@ -11,6 +11,7 @@ use App\Http\Controllers\ImprimirRecibosController;
 use App\Http\Controllers\PlanoImagenController;
 use App\Http\Controllers\PlanoPublicoController;
 use App\Http\Controllers\RegistrarInteresController;
+use App\Http\Controllers\ReporteDeCajaController;
 use App\Http\Middleware\SuspensionPorMora;
 use App\Http\Middleware\UsuarioActivoDelPanel;
 use Illuminate\Support\Facades\Route;
@@ -87,6 +88,17 @@ Route::middleware(UsuarioActivoDelPanel::class, SuspensionPorMora::class)
          *     /documentos/estado-general/1
          */
         Route::get('estado-general/{proyecto}', EstadoGeneralController::class)->name('estado-general');
+
+        /*
+         * La caja de un rango de días, de uno, varios o todos los proyectos
+         * (24-oct-2026). Es la pantalla «Caja» en una hoja.
+         *
+         *     /documentos/caja?desde=2026-10-01&hasta=2026-10-24&proyectos=1,3
+         *
+         * La llave es la de la lista de recibos, y el recorte del receptor lo
+         * decide el controlador con el usuario conectado, no la URL.
+         */
+        Route::get('caja', ReporteDeCajaController::class)->name('caja');
 
         /*
          * El papel de una SALIDA: la devolución de una seña (R14) y el acta

@@ -194,7 +194,8 @@ describe('el cálculo', function (): void {
         $sinAnotar = ($this->cobrar)($this->norte, '250.00', '2026-10-07');
         Recibo::query()->whereKey($sinAnotar->getKey())->update(['recibido_por' => null]);
 
-        $quienes = CajaPorDia::quienesRecibieron(CarbonImmutable::parse('2026-10-07'));
+        $dia = CarbonImmutable::parse('2026-10-07');
+        $quienes = CajaPorDia::quienesRecibieron($dia, $dia);
 
         expect(array_column($quienes, 'nombre'))->toBe(['EDWIN ADONAY', 'ELDER DIONEL', 'Sin anotar'])
             ->and($quienes[0]['total'])->toBeMonto('3000.00')
@@ -320,6 +321,78 @@ describe('la pantalla', function (): void {
 });
 
 /*
+| El papel — 24-oct-2026, la misma tarde: «¿no hay un botón como para
+| imprimir el reporte de lo que se selecciona?». Lo que se imprime tiene que
+| ser lo que se estaba mirando.
+*/
+describe('el papel', function (): void {
+    test('el botón Imprimir arma la dirección con los días y los proyectos elegidos', function (): void {
+        $pantalla = Livewire::test(Caja::class)
+            ->set('filtros.desde', '2026-10-02')
+            ->set('filtros.hasta', '2026-10-09')
+            ->set('filtros.proyectos', [(string) $this->sur->getKey(), (string) $this->norte->getKey()])
+            ->assertActionVisible('imprimir');
+
+        parse_str((string) parse_url($pantalla->instance()->urlDelReporte(), PHP_URL_QUERY), $consulta);
+
+        expect($consulta)->toBe([
+            'desde'     => '2026-10-02',
+            'hasta'     => '2026-10-09',
+            'proyectos' => $this->sur->getKey().','.$this->norte->getKey(),
+        ]);
+    });
+
+    test('la hoja trae los recibos del proyecto elegido, sin los anulados', function (): void {
+        ($this->cobrar)($this->norte, '1000.00', '2026-10-03', ['numero' => 4321]);
+        ($this->cobrar)($this->sur, '2000.00', '2026-10-03', ['numero' => 8765]);
+        ($this->cobrar)($this->norte, '9999.00', '2026-10-04', [
+            'numero'           => 5555,
+            'anulado_el'       => '2026-10-04',
+            'motivo_anulacion' => 'Error de carga.',
+        ]);
+
+        $this->get(route('documentos.caja', [
+            'desde'     => '2026-10-01',
+            'hasta'     => '2026-10-24',
+            'proyectos' => (string) $this->norte->getKey(),
+        ]))
+            ->assertOk()
+            ->assertSeeText('Reporte de caja')
+            ->assertSeeText('Del 1 al 24 de octubre de 2026')
+            ->assertSeeText('004321')
+            ->assertDontSeeText('008765')
+            ->assertDontSeeText('005555');
+    });
+
+    test('sin proyectos en la dirección suma todos', function (): void {
+        ($this->cobrar)($this->norte, '1000.00', '2026-10-03', ['numero' => 4321]);
+        ($this->cobrar)($this->sur, '2000.00', '2026-10-03', ['numero' => 8765]);
+
+        $this->get(route('documentos.caja', ['desde' => '2026-10-01', 'hasta' => '2026-10-24']))
+            ->assertOk()
+            ->assertSeeText('Todos los proyectos')
+            ->assertSeeText('004321')
+            ->assertSeeText('008765');
+    });
+
+    /*
+    | Es una dirección que alguien puede teclear. `2026-99-99` no da error en
+    | PHP: se desborda a otro año. Lo que no se entiende cae al mes corriente.
+    */
+    test('fechas que no se entienden caen al mes corriente', function (): void {
+        $this->get(route('documentos.caja', ['desde' => 'ayer', 'hasta' => '2026-99-99']))
+            ->assertOk()
+            ->assertSeeText('Del 1 al 24 de octubre de 2026');
+    });
+
+    test('sin permiso para ver recibos, no hay papel', function (): void {
+        actingAsPanelUser();
+
+        $this->get(route('documentos.caja'))->assertForbidden();
+    });
+});
+
+/*
 | `Roles::RECEPTOR` promete que «NO ve el arqueo de otro receptor». Se siembra
 | el RoleSeeder de verdad: un rol armado a mano no prueba la matriz.
 */
@@ -357,5 +430,24 @@ describe('quién la ve', function (): void {
             ->assertSee('Lo que entró');
 
         expect($pantalla->instance()->caja()->total)->toBeMonto('3000.00');
+    });
+
+    /*
+    | 🔴 El recorte lo decide el controlador con el usuario conectado: la
+    | dirección no dice a quién recortar, así que editarla no sirve de nada.
+    */
+    test('el receptor imprime solo lo que recibió él', function (): void {
+        $receptor = crearUsuarioConRol(Roles::RECEPTOR);
+
+        ($this->cobrar)($this->norte, '1000.00', '2026-10-03', ['numero' => 4321, 'recibido_por' => $receptor->getKey()]);
+        ($this->cobrar)($this->norte, '2000.00', '2026-10-03', ['numero' => 8765]);
+
+        $this->actingAs($receptor);
+
+        $this->get(route('documentos.caja', ['desde' => '2026-10-01', 'hasta' => '2026-10-24']))
+            ->assertOk()
+            ->assertSeeText('Recibido por')
+            ->assertSeeText('004321')
+            ->assertDontSeeText('008765');
     });
 });

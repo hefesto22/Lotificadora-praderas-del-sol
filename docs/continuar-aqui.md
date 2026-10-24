@@ -5,7 +5,8 @@
 
 ## 24-oct — La pantalla «Caja»: lo que entró, día por día
 
-**SIN COMMITEAR.** Pedido de Mauricio: «función de caja, aunque solo será para
+**EN PRODUCCIÓN** (c1a6df9). El botón «Imprimir», **sin commitear**.
+Pedido de Mauricio: «función de caja, aunque solo será para
 reportes de lo que se recibió qué día … nadie la abrirá … el 1 de octubre, el 2
 de octubre y así … solo de un proyecto o de dos o de más», en el menú «abajo de
 Escritorio, que diga Caja».
@@ -32,10 +33,20 @@ Escritorio, que diga Caja».
   delega en él: la regla de los dos caminos —venta o compromiso— quedó en un
   solo lugar). Tests: `tests/Feature/Filament/CajaTest.php`.
 - Sin migración, sin permiso nuevo, sin seeder.
-- **Ideas que quedaron sin construir** (propuestas, nada aprobado): imprimir el
-  reporte del rango (misma ventana flotante del Estado mensual), y restar lo
-  que salió en efectivo (gastos de la caja y devoluciones) para que cada día
-  diga cuánto tenía que quedar en la gaveta.
+- **El papel** (la misma tarde, ya en producción: «¿no hay un botón como para
+  imprimir el reporte de lo que se selecciona?»): botón **Imprimir** en Caja →
+  `/documentos/caja?desde=…&hasta=…&proyectos=1,3`, en la ventana flotante del
+  Estado mensual. `ReporteDeCajaController` + `documentos/caja.blade.php`:
+  membrete (el del proyecto si es uno solo; si no, el de la lotificadora),
+  lo que entró por forma, quién lo recibió, día por día, los recibos (tope
+  1,000, la hoja avisa si quedan más), firmas Entregó / Recibió. El recorte
+  del receptor lo decide el controlador, NUNCA la URL. Para eso
+  `CajaPorDia` ganó `acotar()`, `renglones()`, `periodoEscrito()`,
+  `nombreDelDia()` y `proyectosEscritos()`, y `quienesRecibieron()` pasó a
+  recibir un rango; la pantalla y el papel usan las mismas.
+- **Idea sin construir** (propuesta, nada aprobado): restar lo que salió en
+  efectivo (gastos de la caja y devoluciones) para que cada día diga cuánto
+  tenía que quedar en la gaveta.
 
 ## 10-oct (tarde) — El estado general del proyecto
 

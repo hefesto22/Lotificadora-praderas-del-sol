@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace App\Domain\Reportes;
 
+use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\ValueObjects\Monto;
+use App\Models\Proyecto;
 use App\Models\Recibo;
 use App\Models\User;
 use Carbon\CarbonImmutable;
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Collection;
 
 /**
  * La caja, día por día: cuánto dinero entró cada día — 24-oct-2026.
@@ -48,6 +50,15 @@ use Illuminate\Database\Eloquent\Collection;
  */
 final readonly class CajaPorDia
 {
+    /**
+     * Un año, como mucho, de una vez.
+     *
+     * La consulta aguanta más —es una sola, agrupada—, pero ni la pantalla ni
+     * el papel: tres años son mil renglones que nadie lee. Si piden más, se
+     * recorta desde el «hasta» hacia atrás y se dice.
+     */
+    public const int DIAS_COMO_MUCHO = 366;
+
     /**
      * @param list<DiaDeCaja> $dias del más viejo al más nuevo, solo los que tuvieron cobros
      * @param array<string, Monto> $porForma clave: `FormaDePago::value`, en el orden del enum
@@ -145,6 +156,30 @@ final readonly class CajaPorDia
     }
 
     /**
+     * El rango que de verdad se muestra: ordenado, y con tope de un año.
+     *
+     * Lo usan la pantalla y el papel. Si cada uno acotara por su lado, un día
+     * la hoja impresa diría un período distinto del que se estaba mirando.
+     *
+     * @return array{desde: CarbonImmutable, hasta: CarbonImmutable, recortado: bool}
+     */
+    public static function acotar(CarbonImmutable $desde, CarbonImmutable $hasta): array
+    {
+        // Dadas vuelta no es un error que valga la pena gritar: se entiende.
+        if ($hasta->isBefore($desde)) {
+            [$desde, $hasta] = [$hasta, $desde];
+        }
+
+        $tope = $hasta->subDays(self::DIAS_COMO_MUCHO - 1);
+
+        if ($desde->isBefore($tope)) {
+            return ['desde' => $tope, 'hasta' => $hasta, 'recortado' => true];
+        }
+
+        return ['desde' => $desde, 'hasta' => $hasta, 'recortado' => false];
+    }
+
+    /**
      * Los recibos que cuenta la caja. EL filtro, escrito una sola vez.
      *
      * Lo usan el total, el detalle de un día y quién recibió: si cada uno
@@ -182,49 +217,78 @@ final readonly class CajaPorDia
     }
 
     /**
-     * Los recibos de UN día, para abrir su renglón.
+     * Los recibos del rango, uno por renglón, listos para leer.
      *
-     * Con tope: un día normal trae una docena, pero la pantalla no puede
-     * depender de que sean pocos (§12). El renglón dice cuántos quedaron
-     * afuera.
+     * Lo usan el detalle de un día en la pantalla y el anexo del papel. Se
+     * arma acá —y no en cada vista— porque las etiquetas son reglas: el folio,
+     * a nombre de quién salió, qué lote tocó.
+     *
+     * Con tope: la pantalla no puede depender de que sean pocos (§12). Quien
+     * llama dice cuántos quedaron afuera comparando contra `$recibos`.
      *
      * @param list<int> $proyectos
      *
-     * @return Collection<int, Recibo>
+     * @return list<array{id: int, fecha: CarbonImmutable, folio: string, nombre: string, lotes: string, concepto: string, forma: string, recibio: string, monto: Monto}>
      */
-    public static function recibosDelDia(
-        CarbonImmutable $dia,
+    public static function renglones(
+        CarbonImmutable $desde,
+        CarbonImmutable $hasta,
         array $proyectos = [],
         ?int $recibidoPor = null,
         int $tope = 200,
-    ): Collection {
-        return self::recibos($dia, $dia, $proyectos, $recibidoPor)
+    ): array {
+        $recibos = self::recibos($desde, $hasta, $proyectos, $recibidoPor)
             // Lo mismo que precarga la lista de Recibos para dibujar el lote:
             // sin esto, cada renglón haría sus propias consultas.
             ->with(['cliente', 'compromiso.lote', 'aplicaciones.cuota.compromiso.lote', 'recibidoPor', 'createdBy'])
+            ->orderBy('fecha')
             ->orderBy('id')
             ->limit($tope)
             ->get();
+
+        $renglones = [];
+
+        foreach ($recibos as $recibo) {
+            $concepto = $recibo->getAttribute('concepto');
+            $forma = $recibo->getAttribute('forma_pago');
+            $fecha = $recibo->getAttribute('fecha');
+            $lotes = $recibo->codigosDeLotes();
+
+            $renglones[] = [
+                'id'       => (int) $recibo->getKey(),
+                'fecha'    => CarbonImmutable::parse($fecha instanceof DateTimeInterface ? $fecha->format('Y-m-d') : $desde->toDateString()),
+                'folio'    => $recibo->folio(),
+                'nombre'   => $recibo->nombreDelPapel(),
+                'lotes'    => $lotes === [] ? '—' : implode(' · ', $lotes),
+                'concepto' => $concepto instanceof ConceptoDeRecibo ? $concepto->etiqueta() : '—',
+                'forma'    => $forma instanceof FormaDePago ? $forma->etiqueta() : '—',
+                'recibio'  => $recibo->nombreDeQuienRecibio() ?? '—',
+                'monto'    => $recibo->montoTotal(),
+            ];
+        }
+
+        return $renglones;
     }
 
     /**
-     * Quién recibió el dinero de un día, de mayor a menor.
+     * Quién recibió el dinero del rango —un día o un mes—, de mayor a menor.
      *
      * Por `recibido_por` —el «¿Quién recibió el dinero?» del cobro, R24—, que
      * es lo que pregunta un arqueo: quién tiene el billete en la mano. Los
      * recibos de antes del 27-ago que no lo anotaron van a «Sin anotar», para
-     * que la suma de las personas siga siendo el total del día.
+     * que la suma de las personas siga siendo el total.
      *
      * @param list<int> $proyectos
      *
      * @return list<array{nombre: string, total: Monto}>
      */
     public static function quienesRecibieron(
-        CarbonImmutable $dia,
+        CarbonImmutable $desde,
+        CarbonImmutable $hasta,
         array $proyectos = [],
         ?int $recibidoPor = null,
     ): array {
-        $filas = self::recibos($dia, $dia, $proyectos, $recibidoPor)
+        $filas = self::recibos($desde, $hasta, $proyectos, $recibidoPor)
             ->groupBy('recibido_por')
             ->selectRaw('recibido_por, COALESCE(SUM(monto), 0) AS total')
             ->toBase()
@@ -266,7 +330,65 @@ final readonly class CajaPorDia
         return $lista;
     }
 
+    /**
+     * «Todos los proyectos», o sus nombres: «NORTE, SUR y ESTE».
+     *
+     * @param list<int> $proyectos
+     */
+    public static function proyectosEscritos(array $proyectos): string
+    {
+        if ($proyectos === []) {
+            return 'Todos los proyectos';
+        }
+
+        /** @var list<string> $nombres */
+        $nombres = Proyecto::query()
+            ->reorder()
+            ->whereKey($proyectos)
+            ->orderBy('nombre')
+            ->pluck('nombre')
+            ->all();
+
+        if (count($nombres) < 2) {
+            return $nombres[0] ?? 'Todos los proyectos';
+        }
+
+        $ultimo = array_pop($nombres);
+
+        return implode(', ', $nombres).' y '.$ultimo;
+    }
+
     // ─── Lo que se lee de la caja ─────────────────────────────────────
+
+    /**
+     * «Del 1 al 24 de octubre de 2026», o el día solo si es uno.
+     */
+    public function periodoEscrito(): string
+    {
+        if ($this->desde->isSameDay($this->hasta)) {
+            return ucfirst($this->desde->translatedFormat('l j \d\e F \d\e Y'));
+        }
+
+        if ($this->desde->year !== $this->hasta->year) {
+            return 'Del '.$this->desde->translatedFormat('j \d\e F \d\e Y').' al '.$this->hasta->translatedFormat('j \d\e F \d\e Y');
+        }
+
+        if ($this->desde->month !== $this->hasta->month) {
+            return 'Del '.$this->desde->translatedFormat('j \d\e F').' al '.$this->hasta->translatedFormat('j \d\e F \d\e Y');
+        }
+
+        return 'Del '.$this->desde->day.' al '.$this->hasta->translatedFormat('j \d\e F \d\e Y');
+    }
+
+    /**
+     * «Jueves 1 de octubre». Con el año solo cuando el rango cruza de año.
+     */
+    public function nombreDelDia(DiaDeCaja $dia): string
+    {
+        $texto = ucfirst($dia->fecha->translatedFormat('l j \d\e F'));
+
+        return $this->desde->year === $this->hasta->year ? $texto : $texto.' de '.$dia->fecha->year;
+    }
 
     /**
      * Las formas de pago que tuvieron dinero en el rango, en el orden del enum.

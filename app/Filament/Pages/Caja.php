@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
-use App\Domain\Enums\ConceptoDeRecibo;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Reportes\CajaPorDia;
 use App\Domain\Reportes\DiaDeCaja;
@@ -21,7 +20,9 @@ use Filament\Forms\Components\Select;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Contracts\View\View;
 use Override;
 
 /**
@@ -49,11 +50,20 @@ use Override;
  * interruptor de la barra, si hay uno: es lo que la persona ya está
  * mirando.
  *
+ * ═══ EL PAPEL (24-oct-2026, la misma tarde) ═══
+ *
+ * «¿No hay un botón como para imprimir el reporte de lo que se selecciona?»
+ * — Mauricio, ya en producción. «Imprimir» abre `/documentos/caja` con el
+ * rango y los proyectos de la pantalla, en la misma ventana flotante del
+ * Estado mensual. La hoja la arma `ReporteDeCajaController` con el mismo
+ * `CajaPorDia`: lo que se imprime es lo que se estaba mirando.
+ *
  * ═══ QUIEN LA VE ═══
  *
  * Quien ve la lista de recibos. Pero el receptor ve SOLO lo que recibió él
  * —la misma regla del corte de caja del Escritorio, `Roles::veLaCajaDeTodos()`—
- * porque «NO ve el arqueo de otro receptor».
+ * porque «NO ve el arqueo de otro receptor». El papel aplica la misma regla
+ * por su cuenta: no confía en lo que diga la URL.
  *
  * @property Schema $form
  */
@@ -67,15 +77,6 @@ class Caja extends Page
 
     #[Override]
     protected static ?int $navigationSort = -1;
-
-    /**
-     * Un año, como mucho, de una vez.
-     *
-     * La consulta aguanta más —es una sola, agrupada—, pero la pantalla no:
-     * tres años son mil renglones que nadie lee. Si piden más, se recorta
-     * desde el «hasta» hacia atrás y se dice.
-     */
-    private const int DIAS_COMO_MUCHO = 366;
 
     /** Los recibos que se listan al abrir un día. El renglón dice si quedaron más. */
     private const int RECIBOS_EN_EL_DETALLE = 200;
@@ -181,7 +182,7 @@ class Caja extends Page
     }
 
     /**
-     * Los tres rangos que se piden siempre, a un clic.
+     * Los tres rangos que se piden siempre, a un clic, y el papel.
      *
      * @return array<Action>
      */
@@ -212,6 +213,27 @@ class Caja extends Page
                 ->action(function () use ($mesPasado): void {
                     $this->verDel($mesPasado->startOfMonth(), $mesPasado->endOfMonth()->startOfDay());
                 }),
+
+            /*
+             * El papel de lo que se está mirando, en la ventana flotante del
+             * Estado mensual (el porqué del `<iframe>` está en su marco).
+             *
+             * El único botón de color: los otros tres eligen QUÉ mirar; este
+             * es lo que se viene a hacer con lo que se eligió.
+             */
+            Action::make('imprimir')
+                ->label('Imprimir')
+                ->icon(Heroicon::OutlinedPrinter)
+                ->modalHeading('Reporte de caja')
+                ->modalDescription(fn (): string => $this->caja()->periodoEscrito().' · '.$this->proyectosEscritos())
+                ->modalWidth(Width::FourExtraLarge)
+                ->modalContent(fn (): View => view('filament.pages.estado-mensual-marco', [
+                    'url'    => $this->urlDelReporte(),
+                    'titulo' => 'Reporte de caja',
+                ]))
+                // No hay nada que guardar: se mira, se imprime y se cierra.
+                ->modalSubmitAction(false)
+                ->modalCancelActionLabel('Cerrar'),
         ];
     }
 
@@ -243,11 +265,26 @@ class Caja extends Page
     }
 
     /**
-     * Lo que se ve al abrir un día: sus recibos y quién recibió el dinero.
+     * La dirección del papel, con lo que está elegido en pantalla.
      *
-     * Se arma acá y no en la vista para que la vista solo imprima texto: las
-     * etiquetas, el folio y el enlace son reglas, y una regla en un blade no
-     * la ve nadie.
+     * ⚠️ Lleva el rango y los proyectos, NUNCA a quién recortar: eso lo decide
+     * el controlador con el usuario conectado. Una URL que dijera «todo»
+     * no puede hacer que un receptor vea la caja de otro.
+     */
+    public function urlDelReporte(): string
+    {
+        $periodo = $this->periodo();
+        $proyectos = $this->proyectosElegidos();
+
+        return route('documentos.caja', array_filter([
+            'desde'     => $periodo['desde']->toDateString(),
+            'hasta'     => $periodo['hasta']->toDateString(),
+            'proyectos' => $proyectos === [] ? null : implode(',', $proyectos),
+        ], static fn (?string $valor): bool => $valor !== null));
+    }
+
+    /**
+     * Lo que se ve al abrir un día: sus recibos y quién recibió el dinero.
      *
      * @return array{recibos: list<array{folio: string, url: string, nombre: string, lotes: string, concepto: string, forma: string, recibio: string, monto: string}>, quienes: list<array{nombre: string, total: Monto}>, faltan: int}
      */
@@ -258,43 +295,33 @@ class Caja extends Page
 
         $recibos = [];
 
-        foreach (CajaPorDia::recibosDelDia($dia->fecha, $proyectos, $soloDe, self::RECIBOS_EN_EL_DETALLE) as $recibo) {
-            $concepto = $recibo->getAttribute('concepto');
-            $forma = $recibo->getAttribute('forma_pago');
-            $lotes = $recibo->codigosDeLotes();
-
+        foreach (CajaPorDia::renglones($dia->fecha, $dia->fecha, $proyectos, $soloDe, self::RECIBOS_EN_EL_DETALLE) as $renglon) {
             $recibos[] = [
-                'folio'    => $recibo->folio(),
-                'url'      => ReciboResource::getUrl('view', ['record' => $recibo]),
-                'nombre'   => $recibo->nombreDelPapel(),
-                'lotes'    => $lotes === [] ? '—' : implode(' · ', $lotes),
-                'concepto' => $concepto instanceof ConceptoDeRecibo ? $concepto->etiqueta() : '—',
-                'forma'    => $forma instanceof FormaDePago ? $forma->etiqueta() : '—',
-                'recibio'  => $recibo->nombreDeQuienRecibio() ?? '—',
-                'monto'    => $recibo->montoTotal()->formateado(),
+                'folio'    => $renglon['folio'],
+                'url'      => ReciboResource::getUrl('view', ['record' => $renglon['id']]),
+                'nombre'   => $renglon['nombre'],
+                'lotes'    => $renglon['lotes'],
+                'concepto' => $renglon['concepto'],
+                'forma'    => $renglon['forma'],
+                'recibio'  => $renglon['recibio'],
+                'monto'    => $renglon['monto']->formateado(),
             ];
         }
 
         return [
             'recibos' => $recibos,
             // Al receptor no: todo lo que ve es suyo, y la línea diría su nombre y el total que ya está arriba.
-            'quienes' => $this->soloLoMio() ? [] : CajaPorDia::quienesRecibieron($dia->fecha, $proyectos, $soloDe),
+            'quienes' => $this->soloLoMio() ? [] : CajaPorDia::quienesRecibieron($dia->fecha, $dia->fecha, $proyectos, $soloDe),
             'faltan'  => max(0, $dia->recibos - count($recibos)),
         ];
     }
 
     /**
-     * «Jueves 1 de octubre». Con el año solo cuando el rango cruza de año.
+     * «Jueves 1 de octubre», y «· hoy» cuando es hoy.
      */
-    public function nombreDelDia(DiaDeCaja $dia): string
+    public function nombreDelDia(CajaPorDia $caja, DiaDeCaja $dia): string
     {
-        $periodo = $this->periodo();
-
-        $texto = ucfirst($dia->fecha->translatedFormat('l j \d\e F'));
-
-        if ($periodo['desde']->year !== $periodo['hasta']->year) {
-            $texto .= ' de '.$dia->fecha->year;
-        }
+        $texto = $caja->nombreDelDia($dia);
 
         return $dia->fecha->isSameDay($this->hoy()) ? $texto.' · hoy' : $texto;
     }
@@ -302,23 +329,9 @@ class Caja extends Page
     /**
      * «Del 1 al 24 de octubre de 2026 · Todos los proyectos».
      */
-    public function periodoEscrito(): string
+    public function periodoEscrito(CajaPorDia $caja): string
     {
-        $periodo = $this->periodo();
-        $desde = $periodo['desde'];
-        $hasta = $periodo['hasta'];
-
-        if ($desde->isSameDay($hasta)) {
-            $fechas = ucfirst($desde->translatedFormat('l j \d\e F \d\e Y'));
-        } elseif ($desde->year !== $hasta->year) {
-            $fechas = 'Del '.$desde->translatedFormat('j \d\e F \d\e Y').' al '.$hasta->translatedFormat('j \d\e F \d\e Y');
-        } elseif ($desde->month !== $hasta->month) {
-            $fechas = 'Del '.$desde->translatedFormat('j \d\e F').' al '.$hasta->translatedFormat('j \d\e F \d\e Y');
-        } else {
-            $fechas = 'Del '.$desde->day.' al '.$hasta->translatedFormat('j \d\e F \d\e Y');
-        }
-
-        return $fechas.' · '.$this->proyectosEscritos();
+        return $caja->periodoEscrito().' · '.$this->proyectosEscritos();
     }
 
     /**
@@ -376,21 +389,10 @@ class Caja extends Page
     {
         $hoy = $this->hoy();
 
-        $desde = $this->fechaDelFiltro('desde') ?? $hoy->startOfMonth();
-        $hasta = $this->fechaDelFiltro('hasta') ?? $hoy;
-
-        // Dadas vuelta no es un error que valga la pena gritar: se entiende.
-        if ($hasta->isBefore($desde)) {
-            [$desde, $hasta] = [$hasta, $desde];
-        }
-
-        $tope = $hasta->subDays(self::DIAS_COMO_MUCHO - 1);
-
-        if ($desde->isBefore($tope)) {
-            return ['desde' => $tope, 'hasta' => $hasta, 'recortado' => true];
-        }
-
-        return ['desde' => $desde, 'hasta' => $hasta, 'recortado' => false];
+        return CajaPorDia::acotar(
+            $this->fechaDelFiltro('desde') ?? $hoy->startOfMonth(),
+            $this->fechaDelFiltro('hasta') ?? $hoy,
+        );
     }
 
     // ─── Interno ──────────────────────────────────────────────────────
@@ -431,27 +433,7 @@ class Caja extends Page
 
     private function proyectosEscritos(): string
     {
-        $elegidos = $this->proyectosElegidos();
-
-        if ($elegidos === []) {
-            return 'Todos los proyectos';
-        }
-
-        /** @var list<string> $nombres */
-        $nombres = Proyecto::query()
-            ->reorder()
-            ->whereKey($elegidos)
-            ->orderBy('nombre')
-            ->pluck('nombre')
-            ->all();
-
-        if (count($nombres) < 2) {
-            return $nombres[0] ?? 'Todos los proyectos';
-        }
-
-        $ultimo = array_pop($nombres);
-
-        return implode(', ', $nombres).' y '.$ultimo;
+        return CajaPorDia::proyectosEscritos($this->proyectosElegidos());
     }
 
     /**

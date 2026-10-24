@@ -141,7 +141,7 @@
 
     <x-filament::section
         :heading="$this->soloLoMio() ? 'Lo que recibiste' : 'Lo que entró'"
-        :description="$this->periodoEscrito()"
+        :description="$this->periodoEscrito($caja)"
     >
         <div class="olympo-caja-cifras">
             <div class="olympo-caja-cifra total">
@@ -166,7 +166,7 @@
                 <div class="olympo-caja-cifra">
                     <span class="olympo-caja-rotulo">El día que más entró</span>
                     <span class="olympo-caja-monto">{{ $mejor->total->formateado() }}</span>
-                    <span class="olympo-caja-nota">{{ $this->nombreDelDia($mejor) }}</span>
+                    <span class="olympo-caja-nota">{{ $this->nombreDelDia($caja, $mejor) }}</span>
                 </div>
             @endif
         </div>
@@ -213,7 +213,7 @@
                                 aria-expanded="{{ $abierto ? 'true' : 'false' }}"
                                 @class(['olympo-caja-dia', 'abierto' => $abierto])
                             >
-                                <td class="lote"><span class="olympo-caja-flecha" aria-hidden="true">›</span>{{ $this->nombreDelDia($dia) }}</td>
+                                <td class="lote"><span class="olympo-caja-flecha" aria-hidden="true">›</span>{{ $this->nombreDelDia($caja, $dia) }}</td>
                                 <td>{{ $dia->recibos }}</td>
                                 @foreach ($formas as $forma)
                                     @php

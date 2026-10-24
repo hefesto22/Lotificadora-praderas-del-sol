@@ -34,7 +34,7 @@
 ">
     <iframe
         src="{{ $url }}"
-        title="Estado de resultados"
+        title="{{ $titulo ?? 'Estado de resultados' }}"
         loading="eager"
         style="display: block; width: 100%; height: 100%; border: 0;"
     ></iframe>
