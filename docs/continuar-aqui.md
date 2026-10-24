@@ -1,7 +1,41 @@
-# Continuar acá — 10-oct-2026
+# Continuar acá — 24-oct-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 24-oct — La pantalla «Caja»: lo que entró, día por día
+
+**SIN COMMITEAR.** Pedido de Mauricio: «función de caja, aunque solo será para
+reportes de lo que se recibió qué día … nadie la abrirá … el 1 de octubre, el 2
+de octubre y así … solo de un proyecto o de dos o de más», en el menú «abajo de
+Escritorio, que diga Caja».
+
+- **Dónde:** menú → **Caja**, justo debajo de Escritorio (sin grupo, orden -1;
+  Filament le pone -2 al Escritorio). Ruta `/caja`.
+- **Qué hace:** desde / hasta / proyectos (uno, varios, o vacío = todos). Abre en
+  el mes corriente y en el proyecto del interruptor de la barra. Botones Hoy ·
+  Este mes · Mes pasado. Arriba: total, efectivo, banco y tarjeta, y el día que
+  más entró. Abajo: un renglón por día con una columna por forma de pago (solo
+  las que tuvieron algo) y el total; al tocar un día se abren sus recibos (folio
+  con enlace, recibí de, lote, concepto, forma, quién lo recibió, monto) y quién
+  recibió cuánto.
+- **Es un reporte:** no hay apertura ni cierre ni tabla nueva. Lee `recibos`:
+  NO anulados, por `fecha`, con la seña de un apartado incluida. Es la misma
+  cuenta que «Cobrado hoy» / «Cobrado este mes» del Escritorio, y un test lo ata.
+  (NO es la de `CierreDelMes`, que cuenta solo lo que cuelga de una venta.)
+- **Quién la ve:** `ViewAny:Recibo`. El receptor ve solo lo que recibió él
+  (`recibido_por`); la regla salió del widget a `Roles::veLaCajaDeTodos()` y la
+  usan los dos.
+- **Piezas:** `App\Domain\Reportes\CajaPorDia` + `DiaDeCaja` (el cálculo),
+  `App\Filament\Pages\Caja` + `resources/views/filament/pages/caja.blade.php`,
+  scope nuevo `Recibo::deLosProyectos(list<int>)` (y `delProyecto()` ahora
+  delega en él: la regla de los dos caminos —venta o compromiso— quedó en un
+  solo lugar). Tests: `tests/Feature/Filament/CajaTest.php`.
+- Sin migración, sin permiso nuevo, sin seeder.
+- **Ideas que quedaron sin construir** (propuestas, nada aprobado): imprimir el
+  reporte del rango (misma ventana flotante del Estado mensual), y restar lo
+  que salió en efectivo (gastos de la caja y devoluciones) para que cada día
+  diga cuánto tenía que quedar en la gaveta.
 
 ## 10-oct (tarde) — El estado general del proyecto
 

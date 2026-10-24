@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Models\User;
+use Illuminate\Contracts\Auth\Authenticatable;
+
 /**
  * Lista única de roles del sistema (§9.E.5).
  *
@@ -67,5 +70,22 @@ final class Roles
             self::ADMINISTRADORA,
             self::RECEPTOR,
         ];
+    }
+
+    /**
+     * ¿Ve la caja de TODOS, o solo lo que recibió él?
+     *
+     * La promesa del receptor —«NO ve el arqueo de otro receptor»— la cumplen
+     * dos pantallas: el corte de caja del Escritorio y la pantalla «Caja».
+     * Vivía escrita adentro del widget; desde el 24-oct-2026 vive acá para que
+     * las dos digan lo mismo.
+     *
+     * Se pregunta por el ROL y no por un permiso: «ver el arqueo de todos» no
+     * es una acción sobre un recurso, e inventarle un `VerArqueo:Recibo` al
+     * cruce del §9.E3 sería fabricar un permiso que ninguna política conoce.
+     */
+    public static function veLaCajaDeTodos(?Authenticatable $usuario): bool
+    {
+        return $usuario instanceof User && $usuario->hasRole([self::SUPER_ADMIN, self::ADMINISTRADORA]);
     }
 }

@@ -371,19 +371,13 @@ class CorteDeCajaDeHoy extends StatsOverviewWidget
     /**
      * Un receptor ve solo lo que cobró él. La administradora ve todo.
      *
-     * Se pregunta por el ROL y no por un permiso: «ver el arqueo de todos» no
-     * es una acción sobre un recurso, y inventarle un permiso al cruce del
-     * §9.E3 sería fabricar un `VerArqueo:Recibo` que ninguna política conoce.
+     * La regla vive en `Roles::veLaCajaDeTodos()` desde el 24-oct-2026: la
+     * pantalla «Caja» hace la misma pregunta y las dos tienen que contestar
+     * igual.
      */
     private function soloLoMio(): bool
     {
-        $usuario = auth()->user();
-
-        if (! $usuario instanceof User) {
-            return true;
-        }
-
-        return ! $usuario->hasRole([Roles::SUPER_ADMIN, Roles::ADMINISTRADORA]);
+        return ! Roles::veLaCajaDeTodos(auth()->user());
     }
 
     /**

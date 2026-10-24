@@ -1263,11 +1263,33 @@ class Recibo extends Model
     #[Scope]
     protected function delProyecto(Builder $query, int $proyectoId): Builder
     {
-        return $query->where(static function (Builder $suyo) use ($proyectoId): void {
-            $suyo->whereHas('venta', static function (Builder $venta) use ($proyectoId): void {
-                $venta->where('proyecto_id', $proyectoId);
-            })->orWhereHas('compromiso', static function (Builder $lote) use ($proyectoId): void {
-                $lote->where('proyecto_id', $proyectoId);
+        return $this->deLosProyectos($query, [$proyectoId]);
+    }
+
+    /**
+     * Los recibos de VARIOS proyectos a la vez — 24-oct-2026.
+     *
+     * Nació con la pantalla «Caja», que deja sumar uno, dos o más desarrollos
+     * juntos. Es la misma regla de `delProyecto()` —que ahora delega acá—, así
+     * que los dos caminos (por la venta, o por el compromiso cuando es la seña
+     * de un apartado sin contrato) quedan escritos UNA sola vez.
+     *
+     * ⚠️ Una lista vacía NO es «todos»: es ninguno. Quien quiera todos no
+     * llama al scope.
+     *
+     * @param Builder<Recibo> $query
+     * @param list<int> $proyectos
+     *
+     * @return Builder<Recibo>
+     */
+    #[Scope]
+    protected function deLosProyectos(Builder $query, array $proyectos): Builder
+    {
+        return $query->where(static function (Builder $suyo) use ($proyectos): void {
+            $suyo->whereHas('venta', static function (Builder $venta) use ($proyectos): void {
+                $venta->whereIn('proyecto_id', $proyectos);
+            })->orWhereHas('compromiso', static function (Builder $lote) use ($proyectos): void {
+                $lote->whereIn('proyecto_id', $proyectos);
             });
         });
     }
