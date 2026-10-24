@@ -100,6 +100,7 @@ final readonly class EfectoDelAbono
      * @param int $diaPago el de la venta; los vencimientos nuevos caen ahi
      * @param TasaDeInteres|null $tasa la CONGELADA del compromiso, no la del proyecto
      * @param Monto|null $moraPendiente la que hay que cubrir antes de abonar
+     * @param CarbonImmutable|null $al el día contra el que se mira lo vencido; null es hoy
      */
     public static function calcular(
         iterable $pendientes,
@@ -108,6 +109,7 @@ final readonly class EfectoDelAbono
         int $diaPago,
         ?TasaDeInteres $tasa = null,
         ?Monto $moraPendiente = null,
+        ?CarbonImmutable $al = null,
     ): self {
         $tasa ??= TasaDeInteres::cero();
         $mora = $moraPendiente ?? Monto::cero();
@@ -120,7 +122,7 @@ final readonly class EfectoDelAbono
         foreach ($cuotas as $cuota) {
             $saldoDelLote = $saldoDelLote->sumar($cuota->saldo());
 
-            if ($cuota->estaVencida()) {
+            if ($cuota->estaVencida($al)) {
                 $vencido = $vencido->sumar($cuota->saldo());
             }
         }
@@ -134,7 +136,7 @@ final readonly class EfectoDelAbono
          * lo registra igual —el dinero ya esta sobre el mostrador— y avisa.
          */
         if (! $abono->mayorQue($alDia)) {
-            return self::sinReprogramar($abono, $modalidad, $alDia, $mora, $saldoDelLote, $cuotas, $tasa, esPagoNormal: true);
+            return self::sinReprogramar($abono, $modalidad, $alDia, $mora, $saldoDelLote, $cuotas, $tasa, esPagoNormal: true, al: $al);
         }
 
         $aCapital = $abono->restar($alDia);
@@ -166,7 +168,7 @@ final readonly class EfectoDelAbono
         // `$reemplazables === []` ya esta cubierto por el tope: sin nada que
         // reprogramar el tope es lo vencido, y aca el abono siempre lo supera.
         if ($abono->mayorQue($tope) || $reemplazables === []) {
-            return self::sinReprogramar($abono, $modalidad, $alDia, $mora, $saldoDelLote, $cuotas, $tasa, esPagoNormal: false);
+            return self::sinReprogramar($abono, $modalidad, $alDia, $mora, $saldoDelLote, $cuotas, $tasa, esPagoNormal: false, al: $al);
         }
 
         $primera = $reemplazables[0];
@@ -417,12 +419,13 @@ final readonly class EfectoDelAbono
         array $cuotas,
         TasaDeInteres $tasa,
         bool $esPagoNormal,
+        ?CarbonImmutable $al = null,
     ): self {
         $reprogramable = Monto::cero();
         $interesViejo = Monto::cero();
 
         foreach ($cuotas as $cuota) {
-            if ($cuota->montoPagado()->esCero() && ! $cuota->estaVencida()) {
+            if ($cuota->montoPagado()->esCero() && ! $cuota->estaVencida($al)) {
                 $reprogramable = $reprogramable->sumar($cuota->capitalPendiente());
                 $interesViejo = $interesViejo->sumar($cuota->interesPendiente());
             }

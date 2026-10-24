@@ -2030,88 +2030,15 @@ final readonly class RegistroDePagos
              * papel que promete algo que la base no hizo.
              */
             foreach ($abonos as $renglon) {
-                $lote = $renglon['lote'];
-                $aCapital = $renglon['monto'];
-
-                $limpias = $this->pendientesBloqueadas($lote);
-                $moraDelAbono = MoraDelLote::calcular($limpias, $this->condicionesDe($lote), $cuando);
-
-                $efecto = EfectoDelAbono::calcular(
-                    $limpias,
-                    $aCapital,
+                $moraCobrada = $moraCobrada->sumar($this->abonarAlLote(
+                    $venta,
+                    $recibo,
+                    $renglon['lote'],
+                    $renglon['monto'],
                     $renglon['modalidad'],
-                    $this->diaDePago($venta),
-                    $this->tasaDe($lote),
-                    $moraDelAbono->total,
-                );
-
-                if ($aCapital->mayorQue($efecto->saldoDelLote->sumar($moraDelAbono->total))) {
-                    throw PagoInvalidoException::porPagarDeMas(
-                        $aCapital,
-                        $efecto->saldoDelLote->sumar($moraDelAbono->total),
-                        $this->codigo($lote),
-                    );
-                }
-
-                if ($efecto->esPagoNormal) {
-                    throw PagoInvalidoException::porSobranteQueNoBajaCapital(
-                        $aCapital,
-                        $efecto->ponerAlDia,
-                        $this->codigo($lote),
-                    );
-                }
-
-                if ($efecto->superaElTope) {
-                    throw PagoInvalidoException::porAbonoQueNoSePuedeReprogramar(
-                        $aCapital,
-                        $efecto->tope,
-                        $efecto->saldoDelLote,
-                        $this->codigo($lote),
-                    );
-                }
-
-                $plan = $efecto->planNuevo;
-
-                if ($efecto->problema !== null || ! $plan instanceof PlanDeCuotas) {
-                    throw PagoInvalidoException::porPlanQueNoSePudoArmar(
-                        $efecto->problema ?? 'No se pudo armar el plan nuevo.',
-                        $this->codigo($lote),
-                    );
-                }
-
-                // Un plan que no cierra al centimo no llega nunca a la base (§8.3.4).
-                if (! $plan->cierraExacto()) {
-                    throw PagoInvalidoException::porPlanQueNoCierra($plan->totalCapital(), $efecto->saldoNuevo);
-                }
-
-                /*
-                 * === 5. LO QUE EL ABONO USA PARA PONER AL DIA, SE ESCRIBE ===
-                 *
-                 * Hasta el 27-ago-2026 aca habia un comentario afirmando que
-                 * `ponerAlDia` valia cero «porque el paso 4 releyo despues del
-                 * cobro». Vale cero SOLO si los renglones de cuota cubrieron todo
-                 * lo vencido del lote del abono, y nada obliga a eso.
-                 *
-                 * Lo que costo: recibo RPS-00000005 de Praderas, L 24,000.00 en
-                 * el expediente 0070. Marcaron una cuota por lote y el N-008
-                 * tenia dos vencidas; `EfectoDelAbono` le resto la segunda al
-                 * abono —bajaron capital L 4,833.33 en vez de L 11,812.50— y
-                 * nadie escribio ese pago: L 6,979.17 del cliente desaparecieron
-                 * y la cuota 2 le siguio saliendo pendiente.
-                 *
-                 * El modal SI se lo mostraba antes de confirmar
-                 * (`repartoDelAbono()`: «Pone al dia — cuota 2 … L 6,979.17»).
-                 * Esto es lo que faltaba para que la base diga lo que la pantalla
-                 * prometio, y es exactamente lo que `abonarEnLosDeUnMismoNombre()`
-                 * ya hacia en su propio camino.
-                 */
-                if (! $efecto->ponerAlDia->esCero()) {
-                    $reparto = $this->repartir($recibo, $limpias, $efecto->ponerAlDia, $moraDelAbono);
-                    $moraCobrada = $moraCobrada->sumar($reparto['cobrada']);
-                }
-
-                $this->reescribirElPlan($venta, $lote, $efecto, $plan);
-                $this->asentarLaConstancia($venta, $lote, $recibo, $efecto, $plan, $porQue);
+                    $porQue,
+                    $cuando,
+                ));
             }
 
             /*
@@ -2206,7 +2133,166 @@ final readonly class RegistroDePagos
         });
     }
 
+    /**
+     * ═══ VUELVE A APLICAR UN RECIBO QUE YA EXISTE — 24-oct-2026 ═══
+     *
+     * Lo usa SOLO el traspaso de valor entre los lotes de un contrato
+     * (`TraspasoDeValor`). Ahí los planes se rehacen desde cero —los lotes
+     * cambiaron de valor— y los recibos que ya se cobraron tienen que volver a
+     * caer sobre las cuotas nuevas. El papel no cambia: mismo número, mismo
+     * monto, misma fecha, mismo receptor.
+     *
+     * Por las MISMAS puertas que un cobro con abono: `repartir()` para la
+     * mitad de cuota y `abonarAlLote()` para la de capital. Acá no se escribe
+     * una cuota a mano.
+     *
+     * 🔴 Lo vencido se mira al DÍA DEL RECIBO, no hoy. El abono de un recibo de
+     * agosto puso al día lo que se debía en agosto; mirado en octubre, las
+     * cuotas de septiembre y octubre se comerían ese abono y el plan quedaría
+     * distinto del que el cliente pagó.
+     *
+     * @throws PagoInvalidoException
+     */
+    public function reaplicar(
+        Venta $venta,
+        Recibo $recibo,
+        Compromiso $lote,
+        Monto $aCuotas,
+        Monto $aCapital,
+        ModalidadDeReprogramacion $modalidad,
+        string $motivoDelAbono,
+        CarbonImmutable $cuando,
+    ): void {
+        DB::transaction(function () use ($venta, $recibo, $lote, $aCuotas, $aCapital, $modalidad, $motivoDelAbono, $cuando): void {
+            if (! $aCuotas->esCero()) {
+                $pendientes = $this->pendientesBloqueadas($lote);
+                $mora = MoraDelLote::calcular($pendientes, $this->condicionesDe($lote), $cuando);
+                $tope = $this->saldoDe($pendientes)->sumar($mora->total);
+
+                if ($aCuotas->mayorQue($tope)) {
+                    throw PagoInvalidoException::porPagarDeMas($aCuotas, $tope, $this->codigo($lote));
+                }
+
+                $this->repartir($recibo, $pendientes, $aCuotas, $mora);
+            }
+
+            if (! $aCapital->esCero()) {
+                $this->abonarAlLote($venta, $recibo, $lote, $aCapital, $modalidad, $motivoDelAbono, $cuando, $cuando);
+            }
+        });
+    }
+
     // ─── Interno ──────────────────────────────────────────────────────
+
+    /**
+     * El abono a capital de UN lote, sobre un recibo que ya existe.
+     *
+     * Era el cuerpo del bucle de abonos de `cobrarYAbonarEnUnMismoNombre()`.
+     * Salió a su propio método el 24-oct-2026 para que `reaplicar()` —el
+     * traspaso de valor— abone por EXACTAMENTE la misma puerta, con las
+     * mismas defensas, en vez de copiarlas.
+     *
+     * Devuelve la mora que cobró al poner el lote al día.
+     *
+     * @param CarbonImmutable|null $vencidoAl el día contra el que se mira lo vencido; null es hoy, que es lo que hizo siempre el cobro
+     *
+     * @throws PagoInvalidoException
+     */
+    private function abonarAlLote(
+        Venta $venta,
+        Recibo $recibo,
+        Compromiso $lote,
+        Monto $aCapital,
+        ModalidadDeReprogramacion $modalidad,
+        string $porQue,
+        CarbonImmutable $cuando,
+        ?CarbonImmutable $vencidoAl = null,
+    ): Monto {
+        $limpias = $this->pendientesBloqueadas($lote);
+        $moraDelAbono = MoraDelLote::calcular($limpias, $this->condicionesDe($lote), $cuando);
+
+        $efecto = EfectoDelAbono::calcular(
+            $limpias,
+            $aCapital,
+            $modalidad,
+            $this->diaDePago($venta),
+            $this->tasaDe($lote),
+            $moraDelAbono->total,
+            $vencidoAl,
+        );
+
+        if ($aCapital->mayorQue($efecto->saldoDelLote->sumar($moraDelAbono->total))) {
+            throw PagoInvalidoException::porPagarDeMas(
+                $aCapital,
+                $efecto->saldoDelLote->sumar($moraDelAbono->total),
+                $this->codigo($lote),
+            );
+        }
+
+        if ($efecto->esPagoNormal) {
+            throw PagoInvalidoException::porSobranteQueNoBajaCapital(
+                $aCapital,
+                $efecto->ponerAlDia,
+                $this->codigo($lote),
+            );
+        }
+
+        if ($efecto->superaElTope) {
+            throw PagoInvalidoException::porAbonoQueNoSePuedeReprogramar(
+                $aCapital,
+                $efecto->tope,
+                $efecto->saldoDelLote,
+                $this->codigo($lote),
+            );
+        }
+
+        $plan = $efecto->planNuevo;
+
+        if ($efecto->problema !== null || ! $plan instanceof PlanDeCuotas) {
+            throw PagoInvalidoException::porPlanQueNoSePudoArmar(
+                $efecto->problema ?? 'No se pudo armar el plan nuevo.',
+                $this->codigo($lote),
+            );
+        }
+
+        // Un plan que no cierra al centimo no llega nunca a la base (§8.3.4).
+        if (! $plan->cierraExacto()) {
+            throw PagoInvalidoException::porPlanQueNoCierra($plan->totalCapital(), $efecto->saldoNuevo);
+        }
+
+        /*
+         * === 5. LO QUE EL ABONO USA PARA PONER AL DIA, SE ESCRIBE ===
+         *
+         * Hasta el 27-ago-2026 aca habia un comentario afirmando que
+         * `ponerAlDia` valia cero «porque el paso 4 releyo despues del
+         * cobro». Vale cero SOLO si los renglones de cuota cubrieron todo
+         * lo vencido del lote del abono, y nada obliga a eso.
+         *
+         * Lo que costo: recibo RPS-00000005 de Praderas, L 24,000.00 en
+         * el expediente 0070. Marcaron una cuota por lote y el N-008
+         * tenia dos vencidas; `EfectoDelAbono` le resto la segunda al
+         * abono —bajaron capital L 4,833.33 en vez de L 11,812.50— y
+         * nadie escribio ese pago: L 6,979.17 del cliente desaparecieron
+         * y la cuota 2 le siguio saliendo pendiente.
+         *
+         * El modal SI se lo mostraba antes de confirmar
+         * (`repartoDelAbono()`: «Pone al dia — cuota 2 … L 6,979.17»).
+         * Esto es lo que faltaba para que la base diga lo que la pantalla
+         * prometio, y es exactamente lo que `abonarEnLosDeUnMismoNombre()`
+         * ya hacia en su propio camino.
+         */
+        $moraCobrada = Monto::cero();
+
+        if (! $efecto->ponerAlDia->esCero()) {
+            $reparto = $this->repartir($recibo, $limpias, $efecto->ponerAlDia, $moraDelAbono);
+            $moraCobrada = $reparto['cobrada'];
+        }
+
+        $this->reescribirElPlan($venta, $lote, $efecto, $plan);
+        $this->asentarLaConstancia($venta, $lote, $recibo, $efecto, $plan, $porQue);
+
+        return $moraCobrada;
+    }
 
     /**
      * Lo que se puede verificar sin tocar la base.

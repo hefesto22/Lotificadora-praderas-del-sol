@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Domain\Enums\EstadoCompromiso;
 use App\Domain\ValueObjects\Monto;
 use Database\Factories\CuotaFactory;
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
@@ -293,14 +294,19 @@ class Cuota extends Model
      * ¿Se le paso la fecha y todavia debe algo?
      *
      * Una cuota pagada nunca esta vencida, por vieja que sea.
+     *
+     * `$al` es el día contra el que se mira; sin él, hoy. Lo usa el traspaso
+     * de valor (24-oct-2026), que vuelve a aplicar un recibo viejo tal como se
+     * aplicó el día que se cobró: mirado hoy, las cuotas que vencieron después
+     * se comerían su abono.
      */
-    public function estaVencida(): bool
+    public function estaVencida(?DateTimeInterface $al = null): bool
     {
         $vence = $this->getAttribute('fecha_vencimiento');
 
         return ! $this->estaPagada()
             && $vence !== null
-            && $vence->isBefore(today());
+            && $vence->isBefore($al ?? today());
     }
 
     /**

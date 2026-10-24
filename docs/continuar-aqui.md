@@ -3,6 +3,29 @@
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
 
+## 24-oct (noche) — Exp. 0070: nace `olympo:traspasar-valor`
+
+**El problema.** Cuaderno pág. 147: el O-3 iba por L 210,000.00 con L 200,000.00 de prima, y el O-4 con el N-8 por L 605,000.00 con L 20,000.00 — esos 605,000 son los 250,000 y 345,000 de cada uno MÁS los 10,000 que le faltaban al O-3. La carga dejó cada lote con su valor individual: el O-3 quedó debiendo 48 cuotas de L 208.33 que nadie pactó.
+
+**Decidido con Mauricio:** se mueve VALOR, no prima. O-3 → 200,000 (pagado con su prima, sin cuotas); O-4 → 255,000; N-8 → 350,000 (5,000 y 5,000). El contrato sigue valiendo 805,000 y debiendo 561,000.
+
+**Lo construido:**
+
+- `app/Domain/Ventas/TraspasoDeValor.php` — en UNA transacción: revaloriza cada lote (precio por vara con la regla de `CorreccionDeValor`), rehace su plan con el mismo plazo y el mismo primer vencimiento, y vuelve a aplicar cada recibo de cuotas/abono: las MISMAS cuotas a su monto nuevo, el sobrante a capital en el lote al que ese recibo había mandado capital, con lo vencido mirado al día del recibo. Comprueba saldo total igual, recibos que cuadran y financiado = cuotas + abonado; si algo no da, no queda nada escrito. Se niega a todo lo que obligaría a adivinar (total distinto, interés/mora, pronto pago, cuota pagada en partes por dos recibos, rastro de un anulado, reprogramación sin recibo, lote sin plazo guardado).
+- `RegistroDePagos::reaplicar()` + el abono de un lote salió a `abonarAlLote()` — misma puerta que el cobro con abono, no una copia. `EfectoDelAbono::calcular()` y `Cuota::estaVencida()` aceptan la fecha contra la que se mira lo vencido (default: hoy, como siempre).
+- `olympo:traspasar-valor {venta} --lote=CODIGO:VALOR (todos) --motivo= --ensayo` — imprime lotes antes/después y el reparto de cada recibo.
+- `tests/Feature/Dominio/TraspasarValorTest.php` — el 0070 con sus números al céntimo, ensayo, bitácora, anular después del traspaso, y las negativas.
+
+**Falta:** gate → commit → pruebas (`--ensayo` primero) → producción (`pg_dump`, ensayo, real):
+
+```
+php artisan olympo:traspasar-valor 70 --lote=RPS-O-003:200000.00 --lote=RPS-O-004:255000.00 --lote=RPS-N-008:350000.00 --motivo="Cuaderno pág. 147: el O-3 queda pagado con su prima; los 10,000 restantes se reparten 5,000 al O-4 y 5,000 al N-8" --ensayo
+```
+
+⚠️ El `70` es el id de la URL del expediente en PRODUCCIÓN; en pruebas puede ser otro — ahí va el número de contrato.
+
+**Después:** el diseño de los botones de cabecera del expediente (Registrar un pago, Titular de los recibos, Cambiar titular…) — Mauricio lo pidió.
+
 ## 24-oct — La pantalla «Caja»: lo que entró, día por día
 
 **EN PRODUCCIÓN** (c1a6df9). El botón «Imprimir», **sin commitear**.
