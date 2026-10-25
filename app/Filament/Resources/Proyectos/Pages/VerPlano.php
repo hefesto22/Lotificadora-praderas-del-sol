@@ -103,6 +103,16 @@ class VerPlano extends Page
         return 'Plano de '.$this->getRecord()->getAttribute('nombre');
     }
 
+    /**
+     * El proyecto de este plano: el dinero de una seña o de una prima es de
+     * acá, y eso decide quién aparece en «¿Quién recibió el dinero?»
+     * (`QuienRecibeElDinero::lista()`, 24-oct-2026).
+     */
+    private function proyectoId(): int
+    {
+        return (int) $this->getRecord()->getKey();
+    }
+
     #[Override]
     public function getHeading(): string
     {
@@ -362,7 +372,8 @@ class VerPlano extends Page
                  * dinero que nadie entrego no tiene respuesta.
                  */
                 QuienRecibeElDinero::campo(
-                    'Viene marcado con tu nombre; cambialo si la seña la recibió otra persona. De acá sale el corte de caja del día.'
+                    'Viene marcado con tu nombre; cambialo si la seña la recibió otra persona. De acá sale el corte de caja del día.',
+                    proyecto: $this->proyectoId(),
                 )->visible(fn (Get $get): bool => $this->hayQueCobrarSenia($get)),
 
                 TextInput::make('referencia')
@@ -700,7 +711,8 @@ class VerPlano extends Page
                          * del dia la sumaba bajo «Sin usuario».
                          */
                         QuienRecibeElDinero::campo(
-                            'Viene con tu nombre. Cambialo si la recibió otra persona: de acá sale el corte de caja del día.'
+                            'Viene con tu nombre. Cambialo si la recibió otra persona: de acá sale el corte de caja del día.',
+                            proyecto: $this->proyectoId(),
                         ),
 
                         TextInput::make('referencia_prima')
@@ -1594,7 +1606,7 @@ class VerPlano extends Page
 
             // Igual que el de arriba: `fillForm()` es el estado inicial, así
             // que el valor va acá y no en un `default()` del campo.
-            'recibido_por' => QuienRecibeElDinero::porDefecto(),
+            'recibido_por' => QuienRecibeElDinero::porDefecto($this->proyectoId()),
         ];
     }
 
@@ -1675,7 +1687,7 @@ class VerPlano extends Page
              * estado inicial y los `default()` no se aplican. Mismo motivo que
              * en el modal de cobro, donde ya costó verlo en pantalla.
              */
-            'recibido_por' => QuienRecibeElDinero::porDefecto(),
+            'recibido_por' => QuienRecibeElDinero::porDefecto($this->proyectoId()),
 
             // Al estado y no a $arguments: los closures de un componente del
             // schema no reciben $arguments. Mismo motivo que en la venta.

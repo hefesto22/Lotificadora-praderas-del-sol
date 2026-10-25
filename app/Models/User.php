@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -130,6 +131,21 @@ class User extends Authenticatable implements FilamentUser
     public function createdUsers(): HasMany
     {
         return $this->hasMany(self::class, 'created_by');
+    }
+
+    /**
+     * Los proyectos donde esta persona recibe dinero — 24-oct-2026.
+     *
+     * Es lo que decide quién aparece en «¿Quién recibió el dinero?» de cada
+     * proyecto (`QuienRecibeElDinero::lista()`). Sin ningún proyecto, no
+     * recibe dinero en ninguno: es el interruptor «Recibe dinero» de la ficha
+     * del usuario.
+     *
+     * @return BelongsToMany<Proyecto, $this>
+     */
+    public function proyectosDondeRecibe(): BelongsToMany
+    {
+        return $this->belongsToMany(Proyecto::class, 'proyecto_receptores')->withTimestamps();
     }
 
     /**

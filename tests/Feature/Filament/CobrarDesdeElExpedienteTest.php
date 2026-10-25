@@ -136,12 +136,13 @@ test('el dinero lo puede haber recibido otra persona, y el recibo lo dice', func
     $enLaCaseta = User::factory()->create(['name' => 'Elder Martínez', 'is_active' => true]);
 
     /*
-     * ⚠️ El permiso no es decorado: `Select` de Filament arma solo una regla
-     * `in` con sus opciones, y las opciones de este campo son «quien puede
-     * cobrar». Sin esto, el valor se rechaza por inválido — que es justo lo
-     * que tiene que pasar con alguien que no cobra.
+     * ⚠️ No es decorado: `Select` de Filament arma solo una regla `in` con
+     * sus opciones, y las opciones de este campo son «quien recibe dinero en
+     * ESTE proyecto» (24-oct-2026). Sin esto, el valor se rechaza por inválido
+     * — que es justo lo que tiene que pasar con alguien que no recibe dinero
+     * acá.
      */
-    $enLaCaseta->givePermissionTo('Create:Recibo');
+    $enLaCaseta->proyectosDondeRecibe()->attach(Proyecto::query()->pluck('id')->all());
 
     ($this->expediente)()
         ->callAction('cobrar', ($this->soloElPrimero)('25000.00', [

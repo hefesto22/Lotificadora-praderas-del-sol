@@ -59,6 +59,13 @@ class UsersTable
                     ->color('primary')
                     ->separator(',')
                     ->placeholder('Sin rol'),
+                // Dónde aparece en «¿Quién recibió el dinero?» (24-oct-2026).
+                TextColumn::make('proyectosDondeRecibe.codigo')
+                    ->label('Recibe dinero en')
+                    ->badge()
+                    ->color('success')
+                    ->separator(',')
+                    ->placeholder('No recibe'),
                 ToggleColumn::make('is_active')
                     ->label('Activo')
                     ->onColor('success')

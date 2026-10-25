@@ -1201,12 +1201,13 @@ describe('Quién recibió el dinero (R24)', function (): void {
         $this->enLaCaseta = User::factory()->create(['name' => 'Elder Martínez', 'is_active' => true]);
 
         /*
-         * ⚠️ El permiso no es decorado: el `Select` de Filament arma solo una
-         * regla `in` con sus opciones, y las opciones de este campo son «quien
-         * puede cobrar». Sin esto el valor se rechaza por inválido — que es
-         * justo lo que tiene que pasar con alguien que no cobra.
+         * ⚠️ No es decorado: el `Select` de Filament arma solo una regla `in`
+         * con sus opciones, y las opciones de este campo son «quien recibe
+         * dinero en ESTE proyecto» (24-oct-2026). Sin esto el valor se rechaza
+         * por inválido — que es justo lo que tiene que pasar con alguien que
+         * no recibe dinero acá.
          */
-        $this->enLaCaseta->givePermissionTo('Create:Recibo');
+        $this->enLaCaseta->proyectosDondeRecibe()->attach($this->proyecto->getKey());
     });
 
     test('la seña del apartado queda a nombre de quien la recibió', function (): void {

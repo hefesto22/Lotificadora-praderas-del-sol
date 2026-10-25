@@ -504,6 +504,17 @@ final readonly class CobrarUnPago
      */
     private function __construct(private Venta $venta, private ?Pantalla $pantalla = null) {}
 
+    /**
+     * De qué proyecto es este dinero: decide quién aparece en «¿Quién recibió
+     * el dinero?» (`QuienRecibeElDinero::lista()`, 24-oct-2026).
+     */
+    private function proyectoId(): ?int
+    {
+        $id = $this->venta->getAttribute('proyecto_id');
+
+        return is_numeric($id) ? (int) $id : null;
+    }
+
     // ─── Quién puede qué ──────────────────────────────────────────────
 
     /**
@@ -579,7 +590,7 @@ final readonly class CobrarUnPago
              * unas líneas más abajo para la fecha; costó verlo en pantalla:
              * el campo salía vacío con un `default()` perfectamente escrito.
              */
-            'recibido_por' => QuienRecibeElDinero::porDefecto(),
+            'recibido_por' => QuienRecibeElDinero::porDefecto($this->proyectoId()),
         ];
 
         $lotes = $this->lotesQueDeben();
@@ -773,7 +784,7 @@ final readonly class CobrarUnPago
              * misma pregunta entró en apartar y en vender: el dinero llega por
              * tres puertas y la pregunta tiene que ser una sola.
              */
-            QuienRecibeElDinero::campo(),
+            QuienRecibeElDinero::campo(proyecto: $this->proyectoId()),
 
             TextInput::make('referencia')
                 ->label('Número de referencia')

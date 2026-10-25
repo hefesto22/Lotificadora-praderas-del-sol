@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Users\Schemas;
 
+use App\Models\Proyecto;
+use App\Models\User;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules\Password;
@@ -95,6 +100,65 @@ class UserForm
                             ->preload()
                             ->searchable()
                             ->placeholder('Seleccionar roles'),
+                    ]),
+
+                /*
+                 * ═══ RECIBE DINERO, Y EN QUÉ PROYECTOS — 24-oct-2026 ═══
+                 *
+                 * «Hay que hacer un toggle para marcar si ese usuario aparece
+                 * como persona que recibe dinero o no, y si no está marcado como
+                 * permitido en X proyecto, entonces no aparece en ese
+                 * proyecto» — Mauricio.
+                 *
+                 * El interruptor NO es una columna: es «tiene algún proyecto
+                 * marcado». Una sola fuente —`proyecto_receptores`— y no un
+                 * booleano que pueda decir que sí con la lista vacía.
+                 *
+                 * ⚠️ `saveRelationshipsWhenHidden()` es lo que hace que apagar
+                 * el interruptor DESMARQUE todo: sin eso, Filament no guarda la
+                 * relación de un campo escondido y los proyectos de antes se
+                 * quedarían puestos sin que nadie los vea.
+                 */
+                Section::make('Recibe dinero')
+                    ->description('Solo quien esté marcado aparece en «¿Quién recibió el dinero?» al cobrar, apartar o vender en ese proyecto. De ahí sale el corte de caja.')
+                    ->icon('heroicon-o-banknotes')
+                    ->aside()
+                    ->schema([
+                        Toggle::make('recibe_dinero')
+                            ->label('Recibe dinero de los clientes')
+                            ->onColor('success')
+                            ->live()
+                            ->dehydrated(false)
+                            ->afterStateHydrated(static function (Toggle $component, ?User $record): void {
+                                $component->state($record instanceof User && $record->proyectosDondeRecibe()->exists());
+                            })
+                            ->afterStateUpdated(static function (?bool $state, Get $get, Set $set): void {
+                                if ($state !== true) {
+                                    $set('proyectosDondeRecibe', []);
+
+                                    return;
+                                }
+
+                                // Con un solo proyecto no hay nada que elegir.
+                                $proyectos = Proyecto::query()->pluck('id')->all();
+                                $marcados = $get('proyectosDondeRecibe');
+
+                                if (count($proyectos) === 1 && ($marcados === null || $marcados === [])) {
+                                    $set('proyectosDondeRecibe', array_map(strval(...), $proyectos));
+                                }
+                            })
+                            ->helperText('Apagado, no aparece en ningún proyecto. Los recibos que ya tiene a su nombre no cambian.'),
+
+                        CheckboxList::make('proyectosDondeRecibe')
+                            ->label('¿En qué proyectos?')
+                            ->relationship('proyectosDondeRecibe', 'nombre')
+                            ->bulkToggleable()
+                            ->visible(static fn (Get $get): bool => $get('recibe_dinero') === true)
+                            ->required(static fn (Get $get): bool => $get('recibe_dinero') === true)
+                            ->validationMessages([
+                                'required' => 'Marque al menos un proyecto, o apague «Recibe dinero de los clientes».',
+                            ])
+                            ->saveRelationshipsWhenHidden(),
                     ]),
 
                 Section::make('Estado de la Cuenta')

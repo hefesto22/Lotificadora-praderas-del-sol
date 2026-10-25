@@ -3,6 +3,28 @@
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
 
+## 24-oct (noche) — Quién recibe dinero, y en qué proyecto
+
+**Pedido de Mauricio:** «un toggle para marcar si ese usuario aparece como persona que recibe dinero o no, y si no está marcado como permitido en X proyecto, entonces no aparece en ese proyecto». Lo vio con la administradora apareciendo en «¿Quién recibió el dinero?» de un cobro.
+
+**Lo construido:**
+
+- Tabla `proyecto_receptores` (user ↔ proyecto) y `User::proyectosDondeRecibe()`. La migración **siembra a los de antes** (quien tenía `Create:Recibo`, menos el super-admin) en TODOS los proyectos: el día del despliegue la lista es la misma. En una base nueva, sin el permiso todavía, no siembra.
+- `QuienRecibeElDinero::lista(proyecto, incluir)`: solo activos con ESE proyecto marcado. **Lo que se marca es lo que aparece** — el permiso ya no mete a nadie. Cada puerta pasa su proyecto: cobro (la venta), apartar/vender (el plano), «Corregir» (el recibo, por venta o por compromiso). «Corregir» incluye a quien hoy figura en el papel aunque ya no reciba ahí.
+- Ficha del usuario → sección «Recibe dinero»: interruptor + «¿En qué proyectos?». El interruptor NO es columna: es «tiene algún proyecto». `saveRelationshipsWhenHidden()` es lo que hace que apagarlo desmarque todo. Columna «Recibe dinero en» en la lista de usuarios.
+
+**Después de desplegar:** Usuarios → Rosa Elena → Editar → apagar «Recibe dinero de los clientes» → Guardar.
+
+## 24-oct (noche) — «Recibos por anotar» aplicado en producción
+
+Rosa Elena devolvió llena la lista del 18-oct (269 recibos: 258 «Sin anotar» + 11 a su nombre, RPS-1 a RPS-11). Se aplicó en PRODUCCIÓN a las 17:44 con un script de una sola vez (`storage/app/_analisis/anotar-recibos.php`, fuera del repo por L0) que pasa cada fila por `CorreccionDeRecibo` — la misma puerta del botón «Corregir recibo»: un asiento por recibo en la bitácora, firmado por Mauricio, y sin tocar monto, fecha, concepto ni número. Guardas: id + fecha + monto de cada fila contra la base, todo en una transacción, ensayo primero. `pg_dump` previo: `/root/praderas_produccion_2026-10-24_2343.sql.gz` (hora UTC).
+
+Resultado (ensayo y real idénticos): **Elder L 5,274,200.00 · Edwin L 2,568,797.00 · total L 7,842,997.00**, 269 cambiaron, 0 anulados.
+
+⚠️ **`corregir()` escribe los CUATRO campos** (quién, forma, referencia, observaciones): para tocar solo dos hay que pasarle los otros dos como están, o los borra.
+
+⚠️ **Un archivo que se manda por `scp` desde `_analisis/` llega con 0600** (el modo del Mac) y `www-data` no lo puede abrir («Could not open input file»): `chmod 644` antes de correrlo.
+
 ## 24-oct (noche) — Exp. 0070: nace `olympo:traspasar-valor`
 
 **El problema.** Cuaderno pág. 147: el O-3 iba por L 210,000.00 con L 200,000.00 de prima, y el O-4 con el N-8 por L 605,000.00 con L 20,000.00 — esos 605,000 son los 250,000 y 345,000 de cada uno MÁS los 10,000 que le faltaban al O-3. La carga dejó cada lote con su valor individual: el O-3 quedó debiendo 48 cuotas de L 208.33 que nadie pactó.
@@ -16,13 +38,11 @@
 - `olympo:traspasar-valor {venta} --lote=CODIGO:VALOR (todos) --motivo= --ensayo` — imprime lotes antes/después y el reparto de cada recibo.
 - `tests/Feature/Dominio/TraspasarValorTest.php` — el 0070 con sus números al céntimo, ensayo, bitácora, anular después del traspaso, y las negativas.
 
-**Falta:** gate → commit → pruebas (`--ensayo` primero) → producción (`pg_dump`, ensayo, real):
+**✅ APLICADO EN PRODUCCIÓN el 24-oct, 17:15** (commit del traspaso, `pg_dump` previo en `/root/`). Ensayo y real dieron lo mismo: O-3 L 200,000.00 pagado; O-4 L 255,000.00 debiendo 239,895.83 en cuotas de 5,104.17; N-8 L 350,000.00 debiendo 321,104.17 en cuotas de 7,083.33; total L 561,000.00 antes y después. RPS-00000005 sigue en L 24,000.00 y cuadra: ahora N-8 18,895.83 · O-4 5,104.17. En pruebas el 0070 NO tiene ese recibo (se cobró solo en producción), así que allá el ensayo no ejercitó la re-aplicación.
 
-```
-php artisan olympo:traspasar-valor 70 --lote=RPS-O-003:200000.00 --lote=RPS-O-004:255000.00 --lote=RPS-N-008:350000.00 --motivo="Cuaderno pág. 147: el O-3 queda pagado con su prima; los 10,000 restantes se reparten 5,000 al O-4 y 5,000 al N-8" --ensayo
-```
+⚠️ **Tinker como `www-data` en el servidor** sale sin hacer nada («Writing to directory /var/www/.config/psysh is not allowed»). Va con `sudo -u www-data env HOME=/tmp XDG_CONFIG_HOME=/tmp XDG_DATA_HOME=/tmp XDG_RUNTIME_DIR=/tmp /usr/bin/php8.5 artisan tinker --execute="…"`.
 
-⚠️ El `70` es el id de la URL del expediente en PRODUCCIÓN; en pruebas puede ser otro — ahí va el número de contrato.
+⚠️ **`value()` de Eloquent pasa por los casts**: una columna `date` llega como Carbon, no como texto. Costó 9 tests rojos en la primera vuelta.
 
 **Después:** el diseño de los botones de cabecera del expediente (Registrar un pago, Titular de los recibos, Cambiar titular…) — Mauricio lo pidió.
 

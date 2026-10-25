@@ -7,7 +7,9 @@ namespace App\Filament\Support;
 use App\Domain\Enums\FormaDePago;
 use App\Domain\Exceptions\GrupoOlympoException;
 use App\Domain\Pagos\CorreccionDeRecibo;
+use App\Models\Compromiso;
 use App\Models\Recibo;
+use App\Models\Venta;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -86,7 +88,15 @@ final class CorregirRecibo
                  * quedó el que ya se recibió.
                  */
                 QuienRecibeElDinero::campo(
-                    'De acá sale el corte de caja del día. Cambialo si el papel quedó a nombre de quien no estuvo en la caja.'
+                    'De acá sale el corte de caja del día. Cambialo si el papel quedó a nombre de quien no estuvo en la caja.',
+                    proyecto: static fn (Recibo $record): ?int => self::proyectoDe($record),
+                    /*
+                     * Quien hoy figura en el papel se queda en la lista aunque
+                     * ya no reciba dinero en ese proyecto: corregir la forma de
+                     * pago de un recibo viejo no puede obligar a cambiarle el
+                     * nombre (24-oct-2026).
+                     */
+                    incluir: static fn (Recibo $record): mixed => $record->getAttribute('recibido_por'),
                 ),
 
                 /*
@@ -198,5 +208,28 @@ final class CorregirRecibo
         }
 
         return $opciones;
+    }
+
+    /**
+     * De qué proyecto es el dinero de este recibo.
+     *
+     * Por la venta, o —si es la seña de un apartado, que todavía no tiene
+     * venta— por el compromiso. Los mismos dos caminos que
+     * `Recibo::deLosProyectos()`.
+     */
+    private static function proyectoDe(Recibo $recibo): ?int
+    {
+        $venta = $recibo->venta;
+
+        if ($venta instanceof Venta) {
+            $id = $venta->getAttribute('proyecto_id');
+
+            return is_numeric($id) ? (int) $id : null;
+        }
+
+        $compromiso = $recibo->compromiso;
+        $id = $compromiso instanceof Compromiso ? $compromiso->getAttribute('proyecto_id') : null;
+
+        return is_numeric($id) ? (int) $id : null;
     }
 }

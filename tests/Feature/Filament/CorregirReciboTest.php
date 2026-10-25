@@ -11,6 +11,7 @@ use App\Models\Bloque;
 use App\Models\Cliente;
 use App\Models\Lote;
 use App\Models\Proyecto;
+use App\Models\Recibo;
 use App\Support\Roles;
 use Database\Seeders\RoleSeeder;
 use Livewire\Livewire;
@@ -66,6 +67,9 @@ beforeEach(function (): void {
 
         $this->receptor = crearUsuarioConRol(Roles::RECEPTOR, ['name' => 'ELDER MEJIA']);
         $this->administradora = crearUsuarioConRol(Roles::ADMINISTRADORA, ['name' => 'ROSA ELENA']);
+
+        // Recibe dinero en este proyecto: sin eso no figura en la lista (24-oct-2026).
+        $this->receptor->proyectosDondeRecibe()->attach(Proyecto::query()->pluck('id')->all());
 
         resolve(PermissionRegistrar::class)->forgetCachedPermissions();
     };
@@ -136,4 +140,32 @@ test('sobre un recibo anulado el botón no aparece', function (): void {
     $this->actingAs($this->administradora);
 
     ($this->ficha)()->assertActionHidden('corregir');
+});
+
+/*
+| 24-oct-2026: la lista sale de quién recibe dinero en ESE proyecto. Un recibo
+| viejo a nombre de alguien que después dejó de recibir ahí tiene que poder
+| corregirse —la forma de pago, la referencia— sin que el modal obligue a
+| cambiarle el nombre.
+*/
+test('corregir un recibo de alguien que ya no recibe dinero ahí no obliga a cambiarle el nombre', function (): void {
+    ($this->reparto)();
+
+    Recibo::query()->whereKey($this->recibo->getKey())->update(['recibido_por' => $this->receptor->getKey()]);
+    $this->receptor->proyectosDondeRecibe()->detach();
+
+    $this->actingAs($this->administradora);
+
+    ($this->ficha)()
+        ->callAction('corregir', [
+            'recibido_por' => $this->receptor->getKey(),
+            'forma_pago'   => FormaDePago::Transferencia->value,
+            'motivo'       => 'Fue por transferencia, no en efectivo',
+        ])
+        ->assertHasNoActionErrors();
+
+    $recibo = $this->recibo->fresh();
+
+    expect($recibo?->getAttribute('recibido_por'))->toBe($this->receptor->getKey())
+        ->and($recibo?->getAttribute('forma_pago'))->toBe(FormaDePago::Transferencia);
 });
