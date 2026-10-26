@@ -321,6 +321,15 @@ final readonly class CorreccionDeValor
             ultimaDespues: $ultima->montoTotal(),
         );
 
+        /*
+         * Un lote reestructurado (25-oct-2026) tiene un acta firmada con el
+         * cliente: mover su plan guardado sería reescribir lo que el acta
+         * dice que había. Se corrige con otra reestructuración.
+         */
+        if (Reprogramacion::query()->where('compromiso_id', $lote->getKey())->whereNotNull('reestructuracion_id')->exists()) {
+            throw CorreccionDeValorInvalidaException::porLoteReestructurado($retrato->codigo);
+        }
+
         $this->verificarQueSeaUnResiduo($retrato, $cuotas);
         $this->verificarQueLaUltimaAbsorba($retrato, $ultima);
         $this->verificarLosPlanesViejos($retrato, $lote);

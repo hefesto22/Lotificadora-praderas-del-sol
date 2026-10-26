@@ -55,13 +55,21 @@ use Countable;
  *     → saldo L 250,000.00 en 72 cuotas
  *     → 71 de L 3,472.22 + ultima de L 3,472.38 = L 250,000.00 exacto
  *
- * ═══ LOS TRES CONSTRUCTORES, Y CUAL USA CADA UNO ═══
+ * ═══ LOS CUATRO CONSTRUCTORES, Y CUAL USA CADA UNO ═══
  *
  * - `nuevo()`      — la venta que se firma. Valor, prima, plazo y tasa.
  * - `porCuotaFija()` — R21, camino «misma cuota, menos meses». La cuota es
  *   un dato de entrada y lo que se calcula es cuantas faltan.
  * - `porPlazoFijo()` — R21, camino «mismos meses, cuota mas baja». Los meses
  *   son el dato de entrada y lo que se calcula es la cuota.
+ * - `aFechasPactadas()` — el plan que no se calcula (05-sep-2026). El
+ *   calendario entra ya escrito, fecha por fecha, y lo unico que se computa
+ *   es el interes devengado por dias reales. No tiene plazo ni dia de pago.
+ * - `conInteresEncima()` — no arma un plan: toma uno sin interes y le suma
+ *   a cada mes el interes de su saldo (25-sep-2026). Es la cuota con el
+ *   interes ENCIMA, la otra mitad de «¿en esos L 100,000 va el interes?».
+ * - `conElRestoEnLaUltima()` — tampoco arma uno: al plan de cuota fija le
+ *   junta el pago chico del final con el anterior (26-sep-2026).
  *
  * La tasa entra como ULTIMO parametro y con default en los tres: todas las
  * llamadas que existian el 7-ago siguen compilando y siguen dando el mismo
@@ -89,12 +97,33 @@ final readonly class PlanDeCuotas implements Countable
     public const int PLAZO_MAXIMO_MESES = 600;
 
     /**
+     * Cuantas fechas se pueden pactar en un plan a medida.
+     *
+     * Tope de cordura, igual que `PLAZO_MAXIMO_MESES`: un plan pactado es de
+     * dos, tres, cinco fechas. Sesenta renglones escritos a mano no son un
+     * acuerdo especial — son un plan de cuotas que alguien esta tecleando en
+     * el lugar equivocado, y para eso esta el plazo.
+     */
+    public const int PAGOS_PACTADOS_MAXIMOS = 60;
+
+    /**
      * @param list<CuotaProyectada> $cuotas
      */
     private function __construct(
         public array $cuotas,
         public Monto $saldoFinanciado,
         public TasaDeInteres $tasa,
+        /**
+         * ¿El calendario se pacto a mano en vez de calcularse?
+         *
+         * Lo preguntan el Service —para escribir `plazo_meses` en NULL en vez
+         * de un numero de meses que no existe— y las pantallas, que con esto
+         * dicen «3 pagos pactados» en lugar de «3 meses». Vive en el plan y no
+         * se deduce del calendario a proposito: un plan mensual de tres cuotas
+         * y uno pactado que casualmente cayo en tres fechas mensuales son
+         * indistinguibles mirando las fechas, y significan cosas distintas.
+         */
+        public bool $aFechasPactadas = false,
     ) {}
 
     /**
@@ -304,6 +333,247 @@ final readonly class PlanDeCuotas implements Countable
     }
 
     /**
+     * El mismo plan, con el interés ENCIMA de cada cuota (25-sep-2026).
+     *
+     * ═══ LA OTRA FORMA DE DECIR «L 100,000 AL MES» ═══
+     *
+     * En la tabla francesa la cuota trae el interés adentro: el cliente
+     * entrega siempre lo mismo y lo que baja de capital cambia cada mes. Acá
+     * es al revés: lo parejo es el CAPITAL, y a cada mes se le suma el interés
+     * de lo que todavía debe. Entrega más al principio y va bajando.
+     *
+     * Se pidió con esas palabras —«que diga si en esos 100,000 ya va el
+     * interés o no»— y son dos contratos distintos, no dos maneras de mostrar
+     * el mismo: con el interés encima se paga menos interés en total, porque
+     * el capital baja más rápido al principio.
+     *
+     * ═══ NO ES CUENTA NUEVA ═══
+     *
+     * Recibe un plan SIN interés —armado por `porPlazoFijo()` o
+     * `porCuotaFija()` con tasa cero, que ya resolvieron el cierre del capital,
+     * las fechas y el residuo a la última— y a cada renglón le suma
+     * `TablaDeAmortizacion::interesDelMes()` sobre el capital vivo: el mismo
+     * interés mensual que cobra la francesa (§9.D10). Si recibiera un plan con
+     * interés, lo ignoraría y usaría solo su capital.
+     */
+    public static function conInteresEncima(self $soloCapital, TasaDeInteres $tasa): self
+    {
+        if ($tasa->esCero()) {
+            return $soloCapital;
+        }
+
+        $vivo = $soloCapital->saldoFinanciado;
+        $cuotas = [];
+
+        foreach ($soloCapital->cuotas as $cuota) {
+            $cuotas[] = CuotaProyectada::conInteres(
+                numero: $cuota->numero,
+                vencimiento: $cuota->vencimiento,
+                capital: $cuota->capital,
+                interes: TablaDeAmortizacion::interesDelMes($vivo, $tasa),
+            );
+
+            $vivo = $vivo->restar($cuota->capital);
+        }
+
+        return new self($cuotas, $soloCapital->saldoFinanciado, $tasa);
+    }
+
+    /**
+     * El mismo plan, sin un último pago de centavos (15-oct-2026).
+     *
+     * Si el último pago es menos de un centavo por cada pago del plan, no es
+     * una cuota: es lo que deja la cuota redondeada al centavo, y va sumado a
+     * la anterior (§8.2). Pasó dos veces el mismo día con REB, venta 17: la
+     * cuota fija de L 35,002.13 dejaba un pago 49 de centavos que no se podía
+     * repartir entre tres lotes (`PlanUnificado`), y después de un abono a
+     * capital, «misma cuota, menos meses», la última quedaba en L 0.32
+     * (`EfectoDelAbono`). Un resto de verdad no se toca.
+     */
+    public static function sinElRedondeoAlFinal(self $plan): self
+    {
+        $ultima = $plan->ultima()?->monto;
+
+        if ($plan->count() < 2 || ! $ultima instanceof Monto || ! $ultima->menorQue(new Monto('0.01')->multiplicarPor($plan->count()))) {
+            return $plan;
+        }
+
+        return self::conElRestoEnLaUltima($plan);
+    }
+
+    /**
+     * El mismo plan, con el pago chico del final sumado al anterior.
+     *
+     * ═══ POR QUE ═══
+     *
+     * Con la cuota fija, el último pago casi nunca cierra justo: L 100,000.00
+     * al mes no pagan L 1,161,498.00 más su interés en 12 pagos, y queda un
+     * pago 13 de L 903.36 que nadie entiende (Mauricio, 26-sep-2026: «no
+     * termina de cuadrar la última cuota, se ve feo»). Esto lo junta con el
+     * pago 12: el cliente termina un mes antes y la última cuota es un poco
+     * más grande.
+     *
+     * ═══ LA CUENTA ═══
+     *
+     * Pagar el saldo entero en el mes N−1 es pagar el capital de los dos
+     * últimos renglones más el interés del N−1. El interés del mes N no se
+     * cobra: ese mes ya no hay saldo. Capital total intacto, al centavo.
+     */
+    public static function conElRestoEnLaUltima(self $plan): self
+    {
+        $cuotas = $plan->cuotas;
+        $cantidad = count($cuotas);
+
+        if ($cantidad < 2) {
+            return $plan;
+        }
+
+        $penultima = $cuotas[$cantidad - 2];
+        $ultima = $cuotas[$cantidad - 1];
+
+        $juntas = array_slice($cuotas, 0, $cantidad - 2);
+
+        $juntas[] = CuotaProyectada::conInteres(
+            numero: $penultima->numero,
+            vencimiento: $penultima->vencimiento,
+            capital: $penultima->capital->sumar($ultima->capital),
+            interes: $penultima->interes,
+        );
+
+        return new self($juntas, $plan->saldoFinanciado, $plan->tasa);
+    }
+
+    /**
+     * La parte de UN lote de un plan unificado, como plan propio.
+     *
+     * ═══ POR QUE (04-oct-2026) ═══
+     *
+     * La venta con un solo plan (`RegistroDeVentas::activar(unSoloPlan:)`)
+     * arma la tabla del contrato con `PlanUnificado` y la reparte entre los
+     * lotes. Las cuotas se guardan por lote, y el resto del Service —ver que
+     * cierra, el resumen del contrato, asentar— trabaja con planes.
+     *
+     * Esto solo envuelve lo que `PlanUnificado` ya repartió: no calcula nada.
+     * Que cierre contra el saldo lo verifica quien lo pide, con
+     * `cierraExacto()`, igual que con cualquier otro plan.
+     *
+     * @param list<CuotaProyectada> $cuotas
+     */
+    public static function delReparto(array $cuotas, Monto $saldo, TasaDeInteres $tasa): self
+    {
+        return new self($cuotas, $saldo, $tasa);
+    }
+
+    /**
+     * El plan que NO se calcula: se pacta fecha por fecha.
+     *
+     * Lo pidio Mauricio el 05-sep-2026 con el expediente de ALMA HONORIA
+     * enfrente: «da la prima y promete pagar el resto digamos en 1, dos o mas
+     * fechas, y en cuales». No es un plazo de N meses ni una venta de contado.
+     *
+     * ═══ EN QUE SE DIFERENCIA DE LOS OTROS TRES ═══
+     *
+     * En que no hay nada que repartir. Los otros tres reciben un saldo y una
+     * regla —tantos meses, o tanto por mes— y de ahi sale el calendario. Este
+     * recibe **el calendario ya escrito** y su trabajo es verificarlo y, si el
+     * contrato lleva interes, decir cuanto se le suma a cada fecha.
+     *
+     * Por eso no pasa por `verificarPlazo()` ni `verificarDiaDePago()`: acá no
+     * hay plazo ni dia de pago, y exigirlos seria inventar dos datos para
+     * poder rechazar el unico caso que esta funcion existe para aceptar.
+     *
+     * ═══ EL INTERES SE DEVENGA POR DIAS REALES ═══
+     *
+     * La tabla francesa no sirve: `TablaDeAmortizacion` asume periodos de un
+     * mes exacto y acá las fechas son desparejas por definicion. Se devenga
+     * Actual/365 sobre el capital vivo, que es la misma cuenta que ya hace
+     * `CalculoDeMora` con `TasaDeInteres::diaria()` — una sola forma de contar
+     * dias en todo el sistema.
+     *
+     * Lo que se pacta es el CAPITAL; el interes es lo que se le suma. Ver el
+     * docblock de `PagoPactado` para por que en ese orden y no al reves.
+     *
+     * ⚠️ **La suma de los capitales tiene que dar el saldo al centimo.** No se
+     * ajusta el ultimo renglon como hacen los otros tres: acá no hay residuo
+     * de una division, hay numeros que una persona escribio, y moverle uno sin
+     * avisar es cambiarle el contrato al cliente. Si no cierra, se rechaza y
+     * se corrige en pantalla.
+     *
+     * @param list<PagoPactado> $pagos en el orden en que se van a pagar
+     * @param TasaDeInteres|null $tasa null es 0 %: la suma de lo pactado es
+     *                                 exactamente lo que el cliente paga
+     *
+     * @throws PlanDeCuotasInvalidoException
+     */
+    public static function aFechasPactadas(
+        array $pagos,
+        Monto $saldo,
+        CarbonImmutable $fechaContrato,
+        int $primerNumero = 1,
+        ?TasaDeInteres $tasa = null,
+    ): self {
+        $tasa ??= TasaDeInteres::cero();
+
+        if ($pagos === []) {
+            throw PlanDeCuotasInvalidoException::porPlanPactadoSinFechas();
+        }
+
+        if (count($pagos) > self::PAGOS_PACTADOS_MAXIMOS) {
+            throw PlanDeCuotasInvalidoException::porDemasiadasFechasPactadas(count($pagos));
+        }
+
+        if ($saldo->esCero()) {
+            throw PlanDeCuotasInvalidoException::porContadoConFechasPactadas();
+        }
+
+        $cuotas = [];
+        $capitalVivo = $saldo;
+        $sumaDeCapital = Monto::cero();
+        $anterior = $fechaContrato;
+
+        foreach ($pagos as $indice => $crudo) {
+            $renglon = $indice + 1;
+            $pago = $crudo->alCentimo();
+
+            if (! $pago->fecha->greaterThan($anterior)) {
+                throw PlanDeCuotasInvalidoException::porFechaPactadaFueraDeOrden(
+                    $pago->fecha,
+                    $anterior,
+                    $renglon,
+                );
+            }
+
+            if (! $pago->capital->mayorQue(Monto::cero())) {
+                throw PlanDeCuotasInvalidoException::porPagoPactadoEnCero($renglon);
+            }
+
+            if ($pago->capital->mayorQue($capitalVivo)) {
+                throw PlanDeCuotasInvalidoException::porPagoPactadoQueSuperaElSaldo(
+                    $pago->capital,
+                    $capitalVivo,
+                    $renglon,
+                );
+            }
+
+            $interes = self::devengo($capitalVivo, $tasa, $anterior, $pago->fecha);
+
+            $cuotas[] = $interes->esCero()
+                ? CuotaProyectada::sinInteres($primerNumero + $indice, $pago->fecha, $pago->capital)
+                : CuotaProyectada::conInteres($primerNumero + $indice, $pago->fecha, $pago->capital, $interes);
+
+            $sumaDeCapital = $sumaDeCapital->sumar($pago->capital);
+            $capitalVivo = $capitalVivo->restar($pago->capital);
+            $anterior = $pago->fecha;
+        }
+
+        if (! $sumaDeCapital->igualA($saldo)) {
+            throw PlanDeCuotasInvalidoException::porPagosPactadosQueNoCierran($sumaDeCapital, $saldo);
+        }
+
+        return new self($cuotas, $saldo, $tasa, aFechasPactadas: true);
+    }
+
+    /**
      * La cuota que el cliente paga todos los meses.
      *
      * Es la de la primera; la ultima puede diferir por el residuo. En una
@@ -491,6 +761,53 @@ final readonly class PlanDeCuotas implements Countable
         $cubierto = $cuota->multiplicarPor($enteras);
 
         return $saldo->mayorQue($cubierto) ? $enteras + 1 : $enteras;
+    }
+
+    /**
+     * El interes que corre sobre el capital vivo entre dos fechas.
+     *
+     * Actual/365, la misma convencion que `CalculoDeMora`: el año comercial de
+     * 360 dias solo sirve para que el cliente que rehaga la cuenta con el
+     * calendario encuentre una diferencia que nadie le puede explicar.
+     *
+     * Se redondea al centimo ACA y no al guardar, porque `CuotaProyectada`
+     * exige que capital + interes de exactamente la cuota: con el interes sin
+     * redondear, los tres numeros cierran en el objeto y dejan de cerrar
+     * cuando la base los corta a NUMERIC(14,2).
+     */
+    /**
+     * El interes devengado por dias reales sobre un capital vivo.
+     *
+     * ═══ POR QUE ES PUBLICA (18-sep-2026) ═══
+     *
+     * La usa `CuotasParejas::conInteres()`, que arma los capitales de modo que
+     * lo que el cliente entrega cada fecha caiga en un multiplo de L 100.
+     * Para despejar el capital tiene que saber cuanto interes lleva esa fecha,
+     * y ese numero TIENE que ser el mismo que este motor va a calcular al
+     * firmar: escribir la formula dos veces es como se llega a que la pantalla
+     * prometa un total y el contrato guarde otro (§9.D10).
+     *
+     * Sigue siendo pura —capital, tasa y dos fechas— y no toca nada del plan.
+     */
+    public static function devengo(
+        Monto $capitalVivo,
+        TasaDeInteres $tasa,
+        CarbonImmutable $desde,
+        CarbonImmutable $hasta,
+    ): Monto {
+        if ($tasa->esCero()) {
+            return Monto::cero();
+        }
+
+        $dias = (int) $desde->startOfDay()->diffInDays($hasta->startOfDay(), absolute: true);
+
+        if ($dias === 0) {
+            return Monto::cero();
+        }
+
+        $crudo = $capitalVivo->multiplicarPor($tasa->diaria())->multiplicarPor($dias);
+
+        return new Monto($crudo->redondeado());
     }
 
     private static function verificarPlazo(int $plazoMeses): void

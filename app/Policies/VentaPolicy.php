@@ -82,6 +82,30 @@ class VentaPolicy
         return $authUser->can('ProntoPago:Venta');
     }
 
+    /**
+     * Rehacer el plan de un contrato: meses, cuota, tasa, y sus lotes
+     * unificados en una sola cuota o cada uno con la suya (traído de Maya,
+     * 25-oct-2026).
+     *
+     * ═══ POR QUE NO ALCANZA CON `Reprogramar:Venta` ═══
+     *
+     * Reprogramar reparte la MISMA deuda con la MISMA tasa: un abono baja el
+     * capital y el plan se reacomoda solo. Reestructurar puede cambiar la tasa
+     * y estirar el plan —y con eso sube o baja el interés que paga el
+     * cliente—, mueve lo ya pagado a las cuotas nuevas y perdona la mora que
+     * corría. Sale con un acta que se firma. Nace para super_admin y
+     * administradora; el receptor cobra lo que el contrato dice.
+     *
+     * §9.E3: se nombra uno por uno en `RoleSeeder`, nunca por patrón.
+     *
+     * Sin argumento de modelo, igual que los de arriba: se consulta con
+     * `can('reestructurar', Venta::class)`.
+     */
+    public function reestructurar(AuthUser $authUser): bool
+    {
+        return $authUser->can('Reestructurar:Venta');
+    }
+
     public function viewAny(AuthUser $authUser): bool
     {
         return $authUser->can('ViewAny:Venta');

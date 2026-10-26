@@ -243,6 +243,162 @@
     .dark .olympo-gastos-rotulo, .dark .olympo-gastos-nota { color: rgb(148 154 165); }
     .dark .olympo-gastos-monto, .dark .olympo-gastos-rubro strong { color: rgb(244 244 245); }
     .dark .olympo-gastos-rubro { border-color: rgba(255, 255, 255, .10); background: rgba(255, 255, 255, .03); color: rgb(212 212 216); }
+
+    /* ══ «Reestructurar el contrato» (traído de Maya, 25-oct-2026) ══
+
+       Las tarjetas, la franja del contrato, la franja de estado y el plan
+       con altura fija del modal de Maya, tal cual: «debería de tener más o
+       menos ese mismo diseño» —Mauricio—. El CSS de Filament está
+       precompilado y estas clases no existen ahí (§9.A7). */
+    /* ── Tarjetas de números: «Reestructurar el contrato» ──
+
+       «Que tenga un mejor diseño» —Mauricio—, mirando un modal que decía todo
+       en párrafos grises. Un número que decide dinero se lee en una tarjeta:
+       rótulo chico, el número grande, una línea de detalle. La grilla se
+       acomoda sola: cuatro por fila en la computadora, una en el celular.
+
+       `minmax(11rem, …)` y no menos: «L. 1,161,498.00» en negrita tiene que
+       entrar entero en la tarjeta más angosta. Un monto recortado es peor que
+       uno ausente (§9.A15). */
+    .olympo-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .625rem; }
+    .olympo-kpi {
+        display: flex; flex-direction: column; gap: .1875rem; min-width: 0;
+        padding: .75rem .875rem; border: 1px solid rgb(228 228 231); border-radius: .75rem; background: #fff;
+    }
+    .olympo-kpi .rotulo {
+        font-size: .6875rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: rgb(113 113 122);
+    }
+    .olympo-kpi .valor {
+        font-size: 1.125rem; font-weight: 700; line-height: 1.3; white-space: nowrap;
+        font-variant-numeric: tabular-nums; color: rgb(9 9 11);
+    }
+    .olympo-kpi .detalle { font-size: .75rem; line-height: 1.45; color: rgb(113 113 122); }
+    .olympo-kpi.pagado { border-color: rgba(22, 163, 74, .35); background: rgba(220, 252, 231, .45); }
+    .olympo-kpi.pagado .valor { color: rgb(21 128 61); }
+    .olympo-kpi.mora { border-color: rgba(220, 38, 38, .3); background: rgba(254, 226, 226, .45); }
+    .olympo-kpi.mora .valor { color: rgb(185 28 28); }
+    .dark .olympo-kpi { border-color: rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .03); }
+    .dark .olympo-kpi .rotulo, .dark .olympo-kpi .detalle { color: rgb(161 161 170); }
+    .dark .olympo-kpi .valor { color: #fff; }
+    .dark .olympo-kpi.pagado { border-color: rgba(34, 197, 94, .35); background: rgba(34, 197, 94, .1); }
+    .dark .olympo-kpi.pagado .valor { color: rgb(134 239 172); }
+    .dark .olympo-kpi.mora { border-color: rgba(248, 113, 113, .35); background: rgba(248, 113, 113, .1); }
+    .dark .olympo-kpi.mora .valor { color: rgb(252 165 165); }
+
+    /* ── La franja de datos del contrato (26-sep-2026) ──
+
+       Valor, PRIMA, financiado, tasa y día, de corrido y separados por una
+       raya: se leen de un vistazo sin competir con las tarjetas de abajo, que
+       son las que cambian. La prima va resaltada porque es lo primero que el
+       cliente pregunta cuando se le rehace el plan. En el celular se parten
+       en dos o tres renglones solas. */
+    .olympo-datos {
+        display: flex; flex-wrap: wrap; margin: 0;
+        border: 1px solid rgb(228 228 231); border-radius: .75rem; overflow: hidden; background: rgb(250 250 250);
+    }
+    .olympo-datos > div {
+        flex: 1 1 8.5rem; display: flex; flex-direction: column; gap: .125rem;
+        padding: .625rem .875rem; border-right: 1px solid rgb(228 228 231);
+    }
+    .olympo-datos > div:last-child { border-right: 0; }
+    .olympo-datos dt { font-size: .625rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: rgb(113 113 122); }
+    .olympo-datos dd { margin: 0; font-size: .9375rem; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; color: rgb(9 9 11); }
+    .olympo-datos span { font-size: .6875rem; color: rgb(113 113 122); }
+    .olympo-datos .destacado { background: rgba(254, 243, 199, .6); }
+    .olympo-datos .destacado dd { color: rgb(146 64 14); }
+    .dark .olympo-datos { border-color: rgba(255, 255, 255, .1); background: rgba(255, 255, 255, .03); }
+    .dark .olympo-datos > div { border-right-color: rgba(255, 255, 255, .1); }
+    .dark .olympo-datos dt, .dark .olympo-datos span { color: rgb(161 161 170); }
+    .dark .olympo-datos dd { color: #fff; }
+    .dark .olympo-datos .destacado { background: rgba(245, 158, 11, .12); }
+    .dark .olympo-datos .destacado dd { color: rgb(253 230 138); }
+
+    /* ── La franja de estado: un círculo con el signo y dos renglones ──
+
+       Verde «queda en números cerrados», ámbar «a la cuota 1 le faltan…». El
+       color y el signo dicen el estado antes de leer una palabra. */
+    .olympo-estado {
+        display: flex; gap: .75rem; align-items: flex-start;
+        padding: .875rem 1rem; border: 1px solid; border-radius: .75rem;
+    }
+    .olympo-estado .icono {
+        flex: none; display: inline-flex; align-items: center; justify-content: center;
+        width: 1.75rem; height: 1.75rem; border-radius: 9999px; font-size: .875rem; font-weight: 800; color: #fff;
+    }
+    .olympo-estado strong { display: block; font-size: .9375rem; line-height: 1.4; }
+    .olympo-estado p { margin: .125rem 0 0; font-size: .8125rem; line-height: 1.55; }
+    .olympo-estado.bien { border-color: rgba(22, 163, 74, .4); background: rgba(220, 252, 231, .6); color: rgb(21 128 61); }
+    .olympo-estado.bien .icono { background: rgb(22 163 74); }
+    .olympo-estado.bien strong { color: rgb(20 83 45); }
+    .olympo-estado.falta { border-color: rgba(245, 158, 11, .45); background: rgba(254, 243, 199, .55); color: rgb(120 53 15); }
+    .olympo-estado.falta .icono { background: rgb(217 119 6); }
+    .olympo-estado.falta strong { color: rgb(146 64 14); }
+    .dark .olympo-estado.bien { border-color: rgba(34, 197, 94, .4); background: rgba(34, 197, 94, .12); color: rgb(134 239 172); }
+    .dark .olympo-estado.bien strong { color: rgb(220 252 231); }
+    .dark .olympo-estado.falta { border-color: rgba(245, 158, 11, .35); background: rgba(245, 158, 11, .1); color: rgb(253 230 138); }
+    .dark .olympo-estado.falta strong { color: rgb(254 243 199); }
+
+    /* Las pastillas de la columna «Ya pagado» del plan, y el renglón de un
+       mes que lo ya pagado cubre entero, apenas teñido de verde. */
+    .olympo-pill.bien { background: rgba(22, 163, 74, .12); color: rgb(21 128 61); }
+    .olympo-pill.parcial { background: rgba(245, 158, 11, .15); color: rgb(146 64 14); }
+    .dark .olympo-pill.bien { background: rgba(34, 197, 94, .15); color: rgb(134 239 172); }
+    .dark .olympo-pill.parcial { background: rgba(245, 158, 11, .15); color: rgb(253 230 138); }
+    .olympo-tabla tr.cubierta td { background: rgba(220, 252, 231, .35); }
+    .dark .olympo-tabla tr.cubierta td { background: rgba(34, 197, 94, .07); }
+
+    /* Las aclaraciones del plan, una por renglón, en un panel gris claro
+       con un punto discreto: se leen como nota al pie, no como alarma.
+
+       La franja negra que iba encima de las tarjetas («11 pagos de …») se
+       quitó el 26-sep-2026 —«se ve feo»—: lo que decía vive ahora en la
+       primera línea de cada tarjeta. */
+    .olympo-notas {
+        display: grid; gap: .4375rem; margin: 0; padding: .75rem .875rem; list-style: none;
+        border: 1px solid rgb(244 244 245); border-radius: .75rem; background: rgb(250 250 250);
+    }
+    .olympo-notas li {
+        position: relative; padding-left: .875rem;
+        font-size: .8125rem; line-height: 1.55; color: rgb(82 82 91);
+    }
+    .olympo-notas li::before {
+        content: ''; position: absolute; left: 0; top: .55rem;
+        width: .3125rem; height: .3125rem; border-radius: 9999px; background: rgb(161 161 170);
+    }
+    .dark .olympo-notas { border-color: rgba(255, 255, 255, .06); background: rgba(255, 255, 255, .03); }
+    .dark .olympo-notas li { color: rgb(212 212 216); }
+    .dark .olympo-notas li::before { background: rgb(113 113 122); }
+
+    /* La vista previa antes de que haya un plan que mostrar: un recuadro
+       punteado que dice qué falta, en vez de una línea suelta de texto. */
+    .olympo-espera {
+        padding: 1.5rem 1rem; border: 1px dashed rgb(212 212 216); border-radius: .75rem;
+        font-size: .875rem; line-height: 1.55; text-align: center; color: rgb(113 113 122);
+    }
+    .dark .olympo-espera { border-color: rgba(255, 255, 255, .15); color: rgb(161 161 170); }
+
+    /* La segunda línea de una tarjeta —«Antes …»— un tono más apagada que
+       la primera, para que se lea primero lo nuevo. */
+    .olympo-kpi .detalle + .detalle { color: rgb(161 161 170); }
+    .dark .olympo-kpi .detalle + .detalle { color: rgb(113 113 122); }
+
+    /* El total del plan, al pie del cuadro: la prueba a la vista de que cuadra. */
+    .olympo-plan tfoot td {
+        padding-top: .625rem; font-weight: 700; color: rgb(9 9 11);
+        border-top: 2px solid rgb(228 228 231); border-bottom: 0;
+    }
+    .olympo-scroll-alto tfoot td { position: sticky; bottom: 0; background: #fff; }
+    .dark .olympo-plan tfoot td { color: #fff; border-top-color: rgba(255, 255, 255, .18); }
+    .dark .olympo-scroll-alto tfoot td { background: rgb(24 24 27); }
+
+    /* Bloques apilados con aire entre ellos, sin márgenes sueltos en PHP. */
+    .olympo-bloques { display: grid; gap: .875rem; }
+
+    /* Un cuadro largo —un plan de 48 cuotas— no estira el modal hasta perder
+       de vista el botón: altura fija, y el encabezado se queda arriba. */
+    .olympo-scroll-alto { max-height: 18rem; overflow: auto; overscroll-behavior: contain; }
+    .olympo-scroll-alto thead th { position: sticky; top: 0; z-index: 1; padding-top: .375rem; background: #fff; }
+    .dark .olympo-scroll-alto thead th { background: rgb(24 24 27); }
 </style>
 
 {{-- ═══ IMPRIMIR SIN ABRIR UNA PESTAÑA ═══

@@ -781,6 +781,20 @@ final readonly class RegistroDePagos
             ->get();
 
         foreach ($posteriores as $otra) {
+            /*
+             * Una reestructuración posterior no tiene recibo, así que la
+             * pregunta de abajo la salteaba y el abono se deshacía ENCIMA del
+             * plan reestructurado (traído de Maya, 25-oct-2026).
+             */
+            if ($otra->esReestructuracion()) {
+                $cuando = $otra->getAttribute('created_at');
+
+                throw PagoInvalidoException::porReestructuracionPosterior(
+                    $recibo->folio(),
+                    $cuando instanceof CarbonInterface ? $cuando->format('d/m/Y') : 'después',
+                );
+            }
+
             $suRecibo = $otra->recibo;
 
             if ($suRecibo instanceof Recibo && ! $suRecibo->estaAnulado()) {

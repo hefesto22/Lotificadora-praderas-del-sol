@@ -67,6 +67,8 @@ final class ExportarTodo extends Command
         'recibos',
         'aplicaciones_de_pago',
         'reprogramaciones',
+        // Las actas de reestructuración (25-oct-2026): el antes y el después que firmó el cliente.
+        'reestructuraciones',
         'impresiones_de_recibo',
         'documentos',
         'correlativos',

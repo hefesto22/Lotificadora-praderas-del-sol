@@ -177,6 +177,14 @@ class RoleSeeder extends Seeder
         $permisos = [...$permisos, ...$this->permisos(['ProntoPago'], ['Venta'])];
 
         /*
+         * Reestructurar el plan de un contrato (traído de Maya, 25-oct-2026).
+         * Aparte de `Reprogramar` porque puede cambiar la tasa, estirar el
+         * plan, mover lo ya pagado y perdonar la mora que corría: sale con un
+         * acta que firma el cliente. El receptor no lo tiene.
+         */
+        $permisos = [...$permisos, ...$this->permisos(['Reestructurar'], ['Venta'])];
+
+        /*
          * R14: prorrogar un apartado y marcar la devolucion de su seña. Los
          * dos se nombran solos y NO van a RECURSOS ni a ACCIONES: ver un
          * apartado y estirarlo son cosas distintas, y el receptor hace lo

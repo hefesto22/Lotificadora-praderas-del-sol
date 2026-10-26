@@ -254,6 +254,23 @@ final readonly class TablaDeAmortizacion implements Countable
     }
 
     /**
+     * El interes de UN mes sobre un saldo, para quien no esta armando la tabla.
+     *
+     * ═══ POR QUE SE ABRE (19-sep-2026) ═══
+     *
+     * Deshacer un abono a capital obliga a repartir de nuevo las cuotas viejas
+     * en capital e interes, porque el snapshot guarda el monto y no sus partes.
+     * Ese reparto NO se escribe otra vez en el que deshace: se le pregunta al
+     * motor que armo la tabla la primera vez (§9.D10). Dos versiones de la
+     * misma cuenta es como se llega a que la anulacion devuelva un plan que no
+     * es el que el cliente tenia.
+     */
+    public static function interesDelMes(Monto $saldo, TasaDeInteres $tasa): Monto
+    {
+        return self::interesDe($saldo, $tasa->mensual());
+    }
+
+    /**
      * El interes del mes: saldo x tasa mensual, redondeado a dos decimales.
      *
      * Redondeado acá y no al final: lo que el cliente ve en la tabla del

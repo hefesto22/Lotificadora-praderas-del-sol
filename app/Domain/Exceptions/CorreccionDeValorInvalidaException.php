@@ -143,6 +143,14 @@ final class CorreccionDeValorInvalidaException extends GrupoOlympoException
         );
     }
 
+    public static function porLoteReestructurado(string $codigo): self
+    {
+        return new self(
+            "El lote {$codigo} tiene su plan reestructurado, con un acta firmada. Corregir el valor "
+            .'reescribiría lo que esa acta dice que había: se corrige con una nueva reestructuración.'
+        );
+    }
+
     /**
      * La igualdad que contesta «¿por qué debo esto?»: valor − prima − lo
      * pagado a cuotas − lo abonado a capital = lo que deben sus cuotas.

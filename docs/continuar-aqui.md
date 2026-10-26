@@ -1,7 +1,29 @@
-# Continuar acá — 24-oct-2026
+# Continuar acá — 25-oct-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 25-oct — Reestructurar el contrato (traído de Maya) + los botones del expediente
+
+**Pedido de Mauricio** (con el 0033 enfrente): «hay que hacer reestructuración de contrato, ya sea de un lote o de dos … así como lo manejamos en Constructora Maya», y para el 0033: «se reestructurarían los dos lotes de manera individual a 24 meses cada uno». Contestó: las dos maneras (unificados o cada lote con su cuota), y «reestructurar y renegociar».
+
+**Lo construido (partes 1 y 2 de 3):**
+
+- **El motor de Maya, traído entero** en lo que sirve a cualquier lotificadora: `RegistroDeReestructuraciones`, `SituacionDelPlan`, `PlanUnificado`, `CoberturaDelPlan`, `CondicionesDeReestructuracion` (+ `PagoPactado`, `CuotasParejas`), el modelo `Reestructuracion` y sus 4 migraciones con los nombres de Maya. Lo pagado se reubica recibo por recibo SIN anular ni emitir nada; la mora que corría se perdona; el plan no nace atrasado salvo que se pida; una constancia por lote en `reprogramaciones` (`reestructuracion_id`, sin recibo, sin modalidad).
+- **Lo nuevo que Maya no tenía: cada lote con su cuota.** `CondicionesDeReestructuracion::cadaLoteConSuCuota()` → `PlanUnificado` arma un plan por lote con la MISMA cuenta de un lote solo (`delContrato()`), y el «plan del contrato» es la suma mes por mes. `CoberturaDelPlan::aplicarAlLote()` + `SituacionDelPlan::dineroPorLote()`: lo que un recibo pagó de un lote vuelve a ESE lote. Con titulares de recibo distintos, unificar se niega y cada lote por su lado no. Migración `2026_10_25_100000`: `reestructuraciones.agrupacion` + `lotes_detalle` (cómo quedó cada lote, para el acta).
+- **Desde la próxima o desde la cuota 1** (`$desdeLaPrimera`, de Maya). El 0033 a 24 meses: desde la próxima L 8,333.33 por lote (la última 8,333.41); desde la 1, L 10,000.00 por lote, cuotas 1–4 pagadas con los recibos de siempre, lo próximo el 15/11/2026 por L 20,000.00.
+- **No se trajo:** «anular los recibos y emitir uno por cuota» (no hace falta: se reubica sin anular; y quemar correlativos no se hace de pasada) ni el «resto al final». **A fechas y con descuento** el motor los sabe armar pero `verificarQueSePuedePactar()` los niega: el estado de cuenta y el abono (R21) tienen que saber leerlos antes. Es la parte 3.
+- **Guardas nuevas:** un abono a capital de ANTES de una reestructuración ya no se puede anular (`PagoInvalidoException::porReestructuracionPosterior`); el valor de un lote reestructurado no se corrige (`CorreccionDeValorInvalidaException::porLoteReestructurado`).
+- **La pantalla:** ⋮ «Más trámites» → «Reestructurar el contrato» (`app/Filament/Support/ReestructurarElPlan.php`, el modal de Maya del 07-oct con «¿Cómo quedan los lotes?»). Cada lote con su cuota pide solo los meses; unificados, meses y cuota como en Maya. Sin interés en ningún lote (R1) la tasa no se pregunta. Acta imprimible `documentos/reestructuracion/{id}` con «Cómo queda cada lote»; botón «Imprimir el acta» en Reprogramaciones y en Actualizaciones.
+- **Los botones del expediente** (pedido del 24-oct): arriba solo «Registrar un pago» y «Estado de cuenta»; el resto en «Más trámites» —reestructurar, titular de los recibos, cambiar titular— y rescindir en su propio grupo, separado por una línea.
+- **Permiso `Reestructurar:Venta`**: administradora y super-admin; el receptor no. **Después de desplegar: `olympo:sembrar-permisos`.**
+- `olympo:exportar-todo` exporta también `reestructuraciones`.
+
+**Tests:** `tests/Unit/Domain/Ventas/PlanUnificadoTest.php`, `CoberturaDelPlanTest.php` (el 0033 dorado, cada lote vs unificados), `tests/Feature/Dominio/Ventas/ReestructurarElContratoTest.php` (con base: desde la 1, desde la próxima, el dinero que no cruza de lote, titulares, negativas, las dos guardas) y `tests/Feature/Filament/ReestructurarElContratoTest.php` (el modal, el acta, quién ve el botón).
+
+⚠️ **`ventas.cuota_mensual` es la cuota 1** (`recalcularElResumen`, igual que en Maya): reestructurando DESDE LA PRÓXIMA, la lista de Ventas sigue mostrando la cuota vieja. Desde la cuota 1 sale bien. Anotado para la parte 3.
+
+**Sigue (parte 3, renegociar):** descuento de capital, quitar la mora, otra tasa, a fechas — con el estado de cuenta y el abono sabiendo leerlos.
 
 ## 24-oct (noche) — Quién recibe dinero, y en qué proyecto
 

@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Ventas\RelationManagers;
 
 use App\Models\Cliente;
+use App\Models\Reestructuracion;
 use App\Support\Roles;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
@@ -42,6 +45,13 @@ use Spatie\Activitylog\Models\Activity;
  * pestaña dice quién tocó qué, que es información sobre las personas que
  * usan el sistema, no sobre los lotes. El día que haya que abrirla a otro
  * rol, se abre acá, a mano y a propósito.
+ *
+ * ═══ EL UNICO BOTON: IMPRIMIR EL ACTA (26-sep-2026) ═══
+ *
+ * «Acá en Actualizaciones debería estar para imprimir el acta» —Mauricio—.
+ * El asiento de una reestructuración guarda el id de su acta, y ese renglón
+ * lleva «Imprimir el acta». Imprimir no cambia nada del historial: la regla
+ * de arriba —sin crear, sin editar, sin borrar— sigue entera.
  */
 class ActualizacionesRelationManager extends RelationManager
 {
@@ -134,10 +144,55 @@ class ActualizacionesRelationManager extends RelationManager
                     // o una importación. No es un hueco, es una respuesta.
                     ->placeholder('El sistema'),
             ])
+            ->recordActions([
+                Action::make('imprimir_acta')
+                    ->label('Imprimir el acta')
+                    ->icon(Heroicon::OutlinedPrinter)
+                    ->color('gray')
+                    ->url(fn (Activity $record): ?string => $this->urlDelActa($record))
+                    ->openUrlInNewTab()
+                    ->visible(fn (Activity $record): bool => $this->urlDelActa($record) !== null),
+            ])
             ->defaultSort('created_at', 'desc')
             ->emptyStateHeading('Nadie le ha cambiado nada')
             ->emptyStateDescription('Acá van a ir apareciendo, solas, las modificaciones al expediente y a los datos de sus dueños.')
             ->emptyStateIcon('heroicon-o-clock');
+    }
+
+    /**
+     * Nunca de solo lectura por ser una página de vista: el default de
+     * Filament escondería el botón de imprimir el acta. No hay crear, editar
+     * ni borrar que destapar: esta tabla no los tiene.
+     */
+    #[Override]
+    public function isReadOnly(): bool
+    {
+        return false;
+    }
+
+    /**
+     * Dónde se imprime el acta de un asiento de reestructuración, o null si
+     * el asiento no tiene acta. El acta tiene que ser de ESTE expediente: un
+     * id en `properties` no es prueba de nada por sí solo.
+     *
+     * El parámetro se llama `$record` a propósito (§9.A19): si un fixer
+     * convierte el closure del botón en `$this->urlDelActa(...)`, Filament lo
+     * busca por ese nombre.
+     */
+    private function urlDelActa(Activity $record): ?string
+    {
+        $id = $record->properties->get('reestructuracion_id');
+
+        if (! is_int($id) && (! is_string($id) || ! ctype_digit($id))) {
+            return null;
+        }
+
+        $acta = Reestructuracion::query()
+            ->whereKey((int) $id)
+            ->where('venta_id', $this->getOwnerRecord()->getKey())
+            ->first();
+
+        return $acta instanceof Reestructuracion ? route('documentos.reestructuracion', $acta) : null;
     }
 
     private static function esDeUnCliente(Activity $registro): bool

@@ -46,6 +46,7 @@ use Override;
     'modalidad',
     'motivo',
     'abono_capital',
+    'descuento',
     'saldo_anterior',
     'saldo_nuevo',
     'cuota_anterior',
@@ -54,6 +55,7 @@ use Override;
     'cuotas_despues',
     'desde_numero',
     'plan_anterior',
+    'reestructuracion_id',
 ])]
 #[Table(name: 'reprogramaciones')]
 class Reprogramacion extends Model
@@ -109,11 +111,40 @@ class Reprogramacion extends Model
         return $this->belongsTo(Recibo::class);
     }
 
+    /**
+     * El acta de la reestructuración que la origino (25-sep-2026).
+     *
+     * Nula en un abono. Cuando la hay, esta fila no vino de dinero entrando
+     * sino de rehacer el plan del contrato: no tiene recibo, ni abono, ni
+     * modalidad —lo hace cumplir la base, ver la migracion
+     * `2026_09_25_100000_la_reestructuracion_del_plan`—.
+     *
+     * @return BelongsTo<Reestructuracion, $this>
+     */
+    public function reestructuracion(): BelongsTo
+    {
+        return $this->belongsTo(Reestructuracion::class);
+    }
+
+    public function esReestructuracion(): bool
+    {
+        return $this->getAttribute('reestructuracion_id') !== null;
+    }
+
     // ─── Dinero ───────────────────────────────────────────────────────
 
     public function montoAbonado(): Monto
     {
         return $this->montoDe('abono_capital');
+    }
+
+    /**
+     * Lo que se le perdonó a este lote al reestructurar (18-oct-2026). Solo la
+     * constancia de una reestructuración lo lleva; un abono, nunca.
+     */
+    public function montoDescontado(): Monto
+    {
+        return $this->montoDe('descuento');
     }
 
     public function montoSaldoAnterior(): Monto
@@ -202,11 +233,24 @@ class Reprogramacion extends Model
 
     public function etiquetaDeModalidad(): string
     {
+        if ($this->esReestructuracion()) {
+            // La renegociación (18-oct-2026) usa la misma constancia; lo dice el acta.
+            $acta = $this->relationLoaded('reestructuracion') ? $this->reestructuracion : null;
+
+            return $acta instanceof Reestructuracion && $acta->esRenegociacion()
+                ? 'Renegociación del contrato'
+                : 'Reestructuración del plan';
+        }
+
         return $this->modalidadElegida()?->etiqueta() ?? '—';
     }
 
     public function colorDeModalidad(): string
     {
+        if ($this->esReestructuracion()) {
+            return 'warning';
+        }
+
         return $this->modalidadElegida()?->color() ?? 'gray';
     }
 

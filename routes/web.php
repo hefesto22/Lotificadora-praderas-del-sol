@@ -8,6 +8,7 @@ use App\Http\Controllers\EstadoMensualController;
 use App\Http\Controllers\ImprimirDevolucionController;
 use App\Http\Controllers\ImprimirReciboController;
 use App\Http\Controllers\ImprimirRecibosController;
+use App\Http\Controllers\ImprimirReestructuracionController;
 use App\Http\Controllers\PlanoImagenController;
 use App\Http\Controllers\PlanoPublicoController;
 use App\Http\Controllers\RegistrarInteresController;
@@ -106,6 +107,14 @@ Route::middleware(UsuarioActivoDelPanel::class, SuspensionPorMora::class)
          * contestan las mismas tres preguntas — ver la vista.
          */
         Route::get('devolucion/{devolucion}', ImprimirDevolucionController::class)->name('devolucion');
+
+        /*
+         * El acta que firma el cliente cuando su plan se reestructura
+         * (traída de Maya, 25-oct-2026). Sale de lo que el acta guardó ese
+         * día, no de las cuotas de hoy: un abono posterior no cambia lo que
+         * se firmó.
+         */
+        Route::get('reestructuracion/{reestructuracion}', ImprimirReestructuracionController::class)->name('reestructuracion');
     });
 
 /*

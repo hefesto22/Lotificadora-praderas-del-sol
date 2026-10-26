@@ -443,4 +443,22 @@ final class PagoInvalidoException extends GrupoOlympoException
             'Recargá la página y elegí de la lista nueva.'
         );
     }
+
+    /**
+     * El abono se hizo ANTES de que se reestructurara el plan (25-oct-2026,
+     * traído de Maya).
+     *
+     * No hay «anulá primero» que ofrecer: una reestructuración es un acta
+     * firmada con el cliente, no un recibo. Deshacer el abono devolvería un
+     * plan que la reestructuración ya reemplazó, así que se niega y dice cómo
+     * corregirlo sin romper nada: con otra reestructuración.
+     */
+    public static function porReestructuracionPosterior(string $folio, string $fecha): self
+    {
+        return new self(
+            "El recibo {$folio} no se puede anular: el plan de ese lote se reestructuró el {$fecha}, ".
+            'después de ese abono, y deshacerlo devolvería un plan que ya no existe. Si el abono '.
+            'estuvo mal, corregilo con una nueva reestructuración del plan.'
+        );
+    }
 }

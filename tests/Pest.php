@@ -130,6 +130,8 @@ function sembrarPermisosDeShield(): void
         'CambiarTitular:Venta',
         // Pronto pago: saldar un lote perdonando saldo (23-ago-2026).
         'ProntoPago:Venta',
+        // Reestructurar el plan de un contrato, con su acta (25-oct-2026).
+        'Reestructurar:Venta',
         // La lista de llamadas de cobro del dia (23-ago-2026).
         'Cobranza:Venta',
         // Cargar el plano de un desarrollo: hoy solo Mauricio (23-ago-2026).

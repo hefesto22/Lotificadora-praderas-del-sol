@@ -6,8 +6,10 @@ namespace App\Filament\Resources\Ventas\RelationManagers;
 
 use App\Models\Reprogramacion;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -31,6 +33,12 @@ use Override;
  * si una se hizo mal, la corrección es OTRA reprogramación con su motivo. Que
  * no aparezcan los botones no depende de esta clase: lo decide
  * `ReprogramacionPolicy`, que devuelve `false` a todas las escrituras.
+ *
+ * ═══ EL ACTA, A UN CLIC (26-sep-2026) ═══
+ *
+ * «No sale imprimir acta en ningún lado» —Mauricio—. Las constancias de una
+ * reestructuración están acá, una por lote, y el papel que firmó el cliente
+ * es el acta: cada una lleva «Imprimir el acta». Imprimir no escribe nada.
  */
 class ReprogramacionesRelationManager extends RelationManager
 {
@@ -55,7 +63,7 @@ class ReprogramacionesRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('motivo')
-            ->modifyQueryUsing(static fn (Builder $query): Builder => $query->with(['compromiso.lote', 'createdBy']))
+            ->modifyQueryUsing(static fn (Builder $query): Builder => $query->with(['compromiso.lote', 'createdBy', 'reestructuracion:id,tipo']))
             ->columns([
                 TextColumn::make('created_at')
                     ->label('Cuándo')
@@ -68,17 +76,25 @@ class ReprogramacionesRelationManager extends RelationManager
                     ->color('gray')
                     ->placeholder('—'),
 
+                /*
+                 * Con `state()` y no con `formatStateUsing()`: una
+                 * reestructuración no tiene modalidad —la columna es null— y
+                 * Filament no formatea un null, así que la celda salía vacía.
+                 */
                 TextColumn::make('modalidad')
                     ->label('Qué se hizo')
                     ->badge()
-                    ->formatStateUsing(static fn (Reprogramacion $record): string => $record->etiquetaDeModalidad())
+                    ->state(static fn (Reprogramacion $record): string => $record->etiquetaDeModalidad())
                     ->color(static fn (Reprogramacion $record): string => $record->colorDeModalidad()),
 
                 TextColumn::make('abono_capital')
                     ->label('Bajó el capital')
                     ->alignEnd()
                     ->weight('bold')
-                    ->formatStateUsing(static fn (Reprogramacion $record): string => $record->montoAbonado()->formateado()),
+                    // Una reestructuración no entró plata: no bajó nada (25-sep-2026).
+                    ->formatStateUsing(static fn (Reprogramacion $record): string => $record->esReestructuracion()
+                        ? '—'
+                        : $record->montoAbonado()->formateado()),
 
                 /*
                  * El antes y el después en una sola columna: es la pregunta que
@@ -121,9 +137,20 @@ class ReprogramacionesRelationManager extends RelationManager
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
+            ->recordActions([
+                Action::make('imprimir_acta')
+                    ->label('Imprimir el acta')
+                    ->icon(Heroicon::OutlinedPrinter)
+                    ->color('gray')
+                    ->url(static fn (Reprogramacion $record): ?string => $record->esReestructuracion()
+                        ? route('documentos.reestructuracion', (int) $record->getAttribute('reestructuracion_id'))
+                        : null)
+                    ->openUrlInNewTab()
+                    ->visible(static fn (Reprogramacion $record): bool => $record->esReestructuracion()),
+            ])
             ->defaultSort('created_at', 'desc')
             ->emptyStateHeading('El plan nunca se reprogramó')
-            ->emptyStateDescription('Las cuotas de este expediente son las que se firmaron. Un abono a capital las reescribiría, y quedaría acá.')
+            ->emptyStateDescription('Las cuotas de este expediente son las que se firmaron. Un abono a capital o una reestructuración del plan las reescribiría, y quedaría acá.')
             ->emptyStateIcon('heroicon-o-arrow-trending-down');
     }
 

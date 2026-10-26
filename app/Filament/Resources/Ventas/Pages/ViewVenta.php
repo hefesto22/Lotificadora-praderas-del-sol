@@ -18,10 +18,12 @@ use App\Filament\Schemas\Components\MayusculasField;
 use App\Filament\Schemas\Components\MontoField;
 use App\Filament\Support\AbrirLaImpresion;
 use App\Filament\Support\CobrarUnPago;
+use App\Filament\Support\ReestructurarElPlan;
 use App\Models\Cliente;
 use App\Models\Compromiso;
 use App\Models\Venta;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
@@ -82,11 +84,42 @@ class ViewVenta extends ViewRecord
          * mismo modal y ve una sola opcion.
          */
         return [
-            $this->estadoDeCuentaAction(),
             CobrarUnPago::accion(),
-            $this->titularesDeReciboAction(),
-            $this->cambiarTitularAction(),
-            $this->rescindirAction(),
+            $this->estadoDeCuentaAction(),
+
+            /*
+             * ═══ POR QUE UN SOLO ⋮ Y NO SEIS BOTONES (25-oct-2026) ═══
+             *
+             * «Sería bueno mejorar el diseño de esos botones» —Mauricio—: eran
+             * cinco en fila, y con «Reestructurar el contrato» iban a ser seis.
+             * Arriba quedan los dos que se usan todos los días —cobrar e
+             * imprimir el estado de cuenta— y el resto pasa acá adentro, como
+             * en Maya («se ve feo todo amontonado», 17-sep-2026).
+             *
+             * Rescindir va en su propio grupo, que Filament pinta separado por
+             * una línea: es el único que deshace el contrato y no tiene que
+             * quedar a un pixel de «Cambiar titular».
+             *
+             * §9.A1: una acción de cabecera dentro de un `ActionGroup` no
+             * recibe `$record` inyectado. Las de esta página no lo usan —leen
+             * `$this->venta()`—, y la de reestructurar, que vive en `Support`
+             * y lo tipa, lo lleva puesto a mano con `record()`.
+             */
+            ActionGroup::make([
+                ActionGroup::make([
+                    ReestructurarElPlan::accion()->record(fn (): Venta => $this->venta()),
+                    $this->titularesDeReciboAction(),
+                    $this->cambiarTitularAction(),
+                ])->dropdown(false),
+
+                ActionGroup::make([
+                    $this->rescindirAction(),
+                ])->dropdown(false),
+            ])
+                ->label('Más trámites')
+                ->icon(Heroicon::OutlinedEllipsisVertical)
+                ->color('gray')
+                ->button(),
         ];
     }
 
