@@ -1,7 +1,20 @@
-# Continuar acá — 25-oct-2026
+# Continuar acá — 26-oct-2026
 
 > Se lee esto y `docs/dominio.md` antes de proponer nada. La puerta es
 > `herd composer rector:fix && herd composer lint && herd composer ci && herd composer rector`.
+
+## 26-oct — El plan de cuotas, una pestaña por lote
+
+**Pedido de Mauricio** (con el 0033 ya reestructurado en producción): «que me aparezcan las cuotas en un toggle de cada lote para que no se confunda con esa intercalación; si no está unificada, un toggle para las cuotas de cada uno; si es unificada, solo uno para los lotes unificados».
+
+**Cómo quedó** (`CuotasRelationManager`, verde con 1551 tests):
+
+- Con dos o más lotes: una pestaña por lote (`lote-{compromiso}`), con insignia *Atrasado / Al día / Pagado / Rescindido*, y al final «Todo el contrato» (la lista intercalada de siempre). Abre en el primer lote.
+- Los lotes cuyo ÚLTIMO movimiento en `reprogramaciones` es un acta con `agrupacion = unificado` van juntos en «Plan único: A y B» (`plan-{acta}`): un renglón por mes, una columna por lote y el mes sumado. Si todos los lotes están en ese plan, no hay pestañas.
+- Un solo lote: sin pestañas, como antes.
+- Pruebas: `tests/Feature/Filament/PlanDeCuotasPorLoteTest.php` (5).
+
+**Pendiente:** desplegar a pruebas y producción; mirar el 0033 en la pestaña «Plan de cuotas».
 
 ## 25-oct — Reestructurar el contrato (traído de Maya) + los botones del expediente
 
