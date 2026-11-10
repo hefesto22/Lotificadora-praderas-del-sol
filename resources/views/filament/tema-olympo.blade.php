@@ -1036,11 +1036,91 @@
     .olympo-selector-campo:focus { outline: none; }
     .olympo-selector:focus-within { border-color: rgb(161 161 170); }
 
-    /* En pantalla angosta la barra ya va apretada: se queda el control y se
-       va el rótulo, que es la parte que se adivina por el contenido. */
-    @media (max-width: 48rem) {
-        .olympo-selector-rotulo { display: none; }
-        .olympo-selector-campo { max-width: 9rem; }
+    /*
+       En pantalla angosta el interruptor baja a SU PROPIA FILA — 10-nov-2026.
+
+       Filament esconde entero el bloque del logo debajo de 1024 px: en su
+       topbar.css, `.fi-topbar-start` es `hidden lg:flex`. El interruptor
+       cuelga de TOPBAR_LOGO_AFTER, o sea ADENTRO de ese bloque, así que en el
+       teléfono no se dibujaba nunca —medía 0 px— y quien entraba desde el
+       celular quedaba mirando «Todos» sin poder cambiarlo. Lo reportó
+       Mauricio pensando en los socios, que van a mirar su proyecto desde el
+       teléfono.
+
+       ⚠️ No cabe en la MISMA fila. Medido a 360 px: el menú, la búsqueda, la
+       campana y el avatar ya llenan la barra, y meterle los 164 px del
+       selector encogía el botón del menú a 24 px y el avatar a 16, con el
+       selector montado encima de la búsqueda. Por eso va abajo, a todo el
+       ancho, y con el rótulo «Proyecto» de vuelta: con el ancho entero sí
+       entra, y el nombre se lee completo hasta en 440 px.
+
+       ⚠️ 16 px en el campo, no 13: Safari de iPhone le hace zoom a la página
+       entera cuando se toca un campo con letra más chica que eso. Y 40 px de
+       alto, que es lo mínimo cómodo para un dedo.
+
+       ⚠️ `--topbar-height` se lleva a la altura real (100 px) porque de esa
+       variable salen los desplazamientos de lo que se queda pegado arriba al
+       hacer scroll. Se devuelve a 4rem dentro del menú lateral, que la usa
+       para la altura de su cabecera y si no la estiraría.
+
+       Todo cuelga de `:has(.olympo-selector)`: con un solo proyecto el
+       componente no dibuja el selector y la barra queda como la de fábrica.
+       De 1024 px para arriba no cambia nada: sigue al lado del logo.
+    */
+    @media (max-width: 63.99rem) {
+        .fi-body:has(.olympo-selector) { --topbar-height: 6.25rem; }
+        .fi-body:has(.olympo-selector) .fi-sidebar { --topbar-height: 4rem; }
+
+        .fi-topbar:has(.olympo-selector) {
+            flex-wrap: wrap;
+            align-content: center;
+            row-gap: .5rem;
+            padding-block: .5rem;
+        }
+
+        /* Con wrap los ítems dejan de encogerse y saltan de fila: sin esto el
+           botón del menú quedaba solo arriba y la búsqueda en una fila aparte. */
+        .fi-topbar:has(.olympo-selector) .fi-topbar-end {
+            flex: 1 1 0%;
+            min-width: 0;
+            justify-content: flex-end;
+        }
+
+        .fi-topbar-start:has(.olympo-selector) {
+            display: flex;
+            order: 99;
+            flex: 1 0 100%;
+            min-width: 0;
+            margin: 0;
+        }
+
+        /* El logo y el botón de plegar ya estaban escondidos en el teléfono;
+           al volver a mostrar el bloque hay que esconderlos de nuevo. El logo
+           sigue a la vista en la cabecera del menú lateral. */
+        .fi-topbar-start:has(.olympo-selector) > :not(.olympo-selector-ctn) { display: none; }
+
+        .olympo-selector-ctn {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .olympo-selector {
+            display: flex;
+            width: 100%;
+            box-sizing: border-box;
+            margin-left: 0;
+            padding-block: .4375rem;
+        }
+
+        .olympo-selector-campo {
+            flex: 1;
+            min-width: 0;
+            max-width: none;
+            overflow: hidden;
+            white-space: nowrap;
+            font-size: 1rem;
+            line-height: 1.5rem;
+        }
     }
 
     .dark .olympo-selector {
