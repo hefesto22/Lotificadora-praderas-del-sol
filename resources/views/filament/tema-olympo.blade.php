@@ -1037,90 +1037,57 @@
     .olympo-selector:focus-within { border-color: rgb(161 161 170); }
 
     /*
-       En pantalla angosta el interruptor baja a SU PROPIA FILA — 10-nov-2026.
+       En el teléfono el interruptor vive en el MENÚ LATERAL, al lado del
+       logo — 10-nov-2026.
 
-       Filament esconde entero el bloque del logo debajo de 1024 px: en su
-       topbar.css, `.fi-topbar-start` es `hidden lg:flex`. El interruptor
-       cuelga de TOPBAR_LOGO_AFTER, o sea ADENTRO de ese bloque, así que en el
-       teléfono no se dibujaba nunca —medía 0 px— y quien entraba desde el
-       celular quedaba mirando «Todos» sin poder cambiarlo. Lo reportó
-       Mauricio pensando en los socios, que van a mirar su proyecto desde el
-       teléfono.
+       Debajo de 1024 px Filament esconde entero el bloque del logo de la
+       barra superior (`.fi-topbar-start` es `hidden lg:flex`), y con él el
+       interruptor de arriba. Por eso el componente se cuelga también de
+       SIDEBAR_LOGO_AFTER (ver AdminPanelProvider). Se probó primero en una
+       fila propia debajo de la búsqueda, y Mauricio lo prefirió en el menú:
+       la barra de arriba se queda en sus 64 px de fábrica.
 
-       ⚠️ No cabe en la MISMA fila. Medido a 360 px: el menú, la búsqueda, la
-       campana y el avatar ya llenan la barra, y meterle los 164 px del
-       selector encogía el botón del menú a 24 px y el avatar a 16, con el
-       selector montado encima de la búsqueda. Por eso va abajo, a todo el
-       ancho, y con el rótulo «Proyecto» de vuelta: con el ancho entero sí
-       entra, y el nombre se lee completo hasta en 440 px.
+       ⚠️ El contenedor del logo de Filament es `flex-1`: sin `flex: none` se
+       come todo el ancho y el selector queda aplastado contra el borde.
+
+       ⚠️ El rótulo va ARRIBA del nombre, no al lado. Medido en el menú de
+       320 px: con el rótulo al lado le quedaban 133 px al nombre y «RESIDENCIAL
+       PRADERAS DEL SOL» se cortaba en «RESIDENCIA…»; encima le quedan 203.
 
        ⚠️ 16 px en el campo, no 13: Safari de iPhone le hace zoom a la página
-       entera cuando se toca un campo con letra más chica que eso. Y 40 px de
-       alto, que es lo mínimo cómodo para un dedo.
-
-       ⚠️ `--topbar-height` se lleva a la altura real (100 px) porque de esa
-       variable salen los desplazamientos de lo que se queda pegado arriba al
-       hacer scroll. Se devuelve a 4rem dentro del menú lateral, que la usa
-       para la altura de su cabecera y si no la estiraría.
-
-       Todo cuelga de `:has(.olympo-selector)`: con un solo proyecto el
-       componente no dibuja el selector y la barra queda como la de fábrica.
-       De 1024 px para arriba no cambia nada: sigue al lado del logo.
+       entera cuando se toca un campo con letra más chica que eso.
     */
-    @media (max-width: 63.99rem) {
-        .fi-body:has(.olympo-selector) { --topbar-height: 6.25rem; }
-        .fi-body:has(.olympo-selector) .fi-sidebar { --topbar-height: 4rem; }
+    .fi-sidebar-header:has(.olympo-selector) .fi-sidebar-header-logo-ctn { flex: none; }
 
-        .fi-topbar:has(.olympo-selector) {
-            flex-wrap: wrap;
-            align-content: center;
-            row-gap: .5rem;
-            padding-block: .5rem;
-        }
+    .fi-sidebar-header .olympo-selector-ctn {
+        flex: 1;
+        min-width: 0;
+        margin-left: .75rem;
+    }
 
-        /* Con wrap los ítems dejan de encogerse y saltan de fila: sin esto el
-           botón del menú quedaba solo arriba y la búsqueda en una fila aparte. */
-        .fi-topbar:has(.olympo-selector) .fi-topbar-end {
-            flex: 1 1 0%;
-            min-width: 0;
-            justify-content: flex-end;
-        }
+    .fi-sidebar-header .olympo-selector {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: .0625rem;
+        width: 100%;
+        box-sizing: border-box;
+        margin-left: 0;
+        padding-block: .3125rem;
+    }
 
-        .fi-topbar-start:has(.olympo-selector) {
-            display: flex;
-            order: 99;
-            flex: 1 0 100%;
-            min-width: 0;
-            margin: 0;
-        }
+    .fi-sidebar-header .olympo-selector-rotulo {
+        font-size: .5625rem;
+        line-height: .75rem;
+    }
 
-        /* El logo y el botón de plegar ya estaban escondidos en el teléfono;
-           al volver a mostrar el bloque hay que esconderlos de nuevo. El logo
-           sigue a la vista en la cabecera del menú lateral. */
-        .fi-topbar-start:has(.olympo-selector) > :not(.olympo-selector-ctn) { display: none; }
-
-        .olympo-selector-ctn {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .olympo-selector {
-            display: flex;
-            width: 100%;
-            box-sizing: border-box;
-            margin-left: 0;
-            padding-block: .4375rem;
-        }
-
-        .olympo-selector-campo {
-            flex: 1;
-            min-width: 0;
-            max-width: none;
-            overflow: hidden;
-            white-space: nowrap;
-            font-size: 1rem;
-            line-height: 1.5rem;
-        }
+    .fi-sidebar-header .olympo-selector-campo {
+        width: 100%;
+        max-width: none;
+        overflow: hidden;
+        white-space: nowrap;
+        font-size: 1rem;
+        line-height: 1.25rem;
     }
 
     .dark .olympo-selector {

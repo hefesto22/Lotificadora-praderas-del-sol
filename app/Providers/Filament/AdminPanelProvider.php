@@ -144,6 +144,25 @@ class AdminPanelProvider extends PanelProvider
                 PanelsRenderHook::TOPBAR_LOGO_AFTER,
                 static fn (): string => Blade::render('@livewire(\'selector-de-proyecto\')'),
             )
+            /*
+             * 🔴 El mismo interruptor, en el TELÉFONO — 10-nov-2026.
+             *
+             * Debajo de 1024 px Filament esconde entero el bloque del logo de
+             * la barra superior, y con él el interruptor de arriba: quien
+             * entraba desde el celular quedaba en «Todos» sin poder cambiarlo.
+             * Mauricio lo quiso en el menú lateral, al lado del logo.
+             *
+             * Nunca se ven los dos a la vez, y no hace falta CSS para eso: con
+             * barra superior, Filament esconde la cabecera del menú de 1024 px
+             * para arriba (`lg:hidden`) y el bloque de arriba de 1024 para
+             * abajo (`hidden lg:flex`). Son dos instancias del mismo
+             * componente, así que elegir en una recarga la página y la otra
+             * amanece con el mismo proyecto.
+             */
+            ->renderHook(
+                PanelsRenderHook::SIDEBAR_LOGO_AFTER,
+                static fn (): string => Blade::render('@livewire(\'selector-de-proyecto\')'),
+            )
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
             ->pages([
                 Dashboard::class,
